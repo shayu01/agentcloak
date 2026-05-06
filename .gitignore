@@ -1,0 +1,36 @@
+# Reference projects (local copies, not tracked)
+reference/
+
+# MCP tool indexes
+.ace-tool/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Trellis workspace artifacts (journals tracked, but large artifacts excluded)
+.trellis/workspace/*/screenshots/
+.trellis/workspace/*/artifacts/
