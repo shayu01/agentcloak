@@ -90,6 +90,50 @@ class DaemonClient:
     async def network(self, *, since: int = 0) -> dict[str, Any]:
         return await self._request("GET", "/network", params={"since": str(since)})
 
+    async def action(
+        self,
+        kind: str,
+        *,
+        index: int | None = None,
+        target: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"kind": kind}
+        if index is not None:
+            body["index"] = index
+        if target is not None:
+            body["target"] = target
+        body.update(kwargs)
+        return await self._request("POST", "/action", json_body=body)
+
+    async def action_batch(
+        self,
+        actions: list[dict[str, Any]],
+        *,
+        sleep: float = 0.0,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/action/batch",
+            json_body={"actions": actions, "sleep": sleep},
+        )
+
+    async def fetch(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        body: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        json_body: dict[str, Any] = {"url": url, "method": method, "timeout": timeout}
+        if body is not None:
+            json_body["body"] = body
+        if headers is not None:
+            json_body["headers"] = headers
+        return await self._request("POST", "/fetch", json_body=json_body)
+
     async def shutdown(self) -> dict[str, Any]:
         try:
             return await self._request("POST", "/shutdown")

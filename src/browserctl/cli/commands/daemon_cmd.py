@@ -26,28 +26,35 @@ def daemon_start(
     ),
     host: str | None = typer.Option(None, "--host", help="Bind host."),
     port: int | None = typer.Option(None, "--port", help="Bind port."),
+    profile: str | None = typer.Option(
+        None, "--profile", "-p", help="Browser profile name."
+    ),
 ) -> None:
     """Start the browserctl daemon."""
     if background:
-        cmd = [sys.executable, "-m", "browserctl.daemon.server"]
+        cmd = [sys.executable, "-m", "browserctl.daemon"]
         if host:
             cmd.extend(["--host", host])
         if port:
             cmd.extend(["--port", str(port)])
         if not headless:
             cmd.append("--headed")
+        if profile:
+            cmd.extend(["--profile", profile])
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        output_json({"pid": proc.pid, "background": True}, seq=0)
+        output_json(
+            {"pid": proc.pid, "background": True, "profile": profile}, seq=0
+        )
         return
 
     from browserctl.daemon.server import start
 
-    asyncio.run(start(host=host, port=port, headless=headless))
+    asyncio.run(start(host=host, port=port, headless=headless, profile=profile))
 
 
 @app.command("stop")

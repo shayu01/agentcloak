@@ -31,6 +31,43 @@ class TestSeqCounter:
         _ = c.value
         assert c.value == 1
 
+    def test_last_action_seq_starts_at_zero(self) -> None:
+        c = SeqCounter()
+        assert c.last_action_seq == 0
+
+    def test_increment_action_updates_both_value_and_last_action_seq(self) -> None:
+        c = SeqCounter()
+        result = c.increment_action()
+        assert result == 1
+        assert c.value == 1
+        assert c.last_action_seq == 1
+
+    def test_increment_does_not_update_last_action_seq(self) -> None:
+        c = SeqCounter()
+        c.increment()
+        c.increment()
+        assert c.value == 2
+        assert c.last_action_seq == 0
+
+    def test_mixed_increment_and_increment_action(self) -> None:
+        c = SeqCounter()
+        c.increment()           # seq=1, non-action
+        c.increment_action()    # seq=2, action
+        c.increment()           # seq=3, non-action
+        c.increment()           # seq=4, non-action
+        c.increment_action()    # seq=5, action
+        assert c.value == 5
+        assert c.last_action_seq == 5
+
+    def test_last_action_seq_tracks_most_recent_action(self) -> None:
+        c = SeqCounter()
+        c.increment_action()    # seq=1
+        c.increment()           # seq=2
+        c.increment()           # seq=3
+        assert c.last_action_seq == 1
+        c.increment_action()    # seq=4
+        assert c.last_action_seq == 4
+
 
 class TestRingBuffer:
     def test_empty_buffer(self) -> None:

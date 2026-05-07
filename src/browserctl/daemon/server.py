@@ -43,11 +43,18 @@ def _clear_pid(paths: Paths) -> None:
         pf.unlink()
 
 
-def _write_session(paths: Paths, *, port: int, tier: StealthTier) -> None:
-    data = {
+def _write_session(
+    paths: Paths,
+    *,
+    port: int,
+    tier: StealthTier,
+    profile: str | None = None,
+) -> None:
+    data: dict[str, object] = {
         "pid": os.getpid(),
         "port": port,
         "stealth_tier": tier.value,
+        "profile": profile,
     }
     paths.ensure_dirs()
     paths.active_session_file.write_bytes(orjson.dumps(data))
@@ -77,6 +84,7 @@ async def start(
     host: str | None = None,
     port: int | None = None,
     headless: bool = True,
+    profile: str | None = None,
 ) -> None:
     """Start the daemon server (blocking)."""
     paths, cfg = load_config()
@@ -89,7 +97,12 @@ async def start(
         sys.exit(1)
 
     _write_pid(paths)
-    _write_session(paths, port=actual_port, tier=StealthTier(cfg.default_tier))
+    _write_session(
+        paths,
+        port=actual_port,
+        tier=StealthTier(cfg.default_tier),
+        profile=profile,
+    )
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -103,12 +116,24 @@ async def start(
 
     app = web.Application(middlewares=[error_middleware])
 
-    logger.info("launching_browser", tier=cfg.default_tier, headless=headless)
+    # Resolve profile directory if a profile name is specified
+    profile_dir: Path | None = None
+    if profile:
+        profile_dir = paths.profiles_dir / profile
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(
+        "launching_browser",
+        tier=cfg.default_tier,
+        headless=headless,
+        profile=profile,
+    )
     ctx = await create_context(
         tier=StealthTier(cfg.default_tier),
         headless=headless,
         viewport_width=cfg.viewport_width,
         viewport_height=cfg.viewport_height,
+        profile_dir=profile_dir,
     )
     app["browser_ctx"] = ctx
 

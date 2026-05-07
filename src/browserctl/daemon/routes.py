@@ -33,6 +33,9 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/state", handle_state)
     app.router.add_post("/evaluate", handle_evaluate)
     app.router.add_get("/network", handle_network)
+    app.router.add_post("/action", handle_action)
+    app.router.add_post("/action/batch", handle_action_batch)
+    app.router.add_post("/fetch", handle_fetch)
     app.router.add_post("/shutdown", handle_shutdown)
 
 
@@ -116,6 +119,40 @@ async def handle_network(request: Request) -> Response:
     since: int | str = int(since_raw) if since_raw.isdigit() else since_raw
     reqs = await ctx.network(since=since)
     return _ok({"requests": reqs, "count": len(reqs)}, seq=ctx.seq)
+
+
+async def handle_action(request: Request) -> Response:
+    body = await request.json()
+    kind: str = body["kind"]
+    index = body.get("index")
+    target = str(index) if index is not None else body.get("target", "")
+    extra = {k: v for k, v in body.items() if k not in ("kind", "index", "target")}
+    ctx = _ctx(request)
+    result = await ctx.action(kind, target, **extra)
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_action_batch(request: Request) -> Response:
+    body = await request.json()
+    actions: list[dict[str, Any]] = body.get("actions", [])
+    sleep: float = body.get("sleep", 0.0)
+    ctx = _ctx(request)
+    result = await ctx.action_batch(actions, sleep=sleep)
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_fetch(request: Request) -> Response:
+    body = await request.json()
+    url: str = body["url"]
+    method: str = body.get("method", "GET")
+    req_body: str | None = body.get("body")
+    headers: dict[str, str] | None = body.get("headers")
+    timeout: float = body.get("timeout", 30.0)
+    ctx = _ctx(request)
+    result = await ctx.fetch(
+        url, method=method, body=req_body, headers=headers, timeout=timeout
+    )
+    return _ok(result, seq=ctx.seq)
 
 
 async def handle_shutdown(request: Request) -> Response:

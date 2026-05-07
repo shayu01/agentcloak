@@ -60,7 +60,16 @@ def _root_callback(  # pyright: ignore[reportUnusedFunction]
 
 
 def _register_commands() -> None:
-    from browserctl.cli.commands import browser, daemon_cmd, doctor, js, network
+    from browserctl.cli.commands import (
+        action,
+        browser,
+        daemon_cmd,
+        doctor,
+        fetch,
+        js,
+        network,
+        profile,
+    )
 
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
     app.add_typer(daemon_cmd.app, name="daemon", help="Daemon lifecycle management.")
@@ -69,6 +78,21 @@ def _register_commands() -> None:
     )
     app.add_typer(js.app, name="js", help="JavaScript execution.")
     app.add_typer(network.app, name="network", help="Network request monitoring.")
+    app.add_typer(
+        action.app,
+        name="do",
+        help="Page actions: click, fill, type, scroll, hover, select, press.",
+    )
+    app.add_typer(
+        profile.app,
+        name="profile",
+        help="Browser profile management: create, list, delete, launch.",
+    )
+    app.add_typer(
+        fetch.app,
+        name="fetch",
+        help="HTTP fetch with browser cookies.",
+    )
 
 
 _register_commands()

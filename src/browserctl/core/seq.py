@@ -20,13 +20,25 @@ class SeqCounter:
 
     def __init__(self, start: int = 0) -> None:
         self._value = start
+        self._last_action_seq = 0
 
     @property
     def value(self) -> int:
         return self._value
 
+    @property
+    def last_action_seq(self) -> int:
+        """Seq of the most recent user-initiated mutating action."""
+        return self._last_action_seq
+
     def increment(self) -> int:
         self._value += 1
+        return self._value
+
+    def increment_action(self) -> int:
+        """Increment seq AND mark this as a user-initiated action."""
+        self._value += 1
+        self._last_action_seq = self._value
         return self._value
 
 
