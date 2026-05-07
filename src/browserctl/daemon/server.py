@@ -15,6 +15,8 @@ import structlog
 from aiohttp import web
 
 from browserctl.browser import create_context
+from browserctl.browser.cloak_ctx import TURNSTILE_PATCH_DIR
+from browserctl.browser.xvfb import XvfbManager
 from browserctl.core.config import Paths, load_config
 from browserctl.core.types import StealthTier
 from browserctl.daemon.middleware import error_middleware
@@ -85,6 +87,7 @@ async def start(
     port: int | None = None,
     headless: bool = True,
     profile: str | None = None,
+    stealth: bool = False,
 ) -> None:
     """Start the daemon server (blocking)."""
     paths, cfg = load_config()
@@ -96,13 +99,22 @@ async def start(
         logger.error("daemon_already_running", pid_file=str(_pid_file(paths)))
         sys.exit(1)
 
+    # Resolve stealth tier
+    tier = StealthTier.CLOAK if stealth else StealthTier(cfg.default_tier)
+    actual_headless = headless
+    humanize = False
+    extensions: list[str] | None = None
+    xvfb_mgr: XvfbManager | None = None
+
+    if tier == StealthTier.CLOAK:
+        actual_headless = False
+        humanize = True
+        extensions = [str(TURNSTILE_PATCH_DIR)]
+        xvfb_mgr = XvfbManager(width=cfg.viewport_width, height=cfg.viewport_height)
+        await xvfb_mgr.ensure_display()
+
     _write_pid(paths)
-    _write_session(
-        paths,
-        port=actual_port,
-        tier=StealthTier(cfg.default_tier),
-        profile=profile,
-    )
+    _write_session(paths, port=actual_port, tier=tier, profile=profile)
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -124,16 +136,19 @@ async def start(
 
     logger.info(
         "launching_browser",
-        tier=cfg.default_tier,
-        headless=headless,
+        tier=tier.value,
+        headless=actual_headless,
+        humanize=humanize,
         profile=profile,
     )
     ctx = await create_context(
-        tier=StealthTier(cfg.default_tier),
-        headless=headless,
+        tier=tier,
+        headless=actual_headless,
         viewport_width=cfg.viewport_width,
         viewport_height=cfg.viewport_height,
         profile_dir=profile_dir,
+        humanize=humanize,
+        extensions=extensions,
     )
     app["browser_ctx"] = ctx
 
@@ -143,6 +158,8 @@ async def start(
         logger.info("shutting_down")
         with contextlib.suppress(Exception):
             await ctx.close()
+        if xvfb_mgr is not None:
+            xvfb_mgr.cleanup()
         _clear_pid(paths)
         _clear_session(paths)
 

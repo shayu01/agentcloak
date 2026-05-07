@@ -29,6 +29,8 @@ async def create_context(
     viewport_width: int = 1280,
     viewport_height: int = 800,
     profile_dir: Path | None = None,
+    humanize: bool = False,
+    extensions: list[str] | None = None,
 ) -> BrowserContext:
     """Factory: create a browser context for the given stealth tier."""
     if tier == StealthTier.PATCHRIGHT:
@@ -39,6 +41,18 @@ async def create_context(
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             profile_dir=profile_dir,
+        )
+
+    if tier == StealthTier.CLOAK:
+        from browserctl.browser.cloak_ctx import launch_cloak
+
+        return await launch_cloak(
+            headless=headless,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            profile_dir=profile_dir,
+            humanize=humanize,
+            extensions=extensions,
         )
 
     raise NotImplementedError(f"Backend {tier!r} not yet implemented")

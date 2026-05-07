@@ -29,6 +29,9 @@ def daemon_start(
     profile: str | None = typer.Option(
         None, "--profile", "-p", help="Browser profile name."
     ),
+    stealth: bool = typer.Option(
+        False, "--stealth", "-s", help="Enable CloakBrowser stealth mode."
+    ),
 ) -> None:
     """Start the browserctl daemon."""
     if background:
@@ -41,6 +44,8 @@ def daemon_start(
             cmd.append("--headed")
         if profile:
             cmd.extend(["--profile", profile])
+        if stealth:
+            cmd.append("--stealth")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -48,13 +53,21 @@ def daemon_start(
             start_new_session=True,
         )
         output_json(
-            {"pid": proc.pid, "background": True, "profile": profile}, seq=0
+            {
+                "pid": proc.pid,
+                "background": True,
+                "profile": profile,
+                "stealth": stealth,
+            },
+            seq=0,
         )
         return
 
     from browserctl.daemon.server import start
 
-    asyncio.run(start(host=host, port=port, headless=headless, profile=profile))
+    asyncio.run(
+        start(host=host, port=port, headless=headless, profile=profile, stealth=stealth)
+    )
 
 
 @app.command("stop")

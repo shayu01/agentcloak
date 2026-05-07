@@ -19,6 +19,9 @@ browserctl = "browserctl.cli.app:main"
 bctl = "browserctl.cli.app:main"
 
 [project.optional-dependencies]
+stealth = [
+    "cloakbrowser>=0.3",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

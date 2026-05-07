@@ -12,6 +12,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--profile", default=None, help="Browser profile name.")
+    parser.add_argument(
+        "--stealth", action="store_true", help="Enable CloakBrowser stealth mode."
+    )
     args = parser.parse_args()
     asyncio.run(
         start(
@@ -19,6 +22,7 @@ def main() -> None:
             port=args.port,
             headless=not args.headed,
             profile=args.profile,
+            stealth=args.stealth,
         )
     )
 

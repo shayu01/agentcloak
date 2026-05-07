@@ -641,7 +641,8 @@ class PatchrightContext:
             await self._browser.close()
         elif self._browser_context is not None:
             await self._browser_context.close()
-        await self._playwright.stop()
+        if self._playwright is not None:
+            await self._playwright.stop()
 
 
 def screenshot_to_base64(data: bytes) -> str:

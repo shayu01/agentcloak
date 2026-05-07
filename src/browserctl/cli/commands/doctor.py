@@ -7,6 +7,7 @@ import platform
 import shutil
 import sys
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -19,6 +20,8 @@ __all__ = ["app"]
 app = typer.Typer()
 
 _REQUIRED_PACKAGES = ["typer", "orjson", "structlog", "aiohttp", "patchright"]
+
+_STEALTH_PACKAGES = ["cloakbrowser"]
 
 _CHROMIUM_BINARIES = [
     "chromium-browser",
@@ -94,6 +97,53 @@ def _check_daemon(cfg: BrowserctlConfig) -> dict[str, Any]:
     }
 
 
+def _check_xvfb() -> dict[str, Any]:
+    path = shutil.which("Xvfb")
+    if path:
+        return {"name": "xvfb", "ok": True, "detail": path, "hint": ""}
+    return {
+        "name": "xvfb",
+        "ok": False,
+        "detail": "not found",
+        "hint": "sudo apt-get install -y xvfb "
+        "(required for --stealth on headless Linux)",
+    }
+
+
+def _check_cloakbrowser_binary() -> dict[str, Any]:
+    try:
+        import cloakbrowser.download  # pyright: ignore[reportMissingImports]
+
+        binary = str(cloakbrowser.download.ensure_binary())  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+        if Path(binary).is_file():
+            return {
+                "name": "cloakbrowser_binary",
+                "ok": True,
+                "detail": binary,
+                "hint": "",
+            }
+        return {
+            "name": "cloakbrowser_binary",
+            "ok": False,
+            "detail": "not downloaded",
+            "hint": "run 'cloakbrowser install' to download",
+        }
+    except ImportError:
+        return {
+            "name": "cloakbrowser_binary",
+            "ok": False,
+            "detail": "cloakbrowser not installed",
+            "hint": "pip install browserctl[stealth]",
+        }
+    except Exception:
+        return {
+            "name": "cloakbrowser_binary",
+            "ok": False,
+            "detail": "binary check failed",
+            "hint": "run 'cloakbrowser install' to download",
+        }
+
+
 @app.callback(invoke_without_command=True)
 def run_doctor() -> None:
     """Run all diagnostic checks and report status."""
@@ -107,10 +157,21 @@ def run_doctor() -> None:
     checks.append(_check_data_dir(paths))
     checks.append(_check_daemon(cfg))
 
+    # Stealth checks (informational — not required for basic operation)
+    stealth_checks: list[dict[str, Any]] = []
+    for pkg in _STEALTH_PACKAGES:
+        stealth_checks.append(_check_package(pkg))
+    stealth_checks.append(_check_xvfb())
+    stealth_checks.append(_check_cloakbrowser_binary())
+
     all_ok = all(c["ok"] for c in checks)
     data: dict[str, Any] = {
         "healthy": all_ok,
         "checks": checks,
+        "stealth": {
+            "available": all(c["ok"] for c in stealth_checks),
+            "checks": stealth_checks,
+        },
     }
     output_json(data, seq=0)
     if not all_ok:
