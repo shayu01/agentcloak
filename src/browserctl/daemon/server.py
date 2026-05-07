@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import orjson
 import structlog
@@ -106,12 +106,31 @@ async def start(
     extensions: list[str] | None = None
     xvfb_mgr: XvfbManager | None = None
 
+    local_proxy: Any = None
+    proxy_url: str | None = None
+
     if tier == StealthTier.CLOAK:
         actual_headless = False
         humanize = True
         extensions = [str(TURNSTILE_PATCH_DIR)]
         xvfb_mgr = XvfbManager(width=cfg.viewport_width, height=cfg.viewport_height)
         await xvfb_mgr.ensure_display()
+
+        try:
+            from httpcloak import LocalProxy  # pyright: ignore[reportMissingImports,reportUnknownVariableType]  # noqa: I001
+
+            local_proxy = LocalProxy(  # pyright: ignore[reportUnknownVariableType]
+                port=0, preset="chrome-146", tls_only=True
+            )
+            proxy_url = str(local_proxy.proxy_url)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+            logger.info("local_proxy_started", url=proxy_url)
+        except ImportError:
+            logger.warning(
+                "httpcloak_not_installed",
+                hint="fetch requests will use plain httpx (TLS fingerprint exposed)",
+            )
+        except Exception as exc:
+            logger.warning("local_proxy_failed", error=str(exc))
 
     _write_pid(paths)
     _write_session(paths, port=actual_port, tier=tier, profile=profile)
@@ -149,8 +168,10 @@ async def start(
         profile_dir=profile_dir,
         humanize=humanize,
         extensions=extensions,
+        proxy_url=proxy_url,
     )
     app["browser_ctx"] = ctx
+    app["local_proxy"] = local_proxy
 
     setup_routes(app)
 
@@ -158,6 +179,9 @@ async def start(
         logger.info("shutting_down")
         with contextlib.suppress(Exception):
             await ctx.close()
+        if local_proxy is not None:
+            with contextlib.suppress(Exception):
+                local_proxy.close()  # pyright: ignore[reportUnknownMemberType]
         if xvfb_mgr is not None:
             xvfb_mgr.cleanup()
         _clear_pid(paths)

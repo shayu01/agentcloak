@@ -21,6 +21,7 @@ bctl = "browserctl.cli.app:main"
 [project.optional-dependencies]
 stealth = [
     "cloakbrowser>=0.3",
+    "httpcloak>=1.6",
 ]
 dev = [
     "pytest>=8.0",

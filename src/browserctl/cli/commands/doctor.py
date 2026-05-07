@@ -21,7 +21,7 @@ app = typer.Typer()
 
 _REQUIRED_PACKAGES = ["typer", "orjson", "structlog", "aiohttp", "patchright"]
 
-_STEALTH_PACKAGES = ["cloakbrowser"]
+_STEALTH_PACKAGES = ["cloakbrowser", "httpcloak"]
 
 _CHROMIUM_BINARIES = [
     "chromium-browser",

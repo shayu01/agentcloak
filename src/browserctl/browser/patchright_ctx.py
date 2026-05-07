@@ -75,6 +75,7 @@ class PatchrightContext:
         seq_counter: SeqCounter,
         ring_buffer: RingBuffer,
         browser_context: Any | None = None,
+        proxy_url: str | None = None,
     ) -> None:
         self._page = page
         self._browser = browser
@@ -82,6 +83,7 @@ class PatchrightContext:
         self._seq_counter = seq_counter
         self._ring_buffer = ring_buffer
         self._browser_context = browser_context
+        self._proxy_url = proxy_url
         self._backend_node_map: dict[int, int] = {}
         self._setup_network_listeners()
 
@@ -551,13 +553,17 @@ class PatchrightContext:
         if headers:
             req_headers.update(headers)
 
-        # Make the request
+        # Make the request (route through LocalProxy when available)
+        client_kwargs: dict[str, Any] = {
+            "cookies": cookie_jar,
+            "timeout": httpx.Timeout(timeout),
+            "follow_redirects": True,
+        }
+        if self._proxy_url:
+            client_kwargs["proxy"] = self._proxy_url
+
         try:
-            async with httpx.AsyncClient(
-                cookies=cookie_jar,
-                timeout=httpx.Timeout(timeout),
-                follow_redirects=True,
-            ) as client:
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 resp = await client.request(
                     method.upper(),
                     url,
@@ -655,6 +661,7 @@ async def launch_patchright(
     viewport_width: int = 1280,
     viewport_height: int = 800,
     profile_dir: Path | None = None,
+    proxy_url: str | None = None,
 ) -> PatchrightContext:
     """Launch a patchright browser and return a context."""
     try:
@@ -703,6 +710,7 @@ async def launch_patchright(
             seq_counter=seq_counter,
             ring_buffer=ring_buffer,
             browser_context=browser_context,
+            proxy_url=proxy_url,
         )
 
     # Ephemeral context: no persistent state
@@ -734,4 +742,5 @@ async def launch_patchright(
         playwright=pw,
         seq_counter=seq_counter,
         ring_buffer=ring_buffer,
+        proxy_url=proxy_url,
     )

@@ -31,6 +31,7 @@ async def create_context(
     profile_dir: Path | None = None,
     humanize: bool = False,
     extensions: list[str] | None = None,
+    proxy_url: str | None = None,
 ) -> BrowserContext:
     """Factory: create a browser context for the given stealth tier."""
     if tier == StealthTier.PATCHRIGHT:
@@ -41,6 +42,7 @@ async def create_context(
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             profile_dir=profile_dir,
+            proxy_url=proxy_url,
         )
 
     if tier == StealthTier.CLOAK:
@@ -53,6 +55,7 @@ async def create_context(
             profile_dir=profile_dir,
             humanize=humanize,
             extensions=extensions,
+            proxy_url=proxy_url,
         )
 
     raise NotImplementedError(f"Backend {tier!r} not yet implemented")

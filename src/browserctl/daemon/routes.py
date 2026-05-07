@@ -45,7 +45,17 @@ def _ctx(request: Request) -> PatchrightContext:
 
 
 async def handle_health(request: Request) -> Response:
-    return _json({"ok": True})
+    data: dict[str, Any] = {"ok": True}
+    local_proxy = request.app.get("local_proxy")
+    if local_proxy is not None:
+        try:
+            data["local_proxy"] = {
+                "running": local_proxy.is_running,
+                "url": local_proxy.proxy_url,
+            }
+        except Exception:
+            data["local_proxy"] = {"running": False}
+    return _json(data)
 
 
 async def handle_navigate(request: Request) -> Response:

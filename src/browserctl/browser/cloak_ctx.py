@@ -55,6 +55,7 @@ async def launch_cloak(
     profile_dir: Path | None = None,
     humanize: bool = True,
     extensions: list[str] | None = None,
+    proxy_url: str | None = None,
 ) -> CloakContext:
     """Launch a CloakBrowser instance and return a CloakContext."""
     cb = _ensure_cloakbrowser()
@@ -85,6 +86,7 @@ async def launch_cloak(
             seq_counter=seq_counter,
             ring_buffer=ring_buffer,
             browser_context=browser_context,
+            proxy_url=proxy_url,
         )
 
     browser = await cb.launch_async(
@@ -105,4 +107,5 @@ async def launch_cloak(
         playwright=None,
         seq_counter=seq_counter,
         ring_buffer=ring_buffer,
+        proxy_url=proxy_url,
     )

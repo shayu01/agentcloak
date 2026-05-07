@@ -1,4 +1,4 @@
-"""Tests for stealth layer — cloak_ctx, xvfb, extensions, doctor integration."""
+"""Tests for stealth layer — cloak_ctx, xvfb, extensions, proxy, doctor integration."""
 
 from __future__ import annotations
 
@@ -182,3 +182,40 @@ class TestCreateContextFactory:
         with patch.dict("sys.modules", {"cloakbrowser": None}):
             with pytest.raises(BackendError, match="CloakBrowser"):
                 await create_context(tier=StealthTier.CLOAK)
+
+
+class TestProxyUrlIntegration:
+    def test_patchright_context_stores_proxy_url(self) -> None:
+        from browserctl.browser.patchright_ctx import PatchrightContext
+        from browserctl.core.seq import RingBuffer, SeqCounter
+
+        page = MagicMock()
+        page.on = MagicMock()
+        ctx = PatchrightContext(
+            page=page,
+            browser=None,
+            playwright=None,
+            seq_counter=SeqCounter(),
+            ring_buffer=RingBuffer(),
+            proxy_url="http://127.0.0.1:12345",
+        )
+        assert ctx._proxy_url == "http://127.0.0.1:12345"
+
+    def test_cloak_context_stores_proxy_url(self) -> None:
+        page = MagicMock()
+        page.on = MagicMock()
+        ctx = CloakContext(
+            page=page,
+            browser=None,
+            playwright=None,
+            seq_counter=MagicMock(),
+            ring_buffer=MagicMock(),
+            proxy_url="http://127.0.0.1:9999",
+        )
+        assert ctx._proxy_url == "http://127.0.0.1:9999"
+
+    def test_doctor_stealth_checks_include_httpcloak(self) -> None:
+        result = runner.invoke(app, ["doctor"])
+        data = json.loads(result.stdout)
+        stealth_names = [c["name"] for c in data["data"]["stealth"]["checks"]]
+        assert "httpcloak" in stealth_names
