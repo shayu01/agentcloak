@@ -1,0 +1,69 @@
+[project]
+name = "browserctl"
+version = "0.1.0"
+description = "Browser CLI toolchain for AI agents"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "shayu", email = "deadshark_c137@proton.me" }]
+dependencies = [
+    "typer>=0.15",
+    "orjson>=3.10",
+    "structlog>=24.0",
+    "aiohttp>=3.9",
+    "patchright>=1.0",
+]
+
+[project.scripts]
+browserctl = "browserctl.cli.app:main"
+bctl = "browserctl.cli.app:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pyright>=1.1",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/browserctl"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "UP007",  # allow X | Y union syntax (we use it)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["browserctl"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+include = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

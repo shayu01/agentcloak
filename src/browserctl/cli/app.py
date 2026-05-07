@@ -1,0 +1,78 @@
+"""Root Typer app, global flags, and structlog setup."""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+import structlog
+import typer
+
+from browserctl import __version__
+from browserctl.cli.output import set_pretty
+from browserctl.core.errors import AgentBrowserError
+
+__all__ = ["app", "main"]
+
+app = typer.Typer(
+    name="browserctl",
+    help="Browser CLI toolchain for AI agents.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+
+
+def _configure_logging(*, verbosity: int) -> None:
+    level = {0: logging.WARNING, 1: logging.INFO}.get(verbosity, logging.DEBUG)
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(level),
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_log_level,
+            structlog.dev.ConsoleRenderer(),
+        ],
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+    )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"browserctl {__version__}")
+        raise typer.Exit
+
+
+@app.callback()
+def _root_callback(  # pyright: ignore[reportUnusedFunction]
+    verbose: int = typer.Option(
+        0, "--verbose", "-v", count=True, help="Increase log verbosity."
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+    _version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version.",
+    ),
+) -> None:
+    set_pretty(enabled=pretty)
+    _configure_logging(verbosity=verbose)
+
+
+def _register_commands() -> None:
+    from browserctl.cli.commands import doctor
+
+    app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
+
+
+_register_commands()
+
+
+def main() -> None:
+    from browserctl.cli.output import output_error
+
+    try:
+        app()
+    except AgentBrowserError as exc:
+        output_error(exc)
+        raise typer.Exit(1) from exc
