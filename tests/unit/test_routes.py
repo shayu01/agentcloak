@@ -16,6 +16,20 @@ from browserctl.daemon.middleware import error_middleware
 from browserctl.daemon.routes import setup_routes
 
 
+def _mock_cdp() -> MagicMock:
+    cdp = MagicMock()
+    cdp.send = AsyncMock(
+        return_value={
+            "nodes": [
+                {"role": {"value": "RootWebArea"}, "name": {"value": "Test"}},
+                {"role": {"value": "link"}, "name": {"value": "A link"}},
+            ]
+        }
+    )
+    cdp.detach = AsyncMock()
+    return cdp
+
+
 def _mock_ctx() -> PatchrightContext:
     page = MagicMock()
     page.on = MagicMock()
@@ -25,14 +39,8 @@ def _mock_ctx() -> PatchrightContext:
     page.evaluate = AsyncMock(return_value="hello")
     page.screenshot = AsyncMock(return_value=b"fakepng")
     page.content = AsyncMock(return_value="<html></html>")
-    page.accessibility = MagicMock()
-    page.accessibility.snapshot = AsyncMock(
-        return_value={
-            "role": "WebArea",
-            "name": "Test",
-            "children": [{"role": "link", "name": "A link"}],
-        }
-    )
+    page.context = MagicMock()
+    page.context.new_cdp_session = AsyncMock(return_value=_mock_cdp())
 
     seq = SeqCounter()
     ring = RingBuffer()

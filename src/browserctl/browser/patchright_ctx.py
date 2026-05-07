@@ -35,7 +35,14 @@ _INTERACTIVE_ROLES = frozenset(
 )
 
 
+_SNAP_CHROMIUM = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
+
+
 def _find_chromium() -> str | None:
+    from pathlib import Path
+
+    if Path(_SNAP_CHROMIUM).is_file():
+        return _SNAP_CHROMIUM
     for name in (
         "chromium-browser",
         "chromium",
@@ -141,10 +148,35 @@ class PatchrightContext:
         )
 
     async def _snapshot_accessible(self) -> PageSnapshot:
-        ax_tree = await self._page.accessibility.snapshot()  # type: ignore[union-attr]
+        cdp = await self._page.context.new_cdp_session(self._page)
+        try:
+            tree = await cdp.send("Accessibility.getFullAXTree")
+        finally:
+            await cdp.detach()
+
+        nodes: list[dict[str, Any]] = tree.get("nodes", [])
         selector_map: dict[int, ElementRef] = {}
         lines: list[str] = []
-        self._walk_ax_tree(ax_tree, selector_map, lines, depth=0, counter=[1])
+        counter = 1
+
+        for node in nodes:
+            role = node.get("role", {}).get("value", "")
+            name = node.get("name", {}).get("value", "")
+            if not role or role == "none":
+                continue
+
+            if role.lower() in _INTERACTIVE_ROLES:
+                selector_map[counter] = ElementRef(
+                    index=counter,
+                    tag=role,
+                    role=role,
+                    text=name,
+                    attributes=dict[str, str](),
+                )
+                lines.append(f"[{counter}] <{role}> {name}")
+                counter += 1
+            elif name:
+                lines.append(f"{role}: {name}")
 
         return PageSnapshot(
             seq=self._seq_counter.value,
@@ -154,40 +186,6 @@ class PatchrightContext:
             tree_text="\n".join(lines),
             selector_map=selector_map,
         )
-
-    def _walk_ax_tree(
-        self,
-        node: dict[str, Any] | None,
-        selector_map: dict[int, ElementRef],
-        lines: list[str],
-        *,
-        depth: int,
-        counter: list[int],
-    ) -> None:
-        if not node:
-            return
-        role = node.get("role", "")
-        name = node.get("name", "")
-        indent = "  " * depth
-
-        if role.lower() in _INTERACTIVE_ROLES:
-            idx = counter[0]
-            counter[0] += 1
-            selector_map[idx] = ElementRef(
-                index=idx,
-                tag=role,
-                role=role,
-                text=name,
-                attributes=dict[str, str](),
-            )
-            lines.append(f"{indent}[{idx}] <{role}> {name}")
-        elif name:
-            lines.append(f"{indent}{role}: {name}")
-
-        for child in node.get("children", []):
-            self._walk_ax_tree(
-                child, selector_map, lines, depth=depth + 1, counter=counter
-            )
 
     async def _snapshot_dom(self) -> PageSnapshot:
         html = await self._page.content()
@@ -272,7 +270,7 @@ async def launch_patchright(
     pw = await async_playwright().start()
     executable = _find_chromium()
 
-    launch_args: dict[str, Any] = {"headless": headless}
+    launch_args: dict[str, Any] = {"headless": headless, "args": ["--no-sandbox"]}
     if executable:
         launch_args["executable_path"] = executable
 

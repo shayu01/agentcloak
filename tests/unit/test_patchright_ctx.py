@@ -12,6 +12,27 @@ from browserctl.core.errors import BackendError, BrowserTimeoutError, Navigation
 from browserctl.core.seq import RingBuffer, SeqCounter
 
 
+def _cdp_node(role: str, name: str) -> dict[str, Any]:
+    return {"role": {"value": role}, "name": {"value": name}}
+
+
+def _mock_cdp_session() -> MagicMock:
+    cdp = MagicMock()
+    cdp.send = AsyncMock(
+        return_value={
+            "nodes": [
+                _cdp_node("RootWebArea", "Example"),
+                _cdp_node("heading", "Main Title"),
+                _cdp_node("link", "Click me"),
+                _cdp_node("button", "Submit"),
+                _cdp_node("textbox", "Search"),
+            ]
+        }
+    )
+    cdp.detach = AsyncMock()
+    return cdp
+
+
 def _default_page() -> MagicMock:
     page = MagicMock()
     page.on = MagicMock()
@@ -21,19 +42,8 @@ def _default_page() -> MagicMock:
     page.evaluate = AsyncMock(return_value="result")
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfakedata")
     page.content = AsyncMock(return_value="<html><body>Hello</body></html>")
-    page.accessibility = MagicMock()
-    page.accessibility.snapshot = AsyncMock(
-        return_value={
-            "role": "WebArea",
-            "name": "Example",
-            "children": [
-                {"role": "heading", "name": "Main Title", "level": 1},
-                {"role": "link", "name": "Click me"},
-                {"role": "button", "name": "Submit"},
-                {"role": "textbox", "name": "Search"},
-            ],
-        }
-    )
+    page.context = MagicMock()
+    page.context.new_cdp_session = AsyncMock(return_value=_mock_cdp_session())
     return page
 
 
