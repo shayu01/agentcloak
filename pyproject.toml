@@ -51,7 +51,9 @@ select = [
     "RUF",  # ruff-specific
 ]
 ignore = [
-    "UP007",  # allow X | Y union syntax (we use it)
+    "UP007",   # allow X | Y union syntax (we use it)
+    "B008",    # typer.Option() in defaults is required by Typer
+    "SIM117",  # nested async with is clearer for session + request
 ]
 
 [tool.ruff.lint.isort]

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import platform
+import shutil
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -17,6 +19,13 @@ __all__ = ["app"]
 app = typer.Typer()
 
 _REQUIRED_PACKAGES = ["typer", "orjson", "structlog", "aiohttp", "patchright"]
+
+_CHROMIUM_BINARIES = [
+    "chromium-browser",
+    "chromium",
+    "google-chrome-stable",
+    "google-chrome",
+]
 
 
 def _check_python() -> dict[str, Any]:
@@ -43,6 +52,19 @@ def _check_package(name: str) -> dict[str, Any]:
         }
 
 
+def _check_chromium() -> dict[str, Any]:
+    for name in _CHROMIUM_BINARIES:
+        path = shutil.which(name)
+        if path:
+            return {"name": "chromium", "ok": True, "detail": path, "hint": ""}
+    return {
+        "name": "chromium",
+        "ok": False,
+        "detail": "not found",
+        "hint": "install chromium or run 'patchright install chromium'",
+    }
+
+
 def _check_data_dir(paths: Paths) -> dict[str, Any]:
     exists = paths.root.is_dir()
     return {
@@ -54,11 +76,21 @@ def _check_data_dir(paths: Paths) -> dict[str, Any]:
 
 
 def _check_daemon(cfg: BrowserctlConfig) -> dict[str, Any]:
+    from browserctl.daemon.server import health
+
+    ok = asyncio.run(health(host=cfg.daemon_host, port=cfg.daemon_port))
+    if ok:
+        return {
+            "name": "daemon",
+            "ok": True,
+            "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
+            "hint": "",
+        }
     return {
         "name": "daemon",
         "ok": False,
         "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
-        "hint": "daemon not running (stub: not implemented yet)",
+        "hint": "run 'browserctl daemon start' to launch",
     }
 
 
@@ -71,6 +103,7 @@ def run_doctor() -> None:
     checks.append(_check_python())
     for pkg in _REQUIRED_PACKAGES:
         checks.append(_check_package(pkg))
+    checks.append(_check_chromium())
     checks.append(_check_data_dir(paths))
     checks.append(_check_daemon(cfg))
 

@@ -18,7 +18,18 @@ __all__ = [
 async def create_context(
     *,
     tier: StealthTier = StealthTier.PATCHRIGHT,
-    profile: str = "default",
+    headless: bool = True,
+    viewport_width: int = 1280,
+    viewport_height: int = 800,
 ) -> BrowserContext:
     """Factory: create a browser context for the given stealth tier."""
+    if tier == StealthTier.PATCHRIGHT:
+        from browserctl.browser.patchright_ctx import launch_patchright
+
+        return await launch_patchright(
+            headless=headless,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+        )
+
     raise NotImplementedError(f"Backend {tier!r} not yet implemented")
