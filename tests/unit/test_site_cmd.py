@@ -18,7 +18,7 @@ class TestSiteList:
         get_registry().clear()
 
     def test_list_empty(self) -> None:
-        result = runner.invoke(app, ["site", "list"])
+        result = runner.invoke(app, ["adapter", "list"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["ok"] is True
@@ -28,7 +28,7 @@ class TestSiteList:
         from browserctl.adapters.discovery import discover_adapters
 
         discover_adapters()
-        result = runner.invoke(app, ["site", "list"])
+        result = runner.invoke(app, ["adapter", "list"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["data"]["count"] >= 2
@@ -41,7 +41,7 @@ class TestSiteInfo:
         discover_adapters()
 
     def test_info_existing(self) -> None:
-        result = runner.invoke(app, ["site", "info", "httpbin/headers"])
+        result = runner.invoke(app, ["adapter", "info", "httpbin/headers"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["ok"] is True
@@ -50,11 +50,11 @@ class TestSiteInfo:
         assert data["data"]["strategy"] == "public"
 
     def test_info_missing(self) -> None:
-        result = runner.invoke(app, ["site", "info", "nonexist/cmd"])
+        result = runner.invoke(app, ["adapter", "info", "nonexist/cmd"])
         assert result.exit_code == 1
 
     def test_info_bad_format(self) -> None:
-        result = runner.invoke(app, ["site", "info", "noSlash"])
+        result = runner.invoke(app, ["adapter", "info", "noSlash"])
         assert result.exit_code == 1
 
 
@@ -65,7 +65,7 @@ class TestSiteRun:
         discover_adapters()
 
     def test_run_browser_required_adapter_fails_without_daemon(self) -> None:
-        result = runner.invoke(app, ["site", "run", "example/title"])
+        result = runner.invoke(app, ["adapter", "run", "example/title"])
         assert result.exit_code == 1
 
 

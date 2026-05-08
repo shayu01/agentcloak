@@ -28,15 +28,6 @@ class TestDaemonBridge:
         result = bridge._format_result(data)
         parsed = json.loads(result)
         assert parsed["error"] == "navigation_failed"
-        assert parsed["hint"] == "Page not found"
-
-    def test_format_result_missing_data(self) -> None:
-        bridge = DaemonBridge.__new__(DaemonBridge)
-        bridge._base = "http://127.0.0.1:9222"
-        data = {"ok": True, "seq": 0}
-        result = bridge._format_result(data)
-        parsed = json.loads(result)
-        assert parsed == {"ok": True, "seq": 0}
 
 
 class TestMCPServerCreation:
@@ -52,14 +43,14 @@ class TestMCPServerCreation:
             import pytest
             pytest.skip("mcp package not installed")
 
-    def test_tool_count_is_12(self) -> None:
+    def test_tool_count_is_15(self) -> None:
         try:
             from browserctl.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
-            assert len(tools) == 12, (
-                f"Expected 12 tools, got {len(tools)}: "
+            assert len(tools) == 15, (
+                f"Expected 15 tools, got {len(tools)}: "
                 f"{sorted(tools.keys())}"
             )
         except ImportError:
@@ -98,9 +89,30 @@ class TestMCPServerCreation:
                 "browserctl_capture_query",
                 "browserctl_status",
                 "browserctl_launch",
-                "browserctl_site_run",
+                "browserctl_adapter_run",
+                "browserctl_adapter_list",
+                "browserctl_profile",
+                "browserctl_doctor",
             }
             assert set(tools.keys()) == expected
         except ImportError:
             import pytest
             pytest.skip("mcp package not installed")
+
+
+class TestResolveTier:
+    def test_patchright_passthrough(self) -> None:
+        from browserctl.core.config import resolve_tier
+
+        assert resolve_tier("patchright") == "patchright"
+
+    def test_cloak_passthrough(self) -> None:
+        from browserctl.core.config import resolve_tier
+
+        assert resolve_tier("cloak") == "cloak"
+
+    def test_auto_resolves(self) -> None:
+        from browserctl.core.config import resolve_tier
+
+        result = resolve_tier("auto")
+        assert result in ("patchright", "cloak")

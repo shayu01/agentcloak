@@ -23,6 +23,9 @@ async def error_middleware(
     handler: Any,
 ) -> StreamResponse:
     """Catch AgentBrowserError and return JSON envelope; log unexpected errors."""
+    import time
+
+    request.app["last_request_time"] = time.monotonic()
     try:
         resp: StreamResponse = await handler(request)
         return resp

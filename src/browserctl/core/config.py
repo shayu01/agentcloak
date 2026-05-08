@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["BrowserctlConfig", "Paths", "load_config"]
+__all__ = ["BrowserctlConfig", "Paths", "load_config", "resolve_tier"]
 
 _ENV_PREFIX = "BROWSERCTL_"
 
@@ -49,11 +49,14 @@ class BrowserctlConfig:
 
     daemon_host: str = "127.0.0.1"
     daemon_port: int = 9222
-    default_tier: str = "patchright"
-    default_profile: str = "default"
+    default_tier: str = "auto"
+    default_profile: str = ""
     viewport_width: int = 1280
     viewport_height: int = 720
     navigation_timeout: int = 30
+    idle_timeout_min: int = 0
+    stop_on_exit: bool = False
+    log_level: str = "warning"
     domain_whitelist: list[str] = field(default_factory=list[str])
     content_scan: bool = False
 
@@ -82,9 +85,15 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, BrowserctlConfig]:
 
     cfg.daemon_host = _env("HOST") or daemon.get("host", cfg.daemon_host)
     cfg.daemon_port = int(_env("PORT") or daemon.get("port", cfg.daemon_port))
-    cfg.default_tier = _env("TIER") or browser.get("default_tier", cfg.default_tier)
-    cfg.default_profile = _env("PROFILE") or browser.get(
-        "default_profile", cfg.default_profile
+    cfg.default_tier = (
+        _env("DEFAULT_TIER")
+        or _env("TIER")
+        or browser.get("default_tier", cfg.default_tier)
+    )
+    cfg.default_profile = (
+        _env("DEFAULT_PROFILE")
+        or _env("PROFILE")
+        or browser.get("default_profile", cfg.default_profile)
     )
     cfg.viewport_width = int(
         _env("VIEWPORT_WIDTH") or browser.get("viewport_width", cfg.viewport_width)
@@ -93,8 +102,21 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, BrowserctlConfig]:
         _env("VIEWPORT_HEIGHT") or browser.get("viewport_height", cfg.viewport_height)
     )
     cfg.navigation_timeout = int(
-        _env("NAVIGATION_TIMEOUT")
+        _env("NAVIGATION_TIMEOUT_SEC")
+        or _env("NAVIGATION_TIMEOUT")
         or browser.get("navigation_timeout", cfg.navigation_timeout)
+    )
+    cfg.idle_timeout_min = int(
+        _env("IDLE_TIMEOUT_MIN")
+        or browser.get("idle_timeout_min", cfg.idle_timeout_min)
+    )
+    cfg.stop_on_exit = (
+        _env("STOP_ON_EXIT") or ""
+    ).lower() in ("true", "1", "yes") or browser.get(
+        "stop_on_exit", cfg.stop_on_exit
+    )
+    cfg.log_level = (
+        _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
     )
 
     whitelist_env = _env("DOMAIN_WHITELIST")
@@ -110,3 +132,15 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, BrowserctlConfig]:
     )
 
     return paths, cfg
+
+
+def resolve_tier(tier_value: str) -> str:
+    """Resolve 'auto' tier to the best available backend."""
+    if tier_value != "auto":
+        return tier_value
+    try:
+        import cloakbrowser as _  # noqa: F401
+
+        return "cloak"
+    except ImportError:
+        return "patchright"

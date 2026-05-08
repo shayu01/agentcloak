@@ -6,6 +6,7 @@ __all__ = ["StealthTier", "Strategy"]
 
 
 class StealthTier(StrEnum):
+    AUTO = "auto"
     PATCHRIGHT = "patchright"
     CLOAK = "cloak"
     REMOTE_BRIDGE = "remote_bridge"

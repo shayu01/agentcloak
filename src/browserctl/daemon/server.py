@@ -106,8 +106,11 @@ async def start(
         logger.error("daemon_already_running", pid_file=str(_pid_file(paths)))
         sys.exit(1)
 
-    # Resolve stealth tier
-    tier = StealthTier.CLOAK if stealth else StealthTier(cfg.default_tier)
+    from browserctl.core.config import resolve_tier
+
+    raw_tier = "cloak" if stealth else cfg.default_tier
+    resolved = resolve_tier(raw_tier)
+    tier = StealthTier(resolved)
     actual_headless = headless
     humanize = False
     extensions: list[str] | None = None
@@ -160,6 +163,7 @@ async def start(
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
     )
 
+    idle_timeout = cfg.idle_timeout_min * 60
     app = web.Application(middlewares=[error_middleware])
 
     # Resolve profile directory if a profile name is specified
@@ -195,6 +199,10 @@ async def start(
 
     register_daemon(actual_port, token=bridge_token)
 
+    app["idle_timeout"] = idle_timeout
+    import time as _time
+
+    app["last_request_time"] = _time.monotonic()
     setup_routes(app)
 
     async def on_shutdown(a: web.Application) -> None:
@@ -228,10 +236,27 @@ async def start(
     await site.start()
     logger.info("daemon_ready", host=actual_host, port=actual_port)
 
+    if idle_timeout > 0:
+        _watchdog = asyncio.ensure_future(_idle_watchdog(app, idle_timeout))
+        app["_idle_watchdog"] = _watchdog
+
     try:
         await asyncio.Event().wait()
     finally:
         await runner.cleanup()
+
+
+async def _idle_watchdog(app: web.Application, timeout: float) -> None:
+    """Shut down daemon after idle_timeout seconds of inactivity."""
+    import time as _time
+
+    while True:
+        await asyncio.sleep(30)
+        elapsed = _time.monotonic() - app["last_request_time"]
+        if elapsed >= timeout:
+            logger.info("idle_timeout_reached", seconds=int(elapsed))
+            await _graceful_shutdown(app)
+            return
 
 
 async def _graceful_shutdown(app: web.Application) -> None:

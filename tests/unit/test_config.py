@@ -29,8 +29,8 @@ class TestDefaults:
         cfg = BrowserctlConfig()
         assert cfg.daemon_host == "127.0.0.1"
         assert cfg.daemon_port == 9222
-        assert cfg.default_tier == "patchright"
-        assert cfg.default_profile == "default"
+        assert cfg.default_tier == "auto"
+        assert cfg.default_profile == ""
         assert cfg.viewport_width == 1280
         assert cfg.viewport_height == 720
         assert cfg.navigation_timeout == 30

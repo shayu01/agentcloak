@@ -114,8 +114,8 @@ def _register_commands() -> None:
     )
     app.add_typer(
         site_cmd.app,
-        name="site",
-        help="Site adapters: list, info, run, scaffold.",
+        name="adapter",
+        help="Adapters: list, info, run, scaffold.",
     )
 
 
