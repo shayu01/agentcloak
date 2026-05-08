@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "browserctl Bridge",
+  "version": "1.0",
+  "description": "Remote browser control bridge for browserctl",
+  "permissions": [
+    "cookies",
+    "tabs",
+    "activeTab",
+    "debugger",
+    "scripting",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "browserctl Bridge"
+  }
+}

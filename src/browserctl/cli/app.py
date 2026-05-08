@@ -62,6 +62,7 @@ def _root_callback(  # pyright: ignore[reportUnusedFunction]
 def _register_commands() -> None:
     from browserctl.cli.commands import (
         action,
+        bridge_cmd,
         browser,
         daemon_cmd,
         doctor,
@@ -92,6 +93,11 @@ def _register_commands() -> None:
         fetch.app,
         name="fetch",
         help="HTTP fetch with browser cookies.",
+    )
+    app.add_typer(
+        bridge_cmd.app,
+        name="bridge",
+        help="Remote bridge: connect Chrome extension to daemon.",
     )
 
 

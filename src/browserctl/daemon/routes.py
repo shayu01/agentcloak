@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import orjson
-from aiohttp import web
+from aiohttp import WSMsgType, web
 from aiohttp.web import Request, Response
 
 from browserctl.browser.patchright_ctx import PatchrightContext, screenshot_to_base64
@@ -37,6 +37,7 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/action/batch", handle_action_batch)
     app.router.add_post("/fetch", handle_fetch)
     app.router.add_post("/shutdown", handle_shutdown)
+    app.router.add_get("/bridge/ws", handle_bridge_ws)
 
 
 def _ctx(request: Request) -> PatchrightContext:
@@ -168,3 +169,25 @@ async def handle_fetch(request: Request) -> Response:
 async def handle_shutdown(request: Request) -> Response:
     await request.app["browser_ctx"].close()
     raise web.GracefulExit
+
+
+async def handle_bridge_ws(request: Request) -> web.WebSocketResponse:
+    """WebSocket endpoint for bridge connection."""
+    from browserctl.browser.remote_ctx import RemoteBridgeContext
+
+    ws = web.WebSocketResponse(heartbeat=30.0)
+    await ws.prepare(request)
+
+    remote_ctx = RemoteBridgeContext(bridge_ws=ws)
+    request.app["bridge_ws"] = ws
+    request.app["remote_ctx"] = remote_ctx
+
+    async for msg in ws:
+        if msg.type == WSMsgType.TEXT:
+            remote_ctx.feed_message(msg.data)
+        elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
+            break
+
+    request.app.pop("bridge_ws", None)
+    request.app.pop("remote_ctx", None)
+    return ws
