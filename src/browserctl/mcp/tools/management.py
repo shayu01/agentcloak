@@ -1,8 +1,8 @@
-"""Management tools — health, cookies, CDP endpoint."""
+"""Management tool — health, CDP endpoint, cookies."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -13,33 +13,38 @@ __all__ = ["register"]
 
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool()
-    async def browserctl_health() -> str:
-        """Check daemon health and connection status."""
-        result = await bridge.request("GET", "/health")
-        return bridge._format_result(result)
+    @mcp.tool(annotations={"readOnlyHint": True})
+    async def browserctl_status(
+        query: Literal[
+            "health", "cdp_endpoint", "cookies"
+        ] = "health",
+        url: str = "",
+    ) -> str:
+        """Query daemon and browser status.
 
-    @mcp.tool()
-    async def browserctl_cookies_export(url: str = "") -> str:
-        """Export cookies from the browser (requires remote bridge).
+        Queries:
+          health       — check daemon connection and proxy status
+          cdp_endpoint — get CDP WebSocket URL (for jshookmcp browser_attach)
+          cookies      — export browser cookies (requires remote bridge)
 
         Args:
-            url: Filter cookies by URL (optional)
-        """
-        json_body: dict[str, str] = {}
-        if url:
-            json_body["url"] = url
-        result = await bridge.request(
-            "POST", "/cookies/export", json_body=json_body
-        )
-        return bridge._format_result(result)
+            query: What to check — health, cdp_endpoint, or cookies
+            url: Filter cookies by URL (only for 'cookies' query)
 
-    @mcp.tool()
-    async def browserctl_cdp_endpoint() -> str:
-        """Get the CDP WebSocket URL for the current browser.
-
-        Use this to share the browser session with jshookmcp
-        via browser_attach(wsEndpoint=<returned URL>).
+        Returns:
+            health: daemon status.
+            cdp_endpoint: ws_endpoint URL for CDP tools.
+            cookies: list of browser cookies.
         """
-        result = await bridge.request("GET", "/cdp/endpoint")
+        if query == "cdp_endpoint":
+            result = await bridge.request("GET", "/cdp/endpoint")
+        elif query == "cookies":
+            json_body: dict[str, str] = {}
+            if url:
+                json_body["url"] = url
+            result = await bridge.request(
+                "POST", "/cookies/export", json_body=json_body
+            )
+        else:
+            result = await bridge.request("GET", "/health")
         return bridge._format_result(result)

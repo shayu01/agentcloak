@@ -34,11 +34,14 @@ def create_server() -> object:
         "browserctl",
         instructions=(
             "browserctl provides browser automation for AI agents. "
-            "Use browserctl_snapshot to see the page accessibility tree "
-            "with [N] element references, then use browserctl_click, "
-            "browserctl_fill, etc. with those references to interact. "
-            "The daemon must be running: start it with "
-            "'browserctl daemon start' in a terminal."
+            "Core workflow: browserctl_navigate → browserctl_snapshot → "
+            "browserctl_action. The snapshot shows an accessibility tree "
+            "with [N] element references — pass those numbers as 'target' "
+            "to browserctl_action. The daemon must be running first: "
+            "'browserctl daemon start' in a terminal. "
+            "For jshookmcp coordination: use browserctl_status(query="
+            "'cdp_endpoint') to get the WebSocket URL, then call "
+            "jshookmcp's browser_attach with that URL."
         ),
     )
 

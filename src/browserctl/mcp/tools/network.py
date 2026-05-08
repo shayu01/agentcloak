@@ -1,4 +1,4 @@
-"""Network tools — request monitoring."""
+"""Network tool — request monitoring."""
 
 from __future__ import annotations
 
@@ -13,12 +13,18 @@ __all__ = ["register"]
 
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_network(since: str = "0") -> str:
-        """List captured network requests.
+        """List captured network requests since a given seq number.
+
+        Use since='last_action' to see requests triggered by the most recent
+        action (click, navigate, etc.).
 
         Args:
-            since: Filter requests after this seq number (or 'last_action')
+            since: Seq number to filter from, or 'last_action' for latest
+
+        Returns:
+            JSON with requests array (method, url, status, resource_type) and count.
         """
         result = await bridge.request(
             "GET", "/network", params={"since": since}

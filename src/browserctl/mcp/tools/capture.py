@@ -1,8 +1,8 @@
-"""Capture tools — record, export, and analyze traffic."""
+"""Capture tools — traffic recording (write) and querying (read)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -13,47 +13,65 @@ __all__ = ["register"]
 
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool()
-    async def browserctl_capture_start() -> str:
-        """Start recording network traffic for API analysis."""
-        result = await bridge.request("POST", "/capture/start")
-        return bridge._format_result(result)
+    @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
+    async def browserctl_capture_control(
+        action: Literal["start", "stop", "clear"],
+    ) -> str:
+        """Control network traffic recording for API analysis.
 
-    @mcp.tool()
-    async def browserctl_capture_stop() -> str:
-        """Stop recording network traffic."""
-        result = await bridge.request("POST", "/capture/stop")
-        return bridge._format_result(result)
-
-    @mcp.tool()
-    async def browserctl_capture_status() -> str:
-        """Check if traffic recording is active and entry count."""
-        result = await bridge.request("GET", "/capture/status")
-        return bridge._format_result(result)
-
-    @mcp.tool()
-    async def browserctl_capture_export(format: str = "har") -> str:
-        """Export captured traffic as HAR or JSON.
+        Actions:
+          start — begin recording all network requests
+          stop  — pause recording (data preserved)
+          clear — delete all captured data
 
         Args:
-            format: Export format — 'har' (standard HAR 1.2) or 'json'
+            action: Recording control — start, stop, or clear
+
+        Returns:
+            JSON with recording status and entry count.
         """
-        result = await bridge.request(
-            "GET", "/capture/export", params={"format": format}
-        )
+        if action == "clear":
+            result = await bridge.request("POST", "/capture/clear")
+        elif action == "stop":
+            result = await bridge.request("POST", "/capture/stop")
+        else:
+            result = await bridge.request("POST", "/capture/start")
         return bridge._format_result(result)
 
-    @mcp.tool()
-    async def browserctl_capture_analyze(domain: str = "") -> str:
-        """Analyze captured traffic for API endpoint patterns.
+    @mcp.tool(annotations={"readOnlyHint": True})
+    async def browserctl_capture_query(
+        action: Literal["status", "export", "analyze"] = "status",
+        format: str = "har",
+        domain: str = "",
+    ) -> str:
+        """Query captured traffic data.
+
+        Actions:
+          status  — check if recording is active and entry count
+          export  — export captured data as HAR 1.2 or JSON
+          analyze — detect API endpoint patterns from traffic
 
         Args:
-            domain: Filter analysis to a specific domain (optional)
+            action: Query type — status, export, or analyze
+            format: Export format for 'export' action — 'har' or 'json'
+            domain: Filter by domain for 'analyze' action
+
+        Returns:
+            status: recording state + entry count.
+            export: HAR 1.2 JSON or raw entry list.
+            analyze: detected API patterns with method, path, auth, schema.
         """
-        params: dict[str, str] = {}
-        if domain:
-            params["domain"] = domain
-        result = await bridge.request(
-            "GET", "/capture/analyze", params=params
-        )
+        if action == "export":
+            result = await bridge.request(
+                "GET", "/capture/export", params={"format": format}
+            )
+        elif action == "analyze":
+            params: dict[str, str] = {}
+            if domain:
+                params["domain"] = domain
+            result = await bridge.request(
+                "GET", "/capture/analyze", params=params
+            )
+        else:
+            result = await bridge.request("GET", "/capture/status")
         return bridge._format_result(result)

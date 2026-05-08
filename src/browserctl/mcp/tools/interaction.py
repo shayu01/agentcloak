@@ -1,9 +1,8 @@
-"""Interaction tools — click, fill, type, scroll, hover, select, press."""
+"""Interaction tool — unified page actions."""
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -12,94 +11,52 @@ if TYPE_CHECKING:
 
 __all__ = ["register"]
 
+ActionKind = Literal[
+    "click", "fill", "type", "scroll", "hover", "select", "press"
+]
+
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    async def _action(kind: str, target: str, **extra: Any) -> str:
-        body: dict[str, Any] = {"kind": kind, "target": target}
-        body.update(extra)
-        result = await bridge.request("POST", "/action", json_body=body)
-        return bridge._format_result(result)
-
-    @mcp.tool()
-    async def browserctl_click(target: str) -> str:
-        """Click an element by its [N] reference from the accessibility tree.
-
-        Args:
-            target: Element reference number from snapshot (e.g. '5' for [5])
-        """
-        return await _action("click", target)
-
-    @mcp.tool()
-    async def browserctl_fill(target: str, text: str) -> str:
-        """Clear an input field and fill it with new text.
-
-        Args:
-            target: Element [N] reference from snapshot
-            text: Text to fill in
-        """
-        return await _action("fill", target, text=text)
-
-    @mcp.tool()
-    async def browserctl_type(target: str, text: str) -> str:
-        """Type text into an element character by character.
-
-        Args:
-            target: Element [N] reference from snapshot
-            text: Text to type
-        """
-        return await _action("type", target, text=text)
-
-    @mcp.tool()
-    async def browserctl_scroll(direction: str = "down") -> str:
-        """Scroll the page.
-
-        Args:
-            direction: Scroll direction — 'up' or 'down'
-        """
-        return await _action("scroll", "", direction=direction)
-
-    @mcp.tool()
-    async def browserctl_hover(target: str) -> str:
-        """Hover over an element.
-
-        Args:
-            target: Element [N] reference from snapshot
-        """
-        return await _action("hover", target)
-
-    @mcp.tool()
-    async def browserctl_select(target: str, value: str) -> str:
-        """Select an option from a dropdown.
-
-        Args:
-            target: Element [N] reference from snapshot
-            value: Option value to select
-        """
-        return await _action("select", target, value=value)
-
-    @mcp.tool()
-    async def browserctl_press(key: str) -> str:
-        """Press a keyboard key.
-
-        Args:
-            key: Key name (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown')
-        """
-        return await _action("press", "", key=key)
-
-    @mcp.tool()
-    async def browserctl_batch_actions(
-        actions_json: str, sleep: float = 0.0
+    @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
+    async def browserctl_action(
+        kind: ActionKind,
+        target: str = "",
+        text: str = "",
+        key: str = "",
+        value: str = "",
+        direction: str = "down",
     ) -> str:
-        """Execute multiple actions in sequence.
+        """Interact with the page. Use [N] refs from browserctl_snapshot as target.
+
+        Actions:
+          click  — click element [N]
+          fill   — clear input [N] and set text (use 'text' param)
+          type   — type into [N] character by character (use 'text' param)
+          scroll — scroll page (use 'direction': up/down)
+          hover  — hover over element [N]
+          select — pick dropdown option [N] (use 'value' param)
+          press  — press keyboard key (use 'key': Enter/Tab/Escape/ArrowDown)
 
         Args:
-            actions_json: JSON array of action objects, each with 'kind' and 'target'
-            sleep: Seconds to wait between actions
+            kind: Action type — click, fill, type, scroll, hover, select, press
+            target: Element [N] reference from snapshot (empty for scroll/press)
+            text: Text for fill/type actions
+            key: Key name for press action (e.g. 'Enter', 'Tab')
+            value: Option value for select action
+            direction: Scroll direction — 'up' or 'down'
+
+        Returns:
+            JSON with action result and updated seq number.
+            Call browserctl_snapshot after to see the new page state.
         """
-        actions: list[dict[str, Any]] = json.loads(actions_json)
-        result = await bridge.request(
-            "POST",
-            "/action/batch",
-            json_body={"actions": actions, "sleep": sleep},
-        )
+        body: dict[str, Any] = {"kind": kind, "target": target}
+        if kind in ("fill", "type") and text:
+            body["text"] = text
+        if kind == "press" and key:
+            body["key"] = key
+        if kind == "select" and value:
+            body["value"] = value
+        if kind == "scroll":
+            body["direction"] = direction
+        result = await bridge.request("POST", "/action", json_body=body)
         return bridge._format_result(result)
