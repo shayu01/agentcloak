@@ -139,3 +139,32 @@ class DaemonClient:
             return await self._request("POST", "/shutdown")
         except Exception:
             return {"ok": True}
+
+    async def capture_start(self) -> dict[str, Any]:
+        return await self._request("POST", "/capture/start")
+
+    async def capture_stop(self) -> dict[str, Any]:
+        return await self._request("POST", "/capture/stop")
+
+    async def capture_status(self) -> dict[str, Any]:
+        return await self._request("GET", "/capture/status")
+
+    async def capture_export(
+        self, *, fmt: str = "har"
+    ) -> dict[str, Any]:
+        return await self._request(
+            "GET", "/capture/export", params={"format": fmt}
+        )
+
+    async def capture_analyze(
+        self, *, domain: str = ""
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if domain:
+            params["domain"] = domain
+        return await self._request(
+            "GET", "/capture/analyze", params=params
+        )
+
+    async def capture_clear(self) -> dict[str, Any]:
+        return await self._request("POST", "/capture/clear")

@@ -39,6 +39,12 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/shutdown", handle_shutdown)
     app.router.add_get("/bridge/ws", handle_bridge_ws)
     app.router.add_post("/cookies/export", handle_cookies_export)
+    app.router.add_post("/capture/start", handle_capture_start)
+    app.router.add_post("/capture/stop", handle_capture_stop)
+    app.router.add_get("/capture/status", handle_capture_status)
+    app.router.add_get("/capture/export", handle_capture_export)
+    app.router.add_get("/capture/analyze", handle_capture_analyze)
+    app.router.add_post("/capture/clear", handle_capture_clear)
 
 
 def _ctx(request: Request) -> PatchrightContext:
@@ -236,3 +242,86 @@ async def handle_cookies_export(request: Request) -> Response:
         params["url"] = url
     result = await remote_ctx.send_command("cookies", params)
     return _ok({"cookies": result}, seq=0)
+
+
+async def handle_capture_start(request: Request) -> Response:
+    ctx = _ctx(request)
+    ctx.capture_store.start()
+    return _ok({"recording": True}, seq=ctx.seq)
+
+
+async def handle_capture_stop(request: Request) -> Response:
+    ctx = _ctx(request)
+    ctx.capture_store.stop()
+    return _ok(
+        {"recording": False, "entries": len(ctx.capture_store)}, seq=ctx.seq
+    )
+
+
+async def handle_capture_status(request: Request) -> Response:
+    ctx = _ctx(request)
+    store = ctx.capture_store
+    return _ok(
+        {"recording": store.recording, "entries": len(store)}, seq=ctx.seq
+    )
+
+
+async def handle_capture_export(request: Request) -> Response:
+    from browserctl.core.har import to_har
+
+    ctx = _ctx(request)
+    fmt = request.query.get("format", "har")
+    entries = ctx.capture_store.entries()
+
+    if fmt == "json":
+        return _ok(
+            {"entries": ctx.capture_store.to_dict_list(), "count": len(entries)},
+            seq=ctx.seq,
+        )
+
+    har = to_har(entries)
+    return _ok(har, seq=ctx.seq)
+
+
+async def handle_capture_analyze(request: Request) -> Response:
+    from browserctl.adapters.analyzer import PatternAnalyzer
+
+    ctx = _ctx(request)
+    domain = request.query.get("domain")
+    if domain:
+        entries = ctx.capture_store.entries_by_domain(domain)
+    else:
+        entries = ctx.capture_store.api_entries()
+
+    analyzer = PatternAnalyzer(entries)
+    patterns = analyzer.analyze()
+
+    patterns_data: list[dict[str, Any]] = []
+    for p in patterns:
+        patterns_data.append(
+            {
+                "method": p.method,
+                "path": p.path,
+                "domain": p.domain,
+                "call_count": p.call_count,
+                "query_params": p.query_params,
+                "status_codes": p.status_codes,
+                "auth_headers": p.auth_headers,
+                "content_type": p.content_type,
+                "category": p.category,
+                "strategy": p.strategy.value,
+                "request_schema": p.request_schema,
+                "response_schema": p.response_schema,
+                "example_urls": p.example_urls,
+            }
+        )
+
+    return _ok(
+        {"patterns": patterns_data, "count": len(patterns_data)}, seq=ctx.seq
+    )
+
+
+async def handle_capture_clear(request: Request) -> Response:
+    ctx = _ctx(request)
+    ctx.capture_store.clear()
+    return _ok({"cleared": True}, seq=ctx.seq)

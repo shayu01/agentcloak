@@ -64,6 +64,7 @@ def _register_commands() -> None:
         action,
         bridge_cmd,
         browser,
+        capture_cmd,
         cookies_cmd,
         daemon_cmd,
         doctor,
@@ -71,6 +72,7 @@ def _register_commands() -> None:
         js,
         network,
         profile,
+        site_cmd,
     )
 
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
@@ -104,6 +106,16 @@ def _register_commands() -> None:
         cookies_cmd.app,
         name="cookies",
         help="Cookie management: export from remote Chrome.",
+    )
+    app.add_typer(
+        capture_cmd.app,
+        name="capture",
+        help="Network traffic capture: record, export, analyze.",
+    )
+    app.add_typer(
+        site_cmd.app,
+        name="site",
+        help="Site adapters: list, info, run, scaffold.",
     )
 
 
