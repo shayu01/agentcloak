@@ -23,8 +23,8 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         """Query daemon and browser status.
 
         Queries:
-          health       — check daemon connection and proxy status
-          cdp_endpoint — get CDP WebSocket URL (for jshookmcp browser_attach)
+          health       — daemon status, stealth tier, current URL, capture state
+          cdp_endpoint — CDP WebSocket URL (for jshookmcp browser_attach)
           cookies      — export browser cookies (requires remote bridge)
 
         Args:
@@ -32,7 +32,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             url: Filter cookies by URL (only for 'cookies' query)
 
         Returns:
-            health: daemon status.
+            health: stealth_tier, current_url, current_title, capture_recording, seq.
             cdp_endpoint: ws_endpoint URL for CDP tools.
             cookies: list of browser cookies.
         """

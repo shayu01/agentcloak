@@ -55,6 +55,20 @@ def _ctx(request: Request) -> PatchrightContext:
 
 async def handle_health(request: Request) -> Response:
     data: dict[str, Any] = {"ok": True}
+    ctx = _ctx(request)
+    data["stealth_tier"] = ctx.stealth_tier.value
+    data["seq"] = ctx.seq
+    data["capture_recording"] = ctx.capture_store.recording
+    data["capture_entries"] = len(ctx.capture_store)
+
+    try:
+        snap = await ctx.snapshot(mode="accessible")
+        data["current_url"] = snap.url
+        data["current_title"] = snap.title
+    except Exception:
+        data["current_url"] = None
+        data["current_title"] = None
+
     local_proxy = request.app.get("local_proxy")
     if local_proxy is not None:
         try:

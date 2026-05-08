@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import shutil
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -12,13 +13,13 @@ from urllib.parse import urlparse
 import httpx
 
 from browserctl.browser.state import ElementRef, PageSnapshot
+from browserctl.core.capture import CaptureEntry, CaptureStore
 from browserctl.core.errors import (
     BackendError,
     BrowserTimeoutError,
     ElementNotFoundError,
     NavigationError,
 )
-from browserctl.core.capture import CaptureEntry, CaptureStore
 from browserctl.core.seq import RingBuffer, SeqCounter, SeqEvent
 from browserctl.core.types import StealthTier
 
@@ -88,6 +89,7 @@ class PatchrightContext:
         self._proxy_url = proxy_url
         self._capture_store = capture_store or CaptureStore()
         self._backend_node_map: dict[int, int] = {}
+        self._pending_captures: set[asyncio.Task[None]] = set()
         self._setup_network_listeners()
 
     def _setup_network_listeners(self) -> None:
@@ -112,13 +114,22 @@ class PatchrightContext:
                     },
                 )
             )
-            self._record_capture(request, response)
+            if self._capture_store.recording:
+                task = asyncio.ensure_future(
+                    self._record_capture_async(request, response)
+                )
+                self._pending_captures.add(task)
+                task.add_done_callback(self._pending_captures.discard)
         except Exception:
             pass
 
-    def _record_capture(self, request: Any, response: Any) -> None:
+    async def _record_capture_async(
+        self, request: Any, response: Any
+    ) -> None:
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
+
+            from browserctl.core.capture import _is_recordable_content, truncate_body
 
             req_headers: dict[str, str] = {}
             try:
@@ -145,9 +156,17 @@ class PatchrightContext:
             except Exception:
                 pass
 
+            resp_body: str | None = None
+            if _is_recordable_content(content_type):
+                try:
+                    raw = await response.body()
+                    resp_body = truncate_body(raw.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
             entry = CaptureEntry(
                 seq=self._seq_counter.value,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 method=request.method,
                 url=request.url,
                 status=response.status,
@@ -155,7 +174,7 @@ class PatchrightContext:
                 request_headers=req_headers,
                 response_headers=resp_headers,
                 request_body=req_body,
-                response_body=None,
+                response_body=resp_body,
                 content_type=content_type,
                 duration_ms=0.0,
             )
