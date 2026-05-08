@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import secrets
 import signal
 import sys
 from typing import TYPE_CHECKING, Any
@@ -45,18 +46,24 @@ def _clear_pid(paths: Paths) -> None:
         pf.unlink()
 
 
+def _generate_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
 def _write_session(
     paths: Paths,
     *,
     port: int,
     tier: StealthTier,
     profile: str | None = None,
+    bridge_token: str | None = None,
 ) -> None:
     data: dict[str, object] = {
         "pid": os.getpid(),
         "port": port,
         "stealth_tier": tier.value,
         "profile": profile,
+        "bridge_token": bridge_token,
     }
     paths.ensure_dirs()
     paths.active_session_file.write_bytes(orjson.dumps(data))
@@ -132,8 +139,16 @@ async def start(
         except Exception as exc:
             logger.warning("local_proxy_failed", error=str(exc))
 
+    bridge_token = _generate_token()
+
     _write_pid(paths)
-    _write_session(paths, port=actual_port, tier=tier, profile=profile)
+    _write_session(
+        paths,
+        port=actual_port,
+        tier=tier,
+        profile=profile,
+        bridge_token=bridge_token,
+    )
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -172,11 +187,21 @@ async def start(
     )
     app["browser_ctx"] = ctx
     app["local_proxy"] = local_proxy
+    app["bridge_token"] = bridge_token
+
+    logger.info("bridge_token_generated", token=bridge_token)
+
+    from browserctl.core.discovery import register_daemon
+
+    register_daemon(actual_port, token=bridge_token)
 
     setup_routes(app)
 
     async def on_shutdown(a: web.Application) -> None:
         logger.info("shutting_down")
+        from browserctl.core.discovery import unregister_daemon
+
+        unregister_daemon()
         with contextlib.suppress(Exception):
             await ctx.close()
         if local_proxy is not None:

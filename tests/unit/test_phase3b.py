@@ -1,0 +1,127 @@
+"""Tests for Phase 3b — token auth, cookies export, mDNS, PyInstaller spec."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+from typer.testing import CliRunner
+
+from browserctl.cli.app import app
+from browserctl.core.discovery import _has_zeroconf, discover_daemon, register_daemon
+
+runner = CliRunner()
+
+
+class TestTokenAuth:
+    def test_check_bridge_token_localhost_bypass(self) -> None:
+        from browserctl.daemon.routes import _check_bridge_token
+
+        request = MagicMock()
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("127.0.0.1", 12345)
+        request.transport = transport
+        request.app = {"bridge_token": "secret123"}
+
+        assert _check_bridge_token(request) is True
+
+    def test_check_bridge_token_valid(self) -> None:
+        from browserctl.daemon.routes import _check_bridge_token
+
+        request = MagicMock()
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
+        request.transport = transport
+        request.app = {"bridge_token": "secret123"}
+        request.headers = {"Authorization": "Bearer secret123"}
+
+        assert _check_bridge_token(request) is True
+
+    def test_check_bridge_token_invalid(self) -> None:
+        from browserctl.daemon.routes import _check_bridge_token
+
+        request = MagicMock()
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
+        request.transport = transport
+        request.app = {"bridge_token": "secret123"}
+        request.headers = {"Authorization": "Bearer wrong_token"}
+
+        assert _check_bridge_token(request) is False
+
+    def test_check_bridge_token_missing(self) -> None:
+        from browserctl.daemon.routes import _check_bridge_token
+
+        request = MagicMock()
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
+        request.transport = transport
+        request.app = {"bridge_token": "secret123"}
+        request.headers = {}
+
+        assert _check_bridge_token(request) is False
+
+    def test_check_bridge_token_no_token_set(self) -> None:
+        from browserctl.daemon.routes import _check_bridge_token
+
+        request = MagicMock()
+        transport = MagicMock()
+        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
+        request.transport = transport
+        request.app = {}
+        request.headers = {}
+
+        assert _check_bridge_token(request) is True
+
+
+class TestCookiesCLI:
+    def test_cookies_help(self) -> None:
+        result = runner.invoke(app, ["cookies", "--help"])
+        assert "export" in result.stdout
+
+    def test_cookies_export_help(self) -> None:
+        result = runner.invoke(app, ["cookies", "export", "--help"])
+        assert "--url" in result.stdout
+        assert "--output" in result.stdout
+
+
+class TestMDNS:
+    def test_has_zeroconf_without_package(self) -> None:
+        with patch.dict("sys.modules", {"zeroconf": None}):
+            assert _has_zeroconf() is False
+
+    def test_discover_daemon_without_zeroconf(self) -> None:
+        with patch(
+            "browserctl.core.discovery._has_zeroconf", return_value=False
+        ):
+            assert discover_daemon() is None
+
+    def test_register_daemon_without_zeroconf(self) -> None:
+        with patch(
+            "browserctl.core.discovery._has_zeroconf", return_value=False
+        ):
+            assert register_daemon(9222) is False
+
+
+class TestPyInstallerSpec:
+    def test_build_script_exists(self) -> None:
+        script = (
+            Path(__file__).parent.parent.parent / "scripts" / "build_bridge.py"
+        )
+        assert script.is_file()
+
+    def test_build_script_is_valid_python(self) -> None:
+        script = (
+            Path(__file__).parent.parent.parent / "scripts" / "build_bridge.py"
+        )
+        compile(script.read_text(), str(script), "exec")
+
+
+class TestRemoteBridgeContextPublicAPI:
+    def test_send_command_exists(self) -> None:
+        from browserctl.browser.remote_ctx import RemoteBridgeContext
+
+        assert hasattr(RemoteBridgeContext, "send_command")

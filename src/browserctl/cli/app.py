@@ -64,6 +64,7 @@ def _register_commands() -> None:
         action,
         bridge_cmd,
         browser,
+        cookies_cmd,
         daemon_cmd,
         doctor,
         fetch,
@@ -98,6 +99,11 @@ def _register_commands() -> None:
         bridge_cmd.app,
         name="bridge",
         help="Remote bridge: connect Chrome extension to daemon.",
+    )
+    app.add_typer(
+        cookies_cmd.app,
+        name="cookies",
+        help="Cookie management: export from remote Chrome.",
     )
 
 

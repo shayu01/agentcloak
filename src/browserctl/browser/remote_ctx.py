@@ -36,6 +36,11 @@ class RemoteBridgeContext:
     def stealth_tier(self) -> StealthTier:
         return StealthTier.REMOTE_BRIDGE
 
+    async def send_command(
+        self, cmd: str, params: dict[str, Any] | None = None, **kw: Any
+    ) -> dict[str, Any]:
+        return await self._send(cmd, params, **kw)
+
     async def _send(
         self, cmd: str, params: dict[str, Any] | None = None, **kw: Any
     ) -> dict[str, Any]:

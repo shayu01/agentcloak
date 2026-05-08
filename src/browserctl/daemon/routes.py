@@ -38,6 +38,7 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/fetch", handle_fetch)
     app.router.add_post("/shutdown", handle_shutdown)
     app.router.add_get("/bridge/ws", handle_bridge_ws)
+    app.router.add_post("/cookies/export", handle_cookies_export)
 
 
 def _ctx(request: Request) -> PatchrightContext:
@@ -171,8 +172,25 @@ async def handle_shutdown(request: Request) -> Response:
     raise web.GracefulExit
 
 
+def _check_bridge_token(request: Request) -> bool:
+    """Verify bridge auth token. Localhost connections skip auth."""
+    peername = request.transport and request.transport.get_extra_info("peername")
+    if peername and peername[0] in ("127.0.0.1", "::1"):
+        return True
+
+    expected = request.app.get("bridge_token")
+    if not expected:
+        return True
+
+    auth = request.headers.get("Authorization", "")
+    return auth == f"Bearer {expected}"
+
+
 async def handle_bridge_ws(request: Request) -> web.WebSocketResponse:
     """WebSocket endpoint for bridge connection."""
+    if not _check_bridge_token(request):
+        raise web.HTTPUnauthorized(text="invalid bridge token")
+
     from browserctl.browser.remote_ctx import RemoteBridgeContext
 
     ws = web.WebSocketResponse(heartbeat=30.0)
@@ -191,3 +209,30 @@ async def handle_bridge_ws(request: Request) -> web.WebSocketResponse:
     request.app.pop("bridge_ws", None)
     request.app.pop("remote_ctx", None)
     return ws
+
+
+async def handle_cookies_export(request: Request) -> Response:
+    """Export cookies from remote Chrome via bridge."""
+    body = await request.json()
+    url: str | None = body.get("url")
+
+    remote_ctx = request.app.get("remote_ctx")
+    if remote_ctx is None:
+        return _json(
+            {
+                "ok": False,
+                "error": "no_bridge",
+                "hint": "No bridge connected",
+                "action": "start bridge process on the remote machine",
+            },
+            status=503,
+        )
+
+    from browserctl.browser.remote_ctx import RemoteBridgeContext
+
+    assert isinstance(remote_ctx, RemoteBridgeContext)
+    params: dict[str, Any] = {}
+    if url:
+        params["url"] = url
+    result = await remote_ctx.send_command("cookies", params)
+    return _ok({"cookies": result}, seq=0)

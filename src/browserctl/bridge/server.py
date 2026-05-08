@@ -141,11 +141,26 @@ class BridgeHub:
         return json.dumps(result)
 
 
+def _build_candidates(cfg: BridgeConfig) -> list[str]:
+    candidates = list(cfg.daemon_candidates)
+    try:
+        from browserctl.core.discovery import discover_daemon
+
+        discovered = discover_daemon(timeout=2.0)
+        if discovered and discovered not in candidates:
+            candidates.insert(0, discovered)
+            logger.info("mdns_candidate_added", url=discovered)
+    except Exception:
+        pass
+    return candidates
+
+
 async def _connect_to_daemon(hub: BridgeHub, cfg: BridgeConfig) -> None:
     delay = RECONNECT_BASE
 
     while True:
-        for candidate in cfg.daemon_candidates:
+        candidates = _build_candidates(cfg)
+        for candidate in candidates:
             try:
                 logger.info("daemon_connecting", url=candidate)
                 async with ClientSession() as session:
@@ -186,11 +201,13 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
     hub = BridgeHub()
 
     async def handle_health(_: web.Request) -> web.Response:
-        return web.json_response({
-            "ok": True,
-            "extension": hub.extension_connected,
-            "daemon": hub.daemon_connected,
-        })
+        return web.json_response(
+            {
+                "ok": True,
+                "extension": hub.extension_connected,
+                "daemon": hub.daemon_connected,
+            }
+        )
 
     app = web.Application()
     app.router.add_get("/ext", hub.handle_extension_ws)
@@ -202,10 +219,9 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
     await site.start()
 
     logger.info("bridge_started", host=host, port=actual_port)
-    logger.info(
-        "extension_hint",
-        message="Install the browserctl extension in Chrome and it will auto-connect",
-    )
+
+    # Wait for extension connection with first-run guidance
+    await _wait_for_extension(hub)
 
     daemon_task = asyncio.create_task(_connect_to_daemon(hub, cfg))
 
@@ -214,3 +230,37 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
     finally:
         daemon_task.cancel()
         await runner.cleanup()
+
+
+async def _wait_for_extension(hub: BridgeHub) -> None:
+    """Wait for extension with install guidance on first run."""
+    if hub.extension_connected:
+        logger.info("extension_already_connected")
+        return
+
+    import sys
+    from pathlib import Path
+
+    ext_dir = Path(__file__).parent / "extension"
+
+    sys.stderr.write("\n")
+    sys.stderr.write("  Chrome extension not connected yet.\n")
+    sys.stderr.write("  Install it to enable browser control:\n\n")
+    sys.stderr.write("  1. Open chrome://extensions in Chrome\n")
+    sys.stderr.write("  2. Enable 'Developer mode' (top-right toggle)\n")
+    sys.stderr.write("  3. Click 'Load unpacked' and select:\n")
+    sys.stderr.write(f"     {ext_dir.resolve()}\n\n")
+    sys.stderr.write("  Waiting for extension to connect...\n\n")
+
+    try:
+        import webbrowser
+
+        webbrowser.open("chrome://extensions")
+    except Exception:
+        pass
+
+    try:
+        await asyncio.wait_for(hub._connected_event.wait(), timeout=120.0)
+        logger.info("extension_connected_after_install")
+    except TimeoutError:
+        logger.warning("extension_connect_timeout")
