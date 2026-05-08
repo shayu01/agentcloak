@@ -33,6 +33,10 @@ class Paths:
     def active_session_file(self) -> Path:
         return self.root / "active-session.json"
 
+    @property
+    def resume_file(self) -> Path:
+        return self.root / "resume.json"
+
     def ensure_dirs(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self.profiles_dir.mkdir(exist_ok=True)

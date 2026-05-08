@@ -9,10 +9,13 @@ import sys
 from typing import Any
 
 import httpx
+import structlog
 
 from browserctl.core.config import load_config
 
 __all__ = ["DaemonBridge"]
+
+logger = structlog.get_logger()
 
 _MAX_STARTUP_WAIT = 15.0
 _POLL_INTERVAL = 0.5
@@ -68,9 +71,7 @@ class DaemonBridge:
         json_body: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient(
-            base_url=self._base, timeout=120.0
-        ) as client:
+        async with httpx.AsyncClient(base_url=self._base, timeout=120.0) as client:
             kwargs: dict[str, Any] = {}
             if json_body is not None:
                 kwargs["json"] = json_body
@@ -88,10 +89,11 @@ class DaemonBridge:
         profile: str | None = None,
     ) -> bool:
         """Start daemon in background and wait for it to be ready."""
-        import logging
-
-        log = logging.getLogger("browserctl.mcp")
-        log.info("Auto-starting daemon...")
+        logger.warning(
+            "daemon_auto_starting",
+            host=self._host,
+            port=self._port,
+        )
 
         cmd = [sys.executable, "-m", "browserctl.daemon"]
         if not headless:
@@ -119,10 +121,20 @@ class DaemonBridge:
                 ) as client:
                     resp = await client.get("/health")
                     if resp.status_code == 200:
-                        log.info("Daemon ready.")
+                        logger.warning(
+                            "daemon_auto_started",
+                            elapsed_s=round(elapsed, 1),
+                            outcome="success",
+                        )
                         return True
             except httpx.ConnectError:
                 continue
+
+        logger.warning(
+            "daemon_auto_start_failed",
+            elapsed_s=round(elapsed, 1),
+            outcome="timeout",
+        )
         return False
 
     async def launch_daemon(
@@ -134,9 +146,7 @@ class DaemonBridge:
     ) -> dict[str, Any]:
         """Explicitly launch daemon with specified options."""
         try:
-            async with httpx.AsyncClient(
-                base_url=self._base, timeout=2.0
-            ) as client:
+            async with httpx.AsyncClient(base_url=self._base, timeout=2.0) as client:
                 resp = await client.get("/health")
                 if resp.status_code == 200:
                     await self._stop_daemon()
@@ -162,9 +172,7 @@ class DaemonBridge:
 
     async def _stop_daemon(self) -> None:
         try:
-            async with httpx.AsyncClient(
-                base_url=self._base, timeout=5.0
-            ) as client:
+            async with httpx.AsyncClient(base_url=self._base, timeout=5.0) as client:
                 await client.post("/shutdown")
         except Exception:
             pass
@@ -174,7 +182,5 @@ class DaemonBridge:
             error = data.get("error", "unknown_error")
             hint = data.get("hint", "")
             action = data.get("action", "")
-            return json.dumps(
-                {"error": error, "hint": hint, "action": action}
-            )
+            return json.dumps({"error": error, "hint": hint, "action": action})
         return json.dumps(data.get("data", data))

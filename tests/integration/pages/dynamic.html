@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dynamic Page</title></head>
+<body>
+  <h1>Dynamic Content</h1>
+  <div id="placeholder">Loading...</div>
+  <script>
+    setTimeout(function() {
+      document.getElementById('placeholder').textContent = 'Content loaded dynamically';
+      var btn = document.createElement('button');
+      btn.id = 'dynamic-btn';
+      btn.textContent = 'Dynamic Button';
+      document.body.appendChild(btn);
+    }, 500);
+  </script>
+</body>
+</html>

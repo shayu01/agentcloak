@@ -95,6 +95,7 @@ async def start(
     headless: bool = True,
     profile: str | None = None,
     stealth: bool = False,
+    humanize: bool | None = None,
 ) -> None:
     """Start the daemon server (blocking)."""
     paths, cfg = load_config()
@@ -112,7 +113,7 @@ async def start(
     resolved = resolve_tier(raw_tier)
     tier = StealthTier(resolved)
     actual_headless = headless
-    humanize = False
+    actual_humanize = humanize if humanize is not None else (tier == StealthTier.CLOAK)
     extensions: list[str] | None = None
     xvfb_mgr: XvfbManager | None = None
 
@@ -120,11 +121,10 @@ async def start(
     proxy_url: str | None = None
 
     if tier == StealthTier.CLOAK:
-        actual_headless = False
-        humanize = True
         extensions = [str(TURNSTILE_PATCH_DIR)]
-        xvfb_mgr = XvfbManager(width=cfg.viewport_width, height=cfg.viewport_height)
-        await xvfb_mgr.ensure_display()
+        if not actual_headless and not os.environ.get("DISPLAY"):
+            xvfb_mgr = XvfbManager(width=cfg.viewport_width, height=cfg.viewport_height)
+            await xvfb_mgr.ensure_display()
 
         try:
             from httpcloak import LocalProxy  # pyright: ignore[reportMissingImports,reportUnknownVariableType]  # noqa: I001
@@ -176,7 +176,7 @@ async def start(
         "launching_browser",
         tier=tier.value,
         headless=actual_headless,
-        humanize=humanize,
+        humanize=actual_humanize,
         profile=profile,
     )
     raw_ctx = await create_context(
@@ -185,7 +185,7 @@ async def start(
         viewport_width=cfg.viewport_width,
         viewport_height=cfg.viewport_height,
         profile_dir=profile_dir,
-        humanize=humanize,
+        humanize=actual_humanize,
         extensions=extensions,
         proxy_url=proxy_url,
     )
@@ -202,6 +202,11 @@ async def start(
     from browserctl.core.discovery import register_daemon
 
     register_daemon(actual_port, token=bridge_token)
+
+    from browserctl.core.resume import ResumeWriter
+
+    resume_writer = ResumeWriter(paths)
+    app["resume_writer"] = resume_writer
 
     app["idle_timeout"] = idle_timeout
     import time as _time
@@ -221,6 +226,7 @@ async def start(
                 local_proxy.close()  # pyright: ignore[reportUnknownMemberType]
         if xvfb_mgr is not None:
             xvfb_mgr.cleanup()
+        resume_writer.clear()
         _clear_pid(paths)
         _clear_session(paths)
 
@@ -239,6 +245,8 @@ async def start(
     site = web.TCPSite(runner, actual_host, actual_port)
     await site.start()
     logger.info("daemon_ready", host=actual_host, port=actual_port)
+
+    resume_writer.start_background()
 
     if idle_timeout > 0:
         _watchdog = asyncio.ensure_future(_idle_watchdog(app, idle_timeout))

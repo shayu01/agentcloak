@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import orjson
+import structlog
 from aiohttp import WSMsgType, web
 from aiohttp.web import Request, Response
 
 from browserctl.browser.patchright_ctx import screenshot_to_base64
+
+logger = structlog.get_logger()
 
 __all__ = ["setup_routes"]
 
@@ -50,6 +53,7 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/tab/new", handle_tab_new)
     app.router.add_post("/tab/close", handle_tab_close)
     app.router.add_post("/tab/switch", handle_tab_switch)
+    app.router.add_get("/resume", handle_resume)
 
 
 def _ctx(request: Request) -> Any:
@@ -90,6 +94,7 @@ async def handle_navigate(request: Request) -> Response:
     timeout: float = body.get("timeout", 30.0)
     ctx = _ctx(request)
     result = await ctx.navigate(url, timeout=timeout)
+    _update_resume(request, action_summary={"kind": "navigate", "url": url})
     return _ok(result, seq=ctx.seq)
 
 
@@ -167,6 +172,7 @@ async def handle_action(request: Request) -> Response:
     extra = {k: v for k, v in body.items() if k not in ("kind", "index", "target")}
     ctx = _ctx(request)
     result = await ctx.action(kind, target, **extra)
+    _update_resume(request, action_summary={"kind": kind, "target": target})
     return _ok(result, seq=ctx.seq)
 
 
@@ -394,3 +400,57 @@ async def handle_tab_switch(request: Request) -> Response:
     ctx = _ctx(request)
     result = await ctx.tab_switch(tab_id)
     return _ok(result, seq=ctx.seq)
+
+
+def _update_resume(
+    request: Request,
+    *,
+    action_summary: dict[str, Any] | None = None,
+) -> None:
+    """Mark resume snapshot dirty (non-blocking, background task flushes)."""
+    writer: Any = request.app.get("resume_writer")
+    if writer is None:
+        return
+    ctx = _ctx(request)
+
+    url = ""
+    tabs: list[dict[str, Any]] = []
+    try:
+        inner = getattr(ctx, "_inner", ctx)
+        page = getattr(inner, "_page", None)
+        if page is not None:
+            url = str(page.url)
+        tab_dict: dict[int, Any] = getattr(inner, "_tabs", {})
+        for tid, pg in tab_dict.items():
+            try:
+                tabs.append({"tab_id": tid, "url": str(pg.url)})
+            except Exception:
+                tabs.append({"tab_id": tid, "url": ""})
+    except Exception:
+        logger.debug("resume_state_extraction_failed", exc_info=True)
+
+    writer.mark_dirty(
+        url=url,
+        title="",
+        tabs=tabs,
+        action_summary=action_summary,
+        capture_active=ctx.capture_store.recording,
+        stealth_tier=ctx.stealth_tier.value,
+    )
+
+
+async def handle_resume(request: Request) -> Response:
+    """Return the current resume snapshot for agent session recovery."""
+    writer = request.app.get("resume_writer")
+    if writer is None:
+        return _json(
+            {
+                "ok": False,
+                "error": "resume_unavailable",
+                "hint": "Resume writer not initialized",
+                "action": "restart the daemon",
+            },
+            status=503,
+        )
+    snap = writer.current_snapshot
+    return _ok(snap.to_dict(), seq=_ctx(request).seq)

@@ -787,11 +787,15 @@ class PatchrightContext:
                 action="use 'tab list' to see available tab IDs",
             )
         page = self._tabs.pop(tab_id)
+        # Grab browser context BEFORE closing (ephemeral needs page.context)
+        if self._browser_context is not None:
+            pw_ctx = self._browser_context
+        else:
+            pw_ctx = page.context
         await page.close()
 
         if not self._tabs:
             # Auto-create blank tab so daemon always has an operable page
-            pw_ctx = self._get_browser_context()
             new_page = await pw_ctx.new_page()
             new_id = self._next_tab_id
             self._next_tab_id += 1

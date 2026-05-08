@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Form Result</title></head>
+<body>
+  <h1>Form Submitted</h1>
+  <p id="result">Submission received</p>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get('name') || '';
+    const email = params.get('email') || '';
+    document.getElementById('result').textContent =
+      'Name: ' + name + ', Email: ' + email;
+  </script>
+</body>
+</html>

@@ -15,7 +15,13 @@ def main() -> None:
     parser.add_argument(
         "--stealth", action="store_true", help="Enable CloakBrowser stealth mode."
     )
+    parser.add_argument(
+        "--no-humanize",
+        action="store_true",
+        help="Disable humanize layer in stealth mode.",
+    )
     args = parser.parse_args()
+    humanize: bool | None = False if args.no_humanize else None
     asyncio.run(
         start(
             host=args.host,
@@ -23,6 +29,7 @@ def main() -> None:
             headless=not args.headed,
             profile=args.profile,
             stealth=args.stealth,
+            humanize=humanize,
         )
     )
 

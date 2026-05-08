@@ -32,8 +32,13 @@ def daemon_start(
     stealth: bool = typer.Option(
         False, "--stealth", "-s", help="Enable CloakBrowser stealth mode."
     ),
+    no_humanize: bool = typer.Option(
+        False, "--no-humanize", help="Disable humanize layer in stealth mode."
+    ),
 ) -> None:
     """Start the browserctl daemon."""
+    humanize: bool | None = False if no_humanize else None
+
     if background:
         cmd = [sys.executable, "-m", "browserctl.daemon"]
         if host:
@@ -46,6 +51,8 @@ def daemon_start(
             cmd.extend(["--profile", profile])
         if stealth:
             cmd.append("--stealth")
+        if no_humanize:
+            cmd.append("--no-humanize")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -66,7 +73,14 @@ def daemon_start(
     from browserctl.daemon.server import start
 
     asyncio.run(
-        start(host=host, port=port, headless=headless, profile=profile, stealth=stealth)
+        start(
+            host=host,
+            port=port,
+            headless=headless,
+            profile=profile,
+            stealth=stealth,
+            humanize=humanize,
+        )
     )
 
 

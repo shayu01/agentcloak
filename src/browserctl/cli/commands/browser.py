@@ -81,3 +81,13 @@ def browser_state() -> None:
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
+
+
+@app.command("resume")
+def browser_resume() -> None:
+    """Get resume snapshot for session recovery."""
+    client = DaemonClient()
+    result = _run(client.resume())
+    data = result.get("data", result)
+    seq = result.get("seq", 0)
+    output_json(data, seq=seq)

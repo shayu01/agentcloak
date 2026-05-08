@@ -2,25 +2,93 @@
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
+import sys
+import time
 from typing import Any
 
 import aiohttp
 import orjson
+import structlog
 
 from browserctl.core.config import load_config
 from browserctl.core.errors import AgentBrowserError, DaemonConnectionError
 
 __all__ = ["DaemonClient"]
 
+logger = structlog.get_logger()
+
+_MAX_STARTUP_WAIT = 15.0
+_POLL_INTERVAL = 0.5
+
 
 class DaemonClient:
-    """Thin HTTP client wrapping daemon API calls."""
+    """HTTP client wrapping daemon API calls with transparent auto-start."""
 
-    def __init__(self, *, host: str | None = None, port: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+        auto_start: bool = True,
+    ) -> None:
         _, cfg = load_config()
         self._host = host or cfg.daemon_host
         self._port = port or cfg.daemon_port
         self._base = f"http://{self._host}:{self._port}"
+        self._auto_start = auto_start
+        self._auto_started = False
+
+    async def _ensure_daemon(self) -> bool:
+        """Start daemon in background and wait for it to be ready."""
+        if self._auto_started:
+            return False
+
+        t0 = time.monotonic()
+        logger.warning(
+            "daemon_auto_starting",
+            host=self._host,
+            port=self._port,
+        )
+
+        cmd = [sys.executable, "-m", "browserctl.daemon"]
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        self._auto_started = True
+
+        elapsed = 0.0
+        while elapsed < _MAX_STARTUP_WAIT:
+            await asyncio.sleep(_POLL_INTERVAL)
+            elapsed += _POLL_INTERVAL
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{self._base}/health",
+                        timeout=aiohttp.ClientTimeout(total=2),
+                    ) as resp:
+                        if resp.status == 200:
+                            total = time.monotonic() - t0
+                            logger.warning(
+                                "daemon_auto_started",
+                                elapsed_s=round(total, 1),
+                                outcome="success",
+                            )
+                            return True
+            except aiohttp.ClientConnectorError:
+                continue
+
+        total = time.monotonic() - t0
+        logger.warning(
+            "daemon_auto_start_failed",
+            elapsed_s=round(total, 1),
+            outcome="timeout",
+        )
+        return False
 
     async def _request(
         self,
@@ -31,6 +99,57 @@ class DaemonClient:
         params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         url = f"{self._base}{path}"
+        try:
+            return await self._do_request(
+                method, url, json_body=json_body, params=params
+            )
+        except aiohttp.ClientConnectorError as exc:
+            if not self._auto_start:
+                raise DaemonConnectionError(
+                    error="daemon_unreachable",
+                    hint=(f"Cannot connect to daemon at {self._host}:{self._port}"),
+                    action="run 'browserctl daemon start' first",
+                ) from exc
+
+            started = await self._ensure_daemon()
+            if not started:
+                raise DaemonConnectionError(
+                    error="daemon_auto_start_failed",
+                    hint=(
+                        f"Cannot connect to daemon"
+                        f" at {self._host}:{self._port}"
+                        " and auto-start failed"
+                    ),
+                    action=("start daemon manually: browserctl daemon start -b"),
+                ) from exc
+
+            try:
+                return await self._do_request(
+                    method,
+                    url,
+                    json_body=json_body,
+                    params=params,
+                )
+            except aiohttp.ClientConnectorError as retry_exc:
+                raise DaemonConnectionError(
+                    error="daemon_unreachable",
+                    hint=(
+                        "Daemon started but still"
+                        f" unreachable at"
+                        f" {self._host}:{self._port}"
+                    ),
+                    action=("check daemon logs for startup errors"),
+                ) from retry_exc
+
+    async def _do_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a single HTTP request to the daemon."""
         try:
             async with aiohttp.ClientSession() as session:
                 kwargs: dict[str, Any] = {"timeout": aiohttp.ClientTimeout(total=120)}
@@ -53,12 +172,8 @@ class DaemonClient:
                     return data
         except AgentBrowserError:
             raise
-        except aiohttp.ClientConnectorError as exc:
-            raise DaemonConnectionError(
-                error="daemon_unreachable",
-                hint=f"Cannot connect to daemon at {self._host}:{self._port}",
-                action="run 'browserctl daemon start' first",
-            ) from exc
+        except aiohttp.ClientConnectorError:
+            raise
         except Exception as exc:
             raise DaemonConnectionError(
                 error="daemon_request_failed",
@@ -178,3 +293,6 @@ class DaemonClient:
 
     async def tab_switch(self, tab_id: int) -> dict[str, Any]:
         return await self._request("POST", "/tab/switch", json_body={"tab_id": tab_id})
+
+    async def resume(self) -> dict[str, Any]:
+        return await self._request("GET", "/resume")

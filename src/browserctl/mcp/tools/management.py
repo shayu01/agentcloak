@@ -1,4 +1,4 @@
-"""Management tools — launch, status, profile, adapter, doctor."""
+"""Management tools — launch, status, profile, adapter, doctor, resume."""
 
 from __future__ import annotations
 
@@ -381,3 +381,18 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             )
 
         return json.dumps({"checks": checks})
+
+    @mcp.tool(annotations={"readOnlyHint": True})
+    async def browserctl_resume() -> str:
+        """Get session resume snapshot for recovering context after restart.
+
+        Returns current URL, open tabs, last 5 actions, capture state,
+        and stealth tier. Use this at the start of a new session to
+        quickly restore working context.
+
+        Returns:
+            JSON with url, title, tabs, recent_actions, capture_active,
+            stealth_tier, and timestamp.
+        """
+        result = await bridge.request("GET", "/resume")
+        return bridge._format_result(result)
