@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from browserctl.browser.state import ElementRef, PageSnapshot
+from browserctl.browser.state import ElementRef, PageSnapshot, TabInfo
 from browserctl.core.capture import CaptureEntry, CaptureStore
 from browserctl.core.errors import (
     BackendError,
@@ -80,7 +80,10 @@ class PatchrightContext:
         proxy_url: str | None = None,
         capture_store: CaptureStore | None = None,
     ) -> None:
-        self._page = page
+        # Multi-tab state: map tab_id -> Page, initial page is tab 0
+        self._tabs: dict[int, Any] = {0: page}
+        self._active_tab: int = 0
+        self._next_tab_id: int = 1
         self._browser = browser
         self._playwright = playwright
         self._seq_counter = seq_counter
@@ -90,10 +93,16 @@ class PatchrightContext:
         self._capture_store = capture_store or CaptureStore()
         self._backend_node_map: dict[int, int] = {}
         self._pending_captures: set[asyncio.Task[None]] = set()
-        self._setup_network_listeners()
+        self._setup_network_listeners(page)
 
-    def _setup_network_listeners(self) -> None:
-        self._page.on("response", self._on_response)
+    @property
+    def _page(self) -> Any:
+        """Return the active tab's Page object."""
+        return self._tabs[self._active_tab]
+
+    def _setup_network_listeners(self, page: Any | None = None) -> None:
+        target = page if page is not None else self._page
+        target.on("response", self._on_response)
 
     @property
     def capture_store(self) -> CaptureStore:
@@ -123,9 +132,7 @@ class PatchrightContext:
         except Exception:
             pass
 
-    async def _record_capture_async(
-        self, request: Any, response: Any
-    ) -> None:
+    async def _record_capture_async(self, request: Any, response: Any) -> None:
         try:
             from datetime import datetime
 
@@ -715,6 +722,112 @@ class PatchrightContext:
             "cookies_used": cookies_used,
             "url": str(resp.url),
         }
+
+    def _get_browser_context(self) -> Any:
+        """Return the Playwright BrowserContext, whether persistent or ephemeral."""
+        if self._browser_context is not None:
+            return self._browser_context
+        # Ephemeral mode: get context from the active page
+        return self._page.context
+
+    async def tab_list(self) -> list[TabInfo]:
+        """Return metadata for all open tabs."""
+        result: list[TabInfo] = []
+        for tid, page in self._tabs.items():
+            try:
+                url = page.url
+            except Exception:
+                url = ""
+            try:
+                title = await page.title()
+            except Exception:
+                title = ""
+            result.append(
+                TabInfo(
+                    tab_id=tid,
+                    url=url,
+                    title=title,
+                    active=(tid == self._active_tab),
+                )
+            )
+        return result
+
+    async def tab_new(self, url: str | None = None) -> dict[str, Any]:
+        """Create a new tab, optionally navigating to a URL."""
+        pw_ctx = self._get_browser_context()
+        new_page = await pw_ctx.new_page()
+        new_id = self._next_tab_id
+        self._next_tab_id += 1
+        self._tabs[new_id] = new_page
+        self._active_tab = new_id
+        self._setup_network_listeners(new_page)
+
+        result: dict[str, Any] = {"tab_id": new_id}
+        if url:
+            nav = await self.navigate(url)
+            result["url"] = nav.get("url", url)
+            result["title"] = nav.get("title", "")
+        else:
+            result["url"] = new_page.url
+            try:
+                result["title"] = await new_page.title()
+            except Exception:
+                result["title"] = ""
+        return result
+
+    async def tab_close(self, tab_id: int) -> dict[str, Any]:
+        """Close a tab by ID. Auto-creates blank tab if closing the last one."""
+        if tab_id not in self._tabs:
+            raise ElementNotFoundError(
+                error="tab_not_found",
+                hint=(
+                    f"Tab {tab_id} does not exist"
+                    f" (open tabs: {sorted(self._tabs.keys())})"
+                ),
+                action="use 'tab list' to see available tab IDs",
+            )
+        page = self._tabs.pop(tab_id)
+        await page.close()
+
+        if not self._tabs:
+            # Auto-create blank tab so daemon always has an operable page
+            pw_ctx = self._get_browser_context()
+            new_page = await pw_ctx.new_page()
+            new_id = self._next_tab_id
+            self._next_tab_id += 1
+            self._tabs[new_id] = new_page
+            self._active_tab = new_id
+            self._setup_network_listeners(new_page)
+            return {"closed": tab_id, "auto_created": new_id}
+
+        if self._active_tab == tab_id:
+            # Switch to the most recent remaining tab
+            self._active_tab = max(self._tabs.keys())
+
+        return {"closed": tab_id}
+
+    async def tab_switch(self, tab_id: int) -> dict[str, Any]:
+        """Switch the active tab."""
+        if tab_id not in self._tabs:
+            raise ElementNotFoundError(
+                error="tab_not_found",
+                hint=(
+                    f"Tab {tab_id} does not exist"
+                    f" (open tabs: {sorted(self._tabs.keys())})"
+                ),
+                action="use 'tab list' to see available tab IDs",
+            )
+        self._active_tab = tab_id
+        page = self._tabs[tab_id]
+        try:
+            url = page.url
+        except Exception:
+            url = ""
+        try:
+            title = await page.title()
+        except Exception:
+            title = ""
+        return {"tab_id": tab_id, "url": url, "title": title}
 
     async def close(self) -> None:
         if self._browser is not None:

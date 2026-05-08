@@ -46,6 +46,10 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/capture/analyze", handle_capture_analyze)
     app.router.add_post("/capture/clear", handle_capture_clear)
     app.router.add_get("/cdp/endpoint", handle_cdp_endpoint)
+    app.router.add_get("/tabs", handle_tab_list)
+    app.router.add_post("/tab/new", handle_tab_new)
+    app.router.add_post("/tab/close", handle_tab_close)
+    app.router.add_post("/tab/switch", handle_tab_switch)
 
 
 def _ctx(request: Request) -> Any:
@@ -356,3 +360,37 @@ async def handle_cdp_endpoint(request: Request) -> Response:
     except (AttributeError, IndexError):
         ws_endpoint = getattr(browser, "ws_endpoint", "")
     return _ok({"ws_endpoint": ws_endpoint}, seq=ctx.seq)
+
+
+async def handle_tab_list(request: Request) -> Response:
+    ctx = _ctx(request)
+    tabs = await ctx.tab_list()
+    data = [
+        {"tab_id": t.tab_id, "url": t.url, "title": t.title, "active": t.active}
+        for t in tabs
+    ]
+    return _ok({"tabs": data, "count": len(data)}, seq=ctx.seq)
+
+
+async def handle_tab_new(request: Request) -> Response:
+    body = await request.json()
+    url: str | None = body.get("url")
+    ctx = _ctx(request)
+    result = await ctx.tab_new(url)
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_tab_close(request: Request) -> Response:
+    body = await request.json()
+    tab_id: int = body["tab_id"]
+    ctx = _ctx(request)
+    result = await ctx.tab_close(tab_id)
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_tab_switch(request: Request) -> Response:
+    body = await request.json()
+    tab_id: int = body["tab_id"]
+    ctx = _ctx(request)
+    result = await ctx.tab_switch(tab_id)
+    return _ok(result, seq=ctx.seq)

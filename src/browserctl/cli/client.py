@@ -149,22 +149,32 @@ class DaemonClient:
     async def capture_status(self) -> dict[str, Any]:
         return await self._request("GET", "/capture/status")
 
-    async def capture_export(
-        self, *, fmt: str = "har"
-    ) -> dict[str, Any]:
-        return await self._request(
-            "GET", "/capture/export", params={"format": fmt}
-        )
+    async def capture_export(self, *, fmt: str = "har") -> dict[str, Any]:
+        return await self._request("GET", "/capture/export", params={"format": fmt})
 
-    async def capture_analyze(
-        self, *, domain: str = ""
-    ) -> dict[str, Any]:
+    async def capture_analyze(self, *, domain: str = "") -> dict[str, Any]:
         params: dict[str, str] = {}
         if domain:
             params["domain"] = domain
-        return await self._request(
-            "GET", "/capture/analyze", params=params
-        )
+        return await self._request("GET", "/capture/analyze", params=params)
 
     async def capture_clear(self) -> dict[str, Any]:
         return await self._request("POST", "/capture/clear")
+
+    async def cdp_endpoint(self) -> dict[str, Any]:
+        return await self._request("GET", "/cdp/endpoint")
+
+    async def tab_list(self) -> dict[str, Any]:
+        return await self._request("GET", "/tabs")
+
+    async def tab_new(self, *, url: str | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if url:
+            body["url"] = url
+        return await self._request("POST", "/tab/new", json_body=body)
+
+    async def tab_close(self, tab_id: int) -> dict[str, Any]:
+        return await self._request("POST", "/tab/close", json_body={"tab_id": tab_id})
+
+    async def tab_switch(self, tab_id: int) -> dict[str, Any]:
+        return await self._request("POST", "/tab/switch", json_body={"tab_id": tab_id})

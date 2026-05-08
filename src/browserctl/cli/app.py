@@ -65,6 +65,7 @@ def _register_commands() -> None:
         bridge_cmd,
         browser,
         capture_cmd,
+        cdp,
         cookies_cmd,
         daemon_cmd,
         doctor,
@@ -73,6 +74,7 @@ def _register_commands() -> None:
         network,
         profile,
         site_cmd,
+        tab,
     )
 
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
@@ -116,6 +118,16 @@ def _register_commands() -> None:
         site_cmd.app,
         name="adapter",
         help="Adapters: list, info, run, scaffold.",
+    )
+    app.add_typer(
+        tab.app,
+        name="tab",
+        help="Tab management: list, new, close, switch.",
+    )
+    app.add_typer(
+        cdp.app,
+        name="cdp",
+        help="Chrome DevTools Protocol: endpoint.",
     )
 
 

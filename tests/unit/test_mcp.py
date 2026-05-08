@@ -41,20 +41,21 @@ class TestMCPServerCreation:
             assert isinstance(mcp, FastMCP)
         except ImportError:
             import pytest
+
             pytest.skip("mcp package not installed")
 
-    def test_tool_count_is_15(self) -> None:
+    def test_tool_count_is_16(self) -> None:
         try:
             from browserctl.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
-            assert len(tools) == 15, (
-                f"Expected 15 tools, got {len(tools)}: "
-                f"{sorted(tools.keys())}"
+            assert len(tools) == 16, (
+                f"Expected 16 tools, got {len(tools)}: {sorted(tools.keys())}"
             )
         except ImportError:
             import pytest
+
             pytest.skip("mcp package not installed")
 
     def test_tool_names_have_prefix(self) -> None:
@@ -69,6 +70,7 @@ class TestMCPServerCreation:
                 )
         except ImportError:
             import pytest
+
             pytest.skip("mcp package not installed")
 
     def test_expected_tools_present(self) -> None:
@@ -93,10 +95,12 @@ class TestMCPServerCreation:
                 "browserctl_adapter_list",
                 "browserctl_profile",
                 "browserctl_doctor",
+                "browserctl_tab",
             }
             assert set(tools.keys()) == expected
         except ImportError:
             import pytest
+
             pytest.skip("mcp package not installed")
 
 

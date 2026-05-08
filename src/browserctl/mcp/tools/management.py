@@ -16,9 +16,7 @@ __all__ = ["register"]
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_status(
-        query: Literal[
-            "health", "cdp_endpoint", "cookies"
-        ] = "health",
+        query: Literal["health", "cdp_endpoint", "cookies"] = "health",
         url: str = "",
     ) -> str:
         """Query daemon and browser status.
@@ -103,34 +101,38 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         discover_adapters()
         parts = name.split("/", 1)
         if len(parts) != 2:
-            return json.dumps({
-                "error": "invalid_adapter_name",
-                "hint": f"Expected 'site/command', got '{name}'",
-                "action": "use format like 'httpbin/headers'",
-            })
+            return json.dumps(
+                {
+                    "error": "invalid_adapter_name",
+                    "hint": f"Expected 'site/command', got '{name}'",
+                    "action": "use format like 'httpbin/headers'",
+                }
+            )
 
         registry = get_registry()
         entry = registry.get(parts[0], parts[1])
         if entry is None:
-            available = [
-                e.meta.full_name for e in registry.list_all()
-            ]
-            return json.dumps({
-                "error": "adapter_not_found",
-                "hint": f"No adapter '{name}'",
-                "action": f"available: {', '.join(available[:10])}",
-            })
+            available = [e.meta.full_name for e in registry.list_all()]
+            return json.dumps(
+                {
+                    "error": "adapter_not_found",
+                    "hint": f"No adapter '{name}'",
+                    "action": f"available: {', '.join(available[:10])}",
+                }
+            )
 
         parsed_args: dict[str, Any] = json.loads(args_json)
         try:
             result = await execute_adapter(entry, args=parsed_args)
             return json.dumps({"result": result})
         except Exception as exc:
-            return json.dumps({
-                "error": "adapter_execution_failed",
-                "hint": str(exc),
-                "action": "check adapter args and daemon status",
-            })
+            return json.dumps(
+                {
+                    "error": "adapter_execution_failed",
+                    "hint": str(exc),
+                    "action": "check adapter args and daemon status",
+                }
+            )
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_adapter_list() -> str:
@@ -147,12 +149,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         adapters: list[dict[str, Any]] = []
         for entry in registry.list_all():
             m = entry.meta
-            adapters.append({
-                "full_name": m.full_name,
-                "strategy": m.strategy.value,
-                "access": m.access,
-                "description": m.description,
-            })
+            adapters.append(
+                {
+                    "full_name": m.full_name,
+                    "strategy": m.strategy.value,
+                    "access": m.access,
+                    "description": m.description,
+                }
+            )
         return json.dumps({"adapters": adapters, "count": len(adapters)})
 
     @mcp.tool(annotations={"readOnlyHint": False})
@@ -182,42 +186,118 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
 
         if action == "list":
-            names = sorted(
-                d.name for d in profiles_dir.iterdir() if d.is_dir()
-            )
+            names = sorted(d.name for d in profiles_dir.iterdir() if d.is_dir())
             return json.dumps({"profiles": names, "count": len(names)})
 
         if not name:
-            return json.dumps({
-                "error": "missing_name",
-                "hint": "Profile name is required for create/delete",
-                "action": "provide a name parameter",
-            })
+            return json.dumps(
+                {
+                    "error": "missing_name",
+                    "hint": "Profile name is required for create/delete",
+                    "action": "provide a name parameter",
+                }
+            )
 
         profile_path = profiles_dir / name
         if action == "create":
             if profile_path.exists():
-                return json.dumps({
-                    "error": "profile_exists",
-                    "hint": f"Profile '{name}' already exists",
-                    "action": "use a different name or delete first",
-                })
+                return json.dumps(
+                    {
+                        "error": "profile_exists",
+                        "hint": f"Profile '{name}' already exists",
+                        "action": "use a different name or delete first",
+                    }
+                )
             profile_path.mkdir(parents=True)
             return json.dumps({"created": name})
 
         if action == "delete":
             if not profile_path.exists():
-                return json.dumps({
-                    "error": "profile_not_found",
-                    "hint": f"Profile '{name}' does not exist",
-                    "action": "use browserctl_profile(action='list')",
-                })
+                return json.dumps(
+                    {
+                        "error": "profile_not_found",
+                        "hint": f"Profile '{name}' does not exist",
+                        "action": "use browserctl_profile(action='list')",
+                    }
+                )
             import shutil
 
             shutil.rmtree(profile_path)
             return json.dumps({"deleted": name})
 
         return json.dumps({"error": "unknown_action", "hint": f"Unknown: {action}"})
+
+    @mcp.tool(annotations={"readOnlyHint": False})
+    async def browserctl_tab(
+        action: Literal["list", "new", "close", "switch"] = "list",
+        tab_id: int = -1,
+        url: str = "",
+    ) -> str:
+        """Manage browser tabs — list, create, close, switch.
+
+        Actions:
+          list   — show all open tabs with id, url, title, active status
+          new    — create a new tab (optionally navigate to url)
+          close  — close tab by tab_id
+          switch — switch active tab to tab_id
+
+        Args:
+            action: Tab action — list, new, close, or switch
+            tab_id: Tab ID (required for close/switch, ignored for list)
+            url: URL to navigate new tab to (only for 'new' action)
+
+        Returns:
+            list: array of tabs.
+            new: created tab_id and url.
+            close: confirmation of closed tab.
+            switch: new active tab info.
+        """
+        if action == "list":
+            result = await bridge.request("GET", "/tabs")
+            return bridge._format_result(result)
+
+        if action == "new":
+            json_body: dict[str, Any] = {}
+            if url:
+                json_body["url"] = url
+            result = await bridge.request("POST", "/tab/new", json_body=json_body)
+            return bridge._format_result(result)
+
+        if action == "close":
+            if tab_id < 0:
+                return json.dumps(
+                    {
+                        "error": "missing_tab_id",
+                        "hint": "tab_id is required for close action",
+                        "action": "provide a valid tab_id",
+                    }
+                )
+            result = await bridge.request(
+                "POST", "/tab/close", json_body={"tab_id": tab_id}
+            )
+            return bridge._format_result(result)
+
+        if action == "switch":
+            if tab_id < 0:
+                return json.dumps(
+                    {
+                        "error": "missing_tab_id",
+                        "hint": "tab_id is required for switch action",
+                        "action": "provide a valid tab_id",
+                    }
+                )
+            result = await bridge.request(
+                "POST", "/tab/switch", json_body={"tab_id": tab_id}
+            )
+            return bridge._format_result(result)
+
+        return json.dumps(
+            {
+                "error": "unknown_action",
+                "hint": f"Unknown tab action: {action}",
+                "action": "use list, new, close, or switch",
+            }
+        )
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_doctor() -> str:
@@ -235,11 +315,13 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
 
         checks: list[dict[str, Any]] = []
 
-        checks.append({
-            "name": "python_version",
-            "ok": sys.version_info >= (3, 12),
-            "value": sys.version,
-        })
+        checks.append(
+            {
+                "name": "python_version",
+                "ok": sys.version_info >= (3, 12),
+                "value": sys.version,
+            }
+        )
 
         try:
             import patchright as _
@@ -251,24 +333,30 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         try:
             import cloakbrowser as _
 
-            checks.append({
-                "name": "cloakbrowser",
-                "ok": True,
-                "hint": "CloakBrowser available — auto tier will use cloak",
-            })
+            checks.append(
+                {
+                    "name": "cloakbrowser",
+                    "ok": True,
+                    "hint": "CloakBrowser available — auto tier will use cloak",
+                }
+            )
         except ImportError:
-            checks.append({
-                "name": "cloakbrowser",
-                "ok": False,
-                "hint": "Not installed — pip install browserctl[stealth]",
-            })
+            checks.append(
+                {
+                    "name": "cloakbrowser",
+                    "ok": False,
+                    "hint": "Not installed — pip install browserctl[stealth]",
+                }
+            )
 
         _, cfg = load_config()
         resolved = resolve_tier(cfg.default_tier)
-        checks.append({
-            "name": "default_tier",
-            "value": f"{cfg.default_tier} → {resolved}",
-        })
+        checks.append(
+            {
+                "name": "default_tier",
+                "value": f"{cfg.default_tier} → {resolved}",
+            }
+        )
 
         try:
             import httpx
@@ -276,16 +364,20 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 base = f"http://{cfg.daemon_host}:{cfg.daemon_port}"
                 resp = await client.get(f"{base}/health")
-                checks.append({
-                    "name": "daemon",
-                    "ok": resp.status_code == 200,
-                    "value": f"{cfg.daemon_host}:{cfg.daemon_port}",
-                })
+                checks.append(
+                    {
+                        "name": "daemon",
+                        "ok": resp.status_code == 200,
+                        "value": f"{cfg.daemon_host}:{cfg.daemon_port}",
+                    }
+                )
         except Exception:
-            checks.append({
-                "name": "daemon",
-                "ok": False,
-                "value": "not running",
-            })
+            checks.append(
+                {
+                    "name": "daemon",
+                    "ok": False,
+                    "value": "not running",
+                }
+            )
 
         return json.dumps({"checks": checks})
