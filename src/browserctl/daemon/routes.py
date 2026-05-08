@@ -45,6 +45,7 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/capture/export", handle_capture_export)
     app.router.add_get("/capture/analyze", handle_capture_analyze)
     app.router.add_post("/capture/clear", handle_capture_clear)
+    app.router.add_get("/cdp/endpoint", handle_cdp_endpoint)
 
 
 def _ctx(request: Request) -> PatchrightContext:
@@ -325,3 +326,24 @@ async def handle_capture_clear(request: Request) -> Response:
     ctx = _ctx(request)
     ctx.capture_store.clear()
     return _ok({"cleared": True}, seq=ctx.seq)
+
+
+async def handle_cdp_endpoint(request: Request) -> Response:
+    """Return the CDP WebSocket URL for jshookmcp browser_attach."""
+    ctx = _ctx(request)
+    browser = getattr(ctx, "_browser", None)
+    if browser is None:
+        return _json(
+            {
+                "ok": False,
+                "error": "no_browser",
+                "hint": "No browser instance available",
+                "action": "navigate to a URL first to initialize the browser",
+            },
+            status=503,
+        )
+    try:
+        ws_endpoint: str = browser.contexts[0].browser.ws_endpoint  # type: ignore[union-attr]
+    except (AttributeError, IndexError):
+        ws_endpoint = getattr(browser, "ws_endpoint", "")
+    return _ok({"ws_endpoint": ws_endpoint}, seq=ctx.seq)
