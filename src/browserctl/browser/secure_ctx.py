@@ -146,16 +146,24 @@ class SecureBrowserContext:
             url, method=method, body=body, headers=headers, timeout=timeout
         )
 
-    async def evaluate(self, js: str) -> Any:
-        return await self._inner.evaluate(js)
+    async def evaluate(self, js: str, *, world: str = "main") -> Any:
+        return await self._inner.evaluate(js, world=world)
 
     async def network(
         self, *, since: int | str = "last_action"
     ) -> list[dict[str, Any]]:
         return await self._inner.network(since=since)
 
-    async def screenshot(self, *, full_page: bool = False) -> bytes:
-        return await self._inner.screenshot(full_page=full_page)
+    async def screenshot(
+        self,
+        *,
+        full_page: bool = False,
+        format: str = "jpeg",
+        quality: int = 80,
+    ) -> bytes:
+        return await self._inner.screenshot(
+            full_page=full_page, format=format, quality=quality
+        )
 
     async def close(self) -> None:
         return await self._inner.close()

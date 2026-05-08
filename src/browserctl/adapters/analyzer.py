@@ -198,8 +198,9 @@ class PatternAnalyzer:
                         all_query_params.add(name)
 
             for header_name in entry.request_headers:
-                if header_name.lower() in _AUTH_HEADERS:
-                    auth_headers_seen.add(header_name)
+                h = str(header_name)
+                if h.lower() in _AUTH_HEADERS:
+                    auth_headers_seen.add(h)
 
             ct = entry.content_type.split(";", 1)[0].strip()
             if ct:
@@ -213,9 +214,7 @@ class PatternAnalyzer:
                     body_obj: Any = json.loads(entry.request_body)
                     schema: Any = _extract_schema(body_obj)
                     if isinstance(schema, dict):
-                        req_schemas.append(
-                            cast("dict[str, Any]", schema)
-                        )
+                        req_schemas.append(cast("dict[str, Any]", schema))
                 except (json.JSONDecodeError, ValueError):
                     pass
 
@@ -224,9 +223,7 @@ class PatternAnalyzer:
                     resp_obj: Any = json.loads(entry.response_body)
                     resp_schema_val: Any = _extract_schema(resp_obj)
                     if isinstance(resp_schema_val, dict):
-                        resp_schemas.append(
-                            cast("dict[str, Any]", resp_schema_val)
-                        )
+                        resp_schemas.append(cast("dict[str, Any]", resp_schema_val))
                 except (json.JSONDecodeError, ValueError):
                     pass
 

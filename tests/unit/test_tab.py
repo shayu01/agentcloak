@@ -30,16 +30,22 @@ def _default_page(
     return page
 
 
-def _mock_cdp_session() -> MagicMock:
+def _mock_cdp_session(eval_value: Any = "result") -> MagicMock:
     cdp = MagicMock()
-    cdp.send = AsyncMock(
-        return_value={
-            "nodes": [
-                {"role": {"value": "RootWebArea"}, "name": {"value": "Test"}},
-                {"role": {"value": "link"}, "name": {"value": "Click me"}},
-            ]
-        }
-    )
+
+    async def _send(method: str, params: Any = None) -> Any:
+        if method == "Accessibility.getFullAXTree":
+            return {
+                "nodes": [
+                    {"role": {"value": "RootWebArea"}, "name": {"value": "Test"}},
+                    {"role": {"value": "link"}, "name": {"value": "Click me"}},
+                ]
+            }
+        if method == "Runtime.evaluate":
+            return {"result": {"type": "object", "value": eval_value}}
+        return {}
+
+    cdp.send = AsyncMock(side_effect=_send)
     cdp.detach = AsyncMock()
     return cdp
 
@@ -288,7 +294,9 @@ class TestActiveTabSemantics:
         """Evaluate runs JS on the active tab's page."""
         page0 = _default_page()
         page1 = _default_page()
-        page1.evaluate = AsyncMock(return_value=42)
+        page1.context.new_cdp_session = AsyncMock(
+            return_value=_mock_cdp_session(eval_value=42)
+        )
         browser_ctx = MagicMock()
         browser_ctx.new_page = AsyncMock(return_value=page1)
 
@@ -296,7 +304,6 @@ class TestActiveTabSemantics:
         await ctx.tab_new()
         result = await ctx.evaluate("1+1")
         assert result == 42
-        page1.evaluate.assert_called_once_with("1+1")
 
 
 class TestEphemeralMode:

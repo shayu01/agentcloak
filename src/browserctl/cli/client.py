@@ -189,8 +189,16 @@ class DaemonClient:
             "POST", "/navigate", json_body={"url": url, "timeout": timeout}
         )
 
-    async def screenshot(self, *, full_page: bool = False) -> dict[str, Any]:
-        params = {"full_page": "true"} if full_page else {}
+    async def screenshot(
+        self,
+        *,
+        full_page: bool = False,
+        format: str = "jpeg",
+        quality: int = 80,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"format": format, "quality": str(quality)}
+        if full_page:
+            params["full_page"] = "true"
         return await self._request("GET", "/screenshot", params=params)
 
     async def snapshot(self, *, mode: str = "accessible") -> dict[str, Any]:
@@ -199,8 +207,10 @@ class DaemonClient:
     async def state(self) -> dict[str, Any]:
         return await self._request("GET", "/state")
 
-    async def evaluate(self, js: str) -> dict[str, Any]:
-        return await self._request("POST", "/evaluate", json_body={"js": js})
+    async def evaluate(self, js: str, *, world: str = "main") -> dict[str, Any]:
+        return await self._request(
+            "POST", "/evaluate", json_body={"js": js, "world": world}
+        )
 
     async def network(self, *, since: int = 0) -> dict[str, Any]:
         return await self._request("GET", "/network", params={"since": str(since)})

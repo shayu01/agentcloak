@@ -101,9 +101,18 @@ async def handle_navigate(request: Request) -> Response:
 async def handle_screenshot(request: Request) -> Response:
     ctx = _ctx(request)
     full_page = request.query.get("full_page", "false") == "true"
-    raw = await ctx.screenshot(full_page=full_page)
+    fmt = request.query.get("format", "jpeg")
+    quality_raw = request.query.get("quality", "80")
+    try:
+        quality = int(quality_raw)
+    except ValueError:
+        quality = 80
+    raw = await ctx.screenshot(full_page=full_page, format=fmt, quality=quality)
     b64 = screenshot_to_base64(raw)
-    return _ok({"base64": b64, "size": len(raw)}, seq=ctx.seq)
+    return _ok(
+        {"base64": b64, "size": len(raw), "format": fmt},
+        seq=ctx.seq,
+    )
 
 
 async def handle_snapshot(request: Request) -> Response:
@@ -128,7 +137,7 @@ async def handle_snapshot(request: Request) -> Response:
 async def handle_state(request: Request) -> Response:
     ctx = _ctx(request)
     snap = await ctx.snapshot(mode="accessible")
-    raw_screenshot = await ctx.screenshot()
+    raw_screenshot = await ctx.screenshot(format="jpeg", quality=80)
     b64 = screenshot_to_base64(raw_screenshot)
     network_reqs = await ctx.network(since=0)
 
@@ -151,8 +160,9 @@ async def handle_state(request: Request) -> Response:
 async def handle_evaluate(request: Request) -> Response:
     body = await request.json()
     js: str = body["js"]
+    world: str = body.get("world", "main")
     ctx = _ctx(request)
-    result = await ctx.evaluate(js)
+    result = await ctx.evaluate(js, world=world)
     return _ok({"result": result}, seq=ctx.seq)
 
 
@@ -315,11 +325,25 @@ async def handle_capture_analyze(request: Request) -> Response:
     else:
         entries = ctx.capture_store.api_entries()
 
-    analyzer = PatternAnalyzer(entries)
-    patterns = analyzer.analyze()
+    try:
+        analyzer = PatternAnalyzer(entries)
+        patterns = analyzer.analyze()
+    except Exception:
+        logger.exception("capture_analyze_failed")
+        return _json(
+            {
+                "ok": False,
+                "error": "analyze_failed",
+                "hint": "PatternAnalyzer raised an exception; check daemon logs",
+                "action": "try capture export --format json to inspect raw entries",
+            },
+            status=500,
+        )
 
     patterns_data: list[dict[str, Any]] = []
     for p in patterns:
+        # Ensure status_codes keys are strings for JSON serialization
+        status_codes = {str(k): v for k, v in p.status_codes.items()}
         patterns_data.append(
             {
                 "method": p.method,
@@ -327,7 +351,7 @@ async def handle_capture_analyze(request: Request) -> Response:
                 "domain": p.domain,
                 "call_count": p.call_count,
                 "query_params": p.query_params,
-                "status_codes": p.status_codes,
+                "status_codes": status_codes,
                 "auth_headers": p.auth_headers,
                 "content_type": p.content_type,
                 "category": p.category,

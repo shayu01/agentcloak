@@ -15,17 +15,26 @@ __all__ = ["register"]
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
-    async def browserctl_evaluate(js: str) -> str:
+    async def browserctl_evaluate(js: str, world: str = "main") -> str:
         """Execute JavaScript in the browser page context. Can modify page state.
+
+        By default runs in the page's main world, so page globals (jQuery, Vue,
+        React, etc.) are accessible. Use world='utility' for an isolated context.
+
+        Note: if evaluate triggers async requests (AJAX/fetch), those requests
+        are captured asynchronously. Use browserctl_network or capture tools
+        to inspect them after a short delay.
 
         Args:
             js: JavaScript code to evaluate (runs in page context with full DOM access)
+            world: Execution context — 'main' (page globals visible)
+                or 'utility' (isolated)
 
         Returns:
             JSON with the evaluation result. Complex objects are serialized.
         """
         result = await bridge.request(
-            "POST", "/evaluate", json_body={"js": js}
+            "POST", "/evaluate", json_body={"js": js, "world": world}
         )
         return bridge._format_result(result)
 
@@ -61,7 +70,5 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             json_body["body"] = body
         if headers_json is not None:
             json_body["headers"] = json.loads(headers_json)
-        result = await bridge.request(
-            "POST", "/fetch", json_body=json_body
-        )
+        result = await bridge.request("POST", "/fetch", json_body=json_body)
         return bridge._format_result(result)

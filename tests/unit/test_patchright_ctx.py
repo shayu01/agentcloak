@@ -16,19 +16,29 @@ def _cdp_node(role: str, name: str) -> dict[str, Any]:
     return {"role": {"value": role}, "name": {"value": name}}
 
 
+def _ax_tree_response() -> dict[str, Any]:
+    return {
+        "nodes": [
+            _cdp_node("RootWebArea", "Example"),
+            _cdp_node("heading", "Main Title"),
+            _cdp_node("link", "Click me"),
+            _cdp_node("button", "Submit"),
+            _cdp_node("textbox", "Search"),
+        ]
+    }
+
+
 def _mock_cdp_session() -> MagicMock:
     cdp = MagicMock()
-    cdp.send = AsyncMock(
-        return_value={
-            "nodes": [
-                _cdp_node("RootWebArea", "Example"),
-                _cdp_node("heading", "Main Title"),
-                _cdp_node("link", "Click me"),
-                _cdp_node("button", "Submit"),
-                _cdp_node("textbox", "Search"),
-            ]
-        }
-    )
+
+    async def _send(method: str, params: Any = None) -> Any:
+        if method == "Accessibility.getFullAXTree":
+            return _ax_tree_response()
+        if method == "Runtime.evaluate":
+            return {"result": {"type": "string", "value": "result"}}
+        return {}
+
+    cdp.send = AsyncMock(side_effect=_send)
     cdp.detach = AsyncMock()
     return cdp
 
@@ -120,6 +130,48 @@ class TestSnapshot:
         assert "Hello World" in snap.tree_text
 
     @pytest.mark.asyncio
+    async def test_accessible_filters_inline_text_box(self) -> None:
+        """InlineTextBox and LineBreak roles are filtered from accessible output."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node("RootWebArea", "Page"),
+                        _cdp_node("button", "OK"),
+                        _cdp_node("InlineTextBox", "some inline text"),
+                        _cdp_node("LineBreak", ""),
+                        _cdp_node("StaticText", "visible"),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert "InlineTextBox" not in snap.tree_text
+        assert "LineBreak" not in snap.tree_text
+        assert "OK" in snap.tree_text
+        assert "visible" in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_compact_mode(self) -> None:
+        """Compact mode outputs only interactive elements and heading-type roles."""
+        ctx = _make_ctx()
+        snap = await ctx.snapshot(mode="compact")
+        assert snap.mode == "compact"
+        assert len(snap.selector_map) == 3
+        assert "[1]" in snap.tree_text
+        # heading is in _HEADING_ROLES, so it appears as structural context
+        assert "heading: Main Title" in snap.tree_text
+        # RootWebArea is not interactive and not in _HEADING_ROLES, so excluded
+        assert "RootWebArea" not in snap.tree_text
+
+    @pytest.mark.asyncio
     async def test_invalid_mode(self) -> None:
         ctx = _make_ctx()
         with pytest.raises(BackendError):
@@ -136,12 +188,61 @@ class TestEvaluate:
 
     @pytest.mark.asyncio
     async def test_evaluate_error(self) -> None:
-        page = MagicMock()
-        page.on = MagicMock()
-        page.evaluate = AsyncMock(side_effect=Exception("SyntaxError"))
+        err_cdp = MagicMock()
+        err_cdp.send = AsyncMock(side_effect=Exception("SyntaxError"))
+        err_cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=err_cdp)
         ctx = _make_ctx(page=page)
         with pytest.raises(BackendError):
             await ctx.evaluate("bad code{{{")
+
+    @pytest.mark.asyncio
+    async def test_evaluate_utility_world(self) -> None:
+        ctx = _make_ctx()
+        result = await ctx.evaluate("document.title", world="utility")
+        assert result == "result"
+        assert ctx.seq == 1
+
+    @pytest.mark.asyncio
+    async def test_evaluate_cdp_exception_details(self) -> None:
+        """CDP exceptionDetails in response raises BackendError."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Runtime.evaluate":
+                return {
+                    "result": {"type": "object"},
+                    "exceptionDetails": {"text": "ReferenceError: x is not defined"},
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        with pytest.raises(BackendError) as exc_info:
+            await ctx.evaluate("x")
+        assert "ReferenceError" in exc_info.value.hint
+
+    @pytest.mark.asyncio
+    async def test_evaluate_undefined_returns_none(self) -> None:
+        """CDP result type 'undefined' returns Python None."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Runtime.evaluate":
+                return {"result": {"type": "undefined"}}
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        result = await ctx.evaluate("void 0")
+        assert result is None
 
 
 class TestScreenshot:
@@ -156,6 +257,24 @@ class TestScreenshot:
         ctx = _make_ctx()
         await ctx.screenshot()
         assert ctx.seq == 0
+
+    @pytest.mark.asyncio
+    async def test_default_format_jpeg(self) -> None:
+        """Default screenshot format is JPEG with quality 80."""
+        page = _default_page()
+        ctx = _make_ctx(page=page)
+        await ctx.screenshot()
+        page.screenshot.assert_called_once_with(
+            full_page=False, type="jpeg", quality=80
+        )
+
+    @pytest.mark.asyncio
+    async def test_png_format_no_quality(self) -> None:
+        """PNG format omits quality parameter."""
+        page = _default_page()
+        ctx = _make_ctx(page=page)
+        await ctx.screenshot(format="png")
+        page.screenshot.assert_called_once_with(full_page=False, type="png")
 
 
 class TestSeqBehavior:

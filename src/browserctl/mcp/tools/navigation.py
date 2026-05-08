@@ -14,9 +14,7 @@ __all__ = ["register"]
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
-    async def browserctl_navigate(
-        url: str, timeout: float = 30.0
-    ) -> str:
+    async def browserctl_navigate(url: str, timeout: float = 30.0) -> str:
         """Navigate the browser to a URL. Changes page state.
 
         Args:
@@ -41,30 +39,40 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         in browserctl_action.
 
         Args:
-            mode: 'accessible' (a11y tree with [N] refs), 'dom', or 'content'
+            mode: 'accessible' (a11y tree with [N] refs — default, filters
+                  redundant Chrome-internal nodes), 'compact' (interactive
+                  elements + headings only — much smaller output), 'dom'
+                  (raw HTML), or 'content' (text extraction)
 
         Returns:
             JSON with url, title, tree_text (the a11y tree), and selector_map.
         """
-        result = await bridge.request(
-            "GET", "/snapshot", params={"mode": mode}
-        )
+        result = await bridge.request("GET", "/snapshot", params={"mode": mode})
         return bridge._format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
-    async def browserctl_screenshot(full_page: bool = False) -> str:
+    async def browserctl_screenshot(
+        full_page: bool = False,
+        format: str = "jpeg",
+        quality: int = 80,
+    ) -> str:
         """Take a screenshot of the current page.
 
         For understanding page layout or verifying visual state.
         For element interaction, prefer browserctl_snapshot (a11y tree).
 
+        Default format is JPEG at quality 80, which is ~75-85% smaller than
+        PNG. Use format='png' when pixel-perfect fidelity is needed.
+
         Args:
             full_page: Capture the full scrollable page instead of viewport
+            format: Image format — 'jpeg' (default, smaller) or 'png' (lossless)
+            quality: JPEG quality 0-100 (default 80, ignored for png)
 
         Returns:
-            JSON with base64-encoded PNG screenshot and size in bytes.
+            JSON with base64-encoded screenshot, size in bytes, and format.
         """
-        params: dict[str, str] = {}
+        params: dict[str, str] = {"format": format, "quality": str(quality)}
         if full_page:
             params["full_page"] = "true"
         result = await bridge.request("GET", "/screenshot", params=params)

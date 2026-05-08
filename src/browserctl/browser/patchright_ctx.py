@@ -47,6 +47,10 @@ _INTERACTIVE_ROLES = frozenset(
 )
 
 
+_SKIP_ROLES = frozenset({"none", "InlineTextBox", "LineBreak"})
+
+_HEADING_ROLES = frozenset({"heading", "banner", "navigation", "main", "region"})
+
 _SNAP_CHROMIUM = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
 
 
@@ -231,6 +235,8 @@ class PatchrightContext:
     async def snapshot(self, *, mode: str = "accessible") -> PageSnapshot:
         if mode == "accessible":
             return await self._snapshot_accessible()
+        if mode == "compact":
+            return await self._snapshot_compact()
         if mode == "dom":
             return await self._snapshot_dom()
         if mode == "content":
@@ -238,17 +244,20 @@ class PatchrightContext:
         raise BackendError(
             error="invalid_snapshot_mode",
             hint=f"Unknown mode: {mode}",
-            action="use one of: accessible, dom, content",
+            action="use one of: accessible, compact, dom, content",
         )
 
-    async def _snapshot_accessible(self) -> PageSnapshot:
+    async def _get_ax_tree(self) -> list[dict[str, Any]]:
+        """Fetch the full accessibility tree via CDP."""
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
             tree = await cdp.send("Accessibility.getFullAXTree")
         finally:
             await cdp.detach()
+        return tree.get("nodes", [])
 
-        nodes: list[dict[str, Any]] = tree.get("nodes", [])
+    async def _snapshot_accessible(self) -> PageSnapshot:
+        nodes = await self._get_ax_tree()
         selector_map: dict[int, ElementRef] = {}
         backend_node_map: dict[int, int] = {}
         lines: list[str] = []
@@ -257,7 +266,7 @@ class PatchrightContext:
         for node in nodes:
             role = node.get("role", {}).get("value", "")
             name = node.get("name", {}).get("value", "")
-            if not role or role == "none":
+            if not role or role in _SKIP_ROLES:
                 continue
 
             if role.lower() in _INTERACTIVE_ROLES:
@@ -283,6 +292,47 @@ class PatchrightContext:
             url=self._page.url,
             title=await self._page.title(),
             mode="accessible",
+            tree_text="\n".join(lines),
+            selector_map=selector_map,
+        )
+
+    async def _snapshot_compact(self) -> PageSnapshot:
+        """Compact snapshot: only interactive [N] elements + headings."""
+        nodes = await self._get_ax_tree()
+        selector_map: dict[int, ElementRef] = {}
+        backend_node_map: dict[int, int] = {}
+        lines: list[str] = []
+        counter = 1
+
+        for node in nodes:
+            role = node.get("role", {}).get("value", "")
+            name = node.get("name", {}).get("value", "")
+            if not role or role in _SKIP_ROLES:
+                continue
+
+            if role.lower() in _INTERACTIVE_ROLES:
+                selector_map[counter] = ElementRef(
+                    index=counter,
+                    tag=role,
+                    role=role,
+                    text=name,
+                    attributes=dict[str, str](),
+                )
+                backend_dom_id = node.get("backendDOMNodeId")
+                if backend_dom_id is not None:
+                    backend_node_map[counter] = int(backend_dom_id)
+                lines.append(f"[{counter}] <{role}> {name}")
+                counter += 1
+            elif role.lower() in _HEADING_ROLES and name:
+                lines.append(f"{role}: {name}")
+
+        self._backend_node_map = backend_node_map
+
+        return PageSnapshot(
+            seq=self._seq_counter.value,
+            url=self._page.url,
+            title=await self._page.title(),
+            mode="compact",
             tree_text="\n".join(lines),
             selector_map=selector_map,
         )
@@ -574,21 +624,61 @@ class PatchrightContext:
 
         return {"results": results, "completed": total, "total": total}
 
-    async def evaluate(self, js: str) -> Any:
-        try:
-            result = await self._page.evaluate(js)
-        except Exception as exc:
-            raise BackendError(
-                error="evaluate_failed",
-                hint=str(exc),
-                action="check JS syntax and page context",
-            ) from exc
+    async def evaluate(self, js: str, *, world: str = "main") -> Any:
+        if world == "main":
+            result = await self._evaluate_main_world(js)
+        else:
+            try:
+                result = await self._page.evaluate(js)
+            except Exception as exc:
+                raise BackendError(
+                    error="evaluate_failed",
+                    hint=str(exc),
+                    action="check JS syntax and page context",
+                ) from exc
 
         new_seq = self._seq_counter.increment_action()
         self._ring_buffer.append(
             SeqEvent(seq=new_seq, kind="evaluate", data={"js": js[:200]})
         )
         return result
+
+    async def _evaluate_main_world(self, js: str) -> Any:
+        """Evaluate JS in the page's main execution context via CDP."""
+        cdp = await self._page.context.new_cdp_session(self._page)
+        try:
+            # Wrap expression so statements work (e.g. `var x = 1; x`)
+            expression = js
+            resp = await cdp.send(
+                "Runtime.evaluate",
+                {
+                    "expression": expression,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                    "userGesture": True,
+                },
+            )
+        except Exception as exc:
+            raise BackendError(
+                error="evaluate_failed",
+                hint=str(exc),
+                action="check JS syntax and page context",
+            ) from exc
+        finally:
+            await cdp.detach()
+
+        if "exceptionDetails" in resp:
+            desc = resp["exceptionDetails"].get("text", "JS exception")
+            raise BackendError(
+                error="evaluate_failed",
+                hint=desc,
+                action="check JS syntax and page context",
+            )
+
+        result_obj = resp.get("result", {})
+        if result_obj.get("type") == "undefined":
+            return None
+        return result_obj.get("value")
 
     async def network(
         self, *, since: int | str = "last_action"
@@ -600,8 +690,17 @@ class PatchrightContext:
         events = self._ring_buffer.since(since_seq)
         return [e.data for e in events if e.kind == "network"]
 
-    async def screenshot(self, *, full_page: bool = False) -> bytes:
-        return await self._page.screenshot(full_page=full_page, type="png")
+    async def screenshot(
+        self,
+        *,
+        full_page: bool = False,
+        format: str = "jpeg",
+        quality: int = 80,
+    ) -> bytes:
+        kwargs: dict[str, Any] = {"full_page": full_page, "type": format}
+        if format == "jpeg":
+            kwargs["quality"] = quality
+        return await self._page.screenshot(**kwargs)
 
     async def fetch(
         self,

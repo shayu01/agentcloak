@@ -44,10 +44,18 @@ def browser_screenshot(
     full_page: bool = typer.Option(
         False, "--full-page", help="Capture full scrollable page."
     ),
+    format: str = typer.Option(
+        "jpeg", "--format", "-f", help="Image format: jpeg or png."
+    ),
+    quality: int = typer.Option(
+        80, "--quality", "-q", help="JPEG quality 0-100 (ignored for png)."
+    ),
 ) -> None:
     """Take a screenshot."""
     client = DaemonClient()
-    result = _run(client.screenshot(full_page=full_page))
+    result = _run(
+        client.screenshot(full_page=full_page, format=format, quality=quality)
+    )
     data = result.get("data", result)
     seq = result.get("seq", 0)
 
@@ -62,7 +70,10 @@ def browser_screenshot(
 @app.command("snapshot")
 def browser_snapshot(
     mode: str = typer.Option(
-        "accessible", "--mode", "-m", help="Snapshot mode: accessible, dom, content."
+        "accessible",
+        "--mode",
+        "-m",
+        help="Snapshot mode: accessible, compact, dom, content.",
     ),
 ) -> None:
     """Get page snapshot (accessible tree, DOM, or text content)."""

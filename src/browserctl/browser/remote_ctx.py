@@ -155,11 +155,12 @@ class RemoteBridgeContext:
             "textbox",
             "treeitem",
         }
+        skip_roles = {"none", "InlineTextBox", "LineBreak"}
 
         for node in nodes:
             role = node.get("role", {}).get("value", "")
             name = node.get("name", {}).get("value", "")
-            if not role or role == "none":
+            if not role or role in skip_roles:
                 continue
             if role.lower() in interactive_roles:
                 selector_map[counter] = ElementRef(
@@ -283,7 +284,8 @@ class RemoteBridgeContext:
         )
         return {"ok": True, "seq": new_seq, "action": kind}
 
-    async def evaluate(self, js: str) -> Any:
+    async def evaluate(self, js: str, *, world: str = "main") -> Any:
+        # Remote bridge always evaluates in page context (main world)
         result = await self._send("evaluate", {"js": js})
         new_seq = self._seq_counter.increment_action()
         self._ring_buffer.append(
@@ -305,7 +307,14 @@ class RemoteBridgeContext:
         events = self._ring_buffer.since(since_seq)
         return [e.data for e in events if e.kind == "network"]
 
-    async def screenshot(self, *, full_page: bool = False) -> bytes:
+    async def screenshot(
+        self,
+        *,
+        full_page: bool = False,
+        format: str = "jpeg",
+        quality: int = 80,
+    ) -> bytes:
+        # Remote bridge screenshot; format/quality not applicable
         result = await self._send("screenshot", {})
         b64 = result.get("base64", "")
         return base64.b64decode(b64)

@@ -22,10 +22,13 @@ def _run(coro: Any) -> Any:
 @app.command("execute-js")
 def execute_js(
     code: str = typer.Argument(help="JavaScript code to evaluate."),
+    world: str = typer.Option(
+        "main", help="Execution context: 'main' (page globals) or 'utility' (isolated)."
+    ),
 ) -> None:
     """Execute JavaScript in the page context."""
     client = DaemonClient()
-    result = _run(client.evaluate(code))
+    result = _run(client.evaluate(code, world=world))
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
