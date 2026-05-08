@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +12,9 @@ if TYPE_CHECKING:
 import pytest
 import pytest_asyncio
 from aiohttp import web
+
+# Headless by default; set BROWSERCTL_TEST_HEADED=1 to run headed
+_HEADLESS = os.environ.get("BROWSERCTL_TEST_HEADED", "").lower() not in ("1", "true")
 
 # ---------------------------------------------------------------------------
 # Local HTTP server serving test HTML pages
@@ -79,7 +83,7 @@ async def browser_context(
         from browserctl.browser.cloak_ctx import launch_cloak
 
         ctx = await launch_cloak(
-            headless=True,
+            headless=_HEADLESS,
             viewport_width=1280,
             viewport_height=720,
         )
@@ -87,7 +91,7 @@ async def browser_context(
         from browserctl.browser.patchright_ctx import launch_patchright
 
         ctx = await launch_patchright(
-            headless=True,
+            headless=_HEADLESS,
             viewport_width=1280,
             viewport_height=720,
         )
@@ -102,7 +106,7 @@ async def fresh_context() -> AsyncGenerator[Any, None]:
     from browserctl.browser.patchright_ctx import launch_patchright
 
     ctx = await launch_patchright(
-        headless=True,
+        headless=_HEADLESS,
         viewport_width=1280,
         viewport_height=720,
     )
