@@ -82,6 +82,19 @@ def daemon_stop(
     output_json({"stopped": True}, seq=0)
 
 
+@app.command("cdp-endpoint")
+def daemon_cdp_endpoint(
+    host: str | None = typer.Option(None, "--host"),
+    port: int | None = typer.Option(None, "--port"),
+) -> None:
+    """Get the CDP WebSocket URL for the current browser."""
+    from browserctl.cli.client import DaemonClient
+
+    client = DaemonClient(host=host, port=port)
+    result = asyncio.run(client._request("GET", "/cdp/endpoint"))
+    output_json(result.get("data", result), seq=result.get("seq", 0))
+
+
 @app.command("health")
 def daemon_health(
     host: str | None = typer.Option(None, "--host"),

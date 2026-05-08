@@ -1,8 +1,9 @@
-"""Management tool — health, CDP endpoint, cookies."""
+"""Management tools — health, launch, CDP endpoint, cookies, site run."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+import json
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -48,3 +49,80 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         else:
             result = await bridge.request("GET", "/health")
         return bridge._format_result(result)
+
+    @mcp.tool(annotations={"destructiveHint": True, "readOnlyHint": False})
+    async def browserctl_launch(
+        headless: bool = True,
+        stealth: bool = False,
+        profile: str = "",
+    ) -> str:
+        """Start or restart the browser daemon with specific options.
+
+        Use before browserctl_navigate when you need a specific browser mode.
+        If the daemon is already running, it will be stopped and restarted.
+        If you don't call this, the daemon auto-starts with defaults on first use.
+
+        Args:
+            headless: Run browser without visible window (default True)
+            stealth: Enable CloakBrowser anti-detection mode
+            profile: Named browser profile for persistent cookies/state
+
+        Returns:
+            JSON with daemon health status including stealth_tier and profile.
+        """
+        result = await bridge.launch_daemon(
+            headless=headless, stealth=stealth, profile=profile
+        )
+        return bridge._format_result(result)
+
+    @mcp.tool(annotations={"readOnlyHint": False})
+    async def browserctl_site_run(
+        name: str,
+        args_json: str = "{}",
+    ) -> str:
+        """Run a registered site adapter by name.
+
+        Adapters are reusable automation commands for specific websites.
+        Use browserctl_status(query='health') first to check available adapters,
+        or list them via the CLI: browserctl site list.
+
+        Args:
+            name: Adapter name as 'site/command' (e.g. 'httpbin/headers')
+            args_json: Arguments as JSON object (e.g. '{"limit": 10}')
+
+        Returns:
+            JSON with the adapter execution result.
+        """
+        from browserctl.adapters.discovery import discover_adapters
+        from browserctl.adapters.executor import execute_adapter
+        from browserctl.adapters.registry import get_registry
+
+        discover_adapters()
+        parts = name.split("/", 1)
+        if len(parts) != 2:
+            return json.dumps({
+                "error": "invalid_adapter_name",
+                "hint": f"Expected 'site/command', got '{name}'",
+                "action": "use format like 'httpbin/headers'",
+            })
+
+        registry = get_registry()
+        entry = registry.get(parts[0], parts[1])
+        if entry is None:
+            available = [e.meta.full_name for e in registry.list_all()]
+            return json.dumps({
+                "error": "adapter_not_found",
+                "hint": f"No adapter '{name}'",
+                "action": f"available: {', '.join(available[:10])}",
+            })
+
+        parsed_args: dict[str, Any] = json.loads(args_json)
+        try:
+            result = await execute_adapter(entry, args=parsed_args)
+            return json.dumps({"result": result})
+        except Exception as exc:
+            return json.dumps({
+                "error": "adapter_execution_failed",
+                "hint": str(exc),
+                "action": "check adapter args and daemon status",
+            })
