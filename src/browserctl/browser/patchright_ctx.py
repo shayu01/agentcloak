@@ -18,6 +18,7 @@ from browserctl.core.errors import (
     ElementNotFoundError,
     NavigationError,
 )
+from browserctl.core.capture import CaptureEntry, CaptureStore
 from browserctl.core.seq import RingBuffer, SeqCounter, SeqEvent
 from browserctl.core.types import StealthTier
 
@@ -76,6 +77,7 @@ class PatchrightContext:
         ring_buffer: RingBuffer,
         browser_context: Any | None = None,
         proxy_url: str | None = None,
+        capture_store: CaptureStore | None = None,
     ) -> None:
         self._page = page
         self._browser = browser
@@ -84,11 +86,16 @@ class PatchrightContext:
         self._ring_buffer = ring_buffer
         self._browser_context = browser_context
         self._proxy_url = proxy_url
+        self._capture_store = capture_store or CaptureStore()
         self._backend_node_map: dict[int, int] = {}
         self._setup_network_listeners()
 
     def _setup_network_listeners(self) -> None:
         self._page.on("response", self._on_response)
+
+    @property
+    def capture_store(self) -> CaptureStore:
+        return self._capture_store
 
     def _on_response(self, response: Any) -> None:
         try:
@@ -105,6 +112,54 @@ class PatchrightContext:
                     },
                 )
             )
+            self._record_capture(request, response)
+        except Exception:
+            pass
+
+    def _record_capture(self, request: Any, response: Any) -> None:
+        try:
+            from datetime import datetime, timezone
+
+            req_headers: dict[str, str] = {}
+            try:
+                for k, v in request.headers.items():
+                    req_headers[k] = v
+            except Exception:
+                pass
+
+            resp_headers: dict[str, str] = {}
+            try:
+                for k, v in response.headers.items():
+                    resp_headers[k] = v
+            except Exception:
+                pass
+
+            content_type = resp_headers.get(
+                "content-type", resp_headers.get("Content-Type", "")
+            )
+
+            req_body: str | None = None
+            try:
+                if request.method in ("POST", "PUT", "PATCH"):
+                    req_body = request.post_data
+            except Exception:
+                pass
+
+            entry = CaptureEntry(
+                seq=self._seq_counter.value,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                method=request.method,
+                url=request.url,
+                status=response.status,
+                resource_type=request.resource_type,
+                request_headers=req_headers,
+                response_headers=resp_headers,
+                request_body=req_body,
+                response_body=None,
+                content_type=content_type,
+                duration_ms=0.0,
+            )
+            self._capture_store.add(entry)
         except Exception:
             pass
 
