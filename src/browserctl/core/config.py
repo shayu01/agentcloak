@@ -58,7 +58,9 @@ class BrowserctlConfig:
     stop_on_exit: bool = False
     log_level: str = "warning"
     domain_whitelist: list[str] = field(default_factory=list[str])
+    domain_blacklist: list[str] = field(default_factory=list[str])
     content_scan: bool = False
+    content_scan_patterns: list[str] = field(default_factory=list[str])
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -110,14 +112,12 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, BrowserctlConfig]:
         _env("IDLE_TIMEOUT_MIN")
         or browser.get("idle_timeout_min", cfg.idle_timeout_min)
     )
-    cfg.stop_on_exit = (
-        _env("STOP_ON_EXIT") or ""
-    ).lower() in ("true", "1", "yes") or browser.get(
-        "stop_on_exit", cfg.stop_on_exit
-    )
-    cfg.log_level = (
-        _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
-    )
+    cfg.stop_on_exit = (_env("STOP_ON_EXIT") or "").lower() in (
+        "true",
+        "1",
+        "yes",
+    ) or browser.get("stop_on_exit", cfg.stop_on_exit)
+    cfg.log_level = _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
 
     whitelist_env = _env("DOMAIN_WHITELIST")
     if whitelist_env is not None:
@@ -130,6 +130,24 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, BrowserctlConfig]:
     cfg.content_scan = bool(
         _env("CONTENT_SCAN") or security.get("content_scan", cfg.content_scan)
     )
+
+    blacklist_env = _env("DOMAIN_BLACKLIST")
+    if blacklist_env is not None:
+        cfg.domain_blacklist = [
+            d.strip() for d in blacklist_env.split(",") if d.strip()
+        ]
+    else:
+        cfg.domain_blacklist = security.get("domain_blacklist", cfg.domain_blacklist)
+
+    patterns_env = _env("CONTENT_SCAN_PATTERNS")
+    if patterns_env is not None:
+        cfg.content_scan_patterns = [
+            p.strip() for p in patterns_env.split(",") if p.strip()
+        ]
+    else:
+        cfg.content_scan_patterns = security.get(
+            "content_scan_patterns", cfg.content_scan_patterns
+        )
 
     return paths, cfg
 

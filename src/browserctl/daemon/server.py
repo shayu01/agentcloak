@@ -179,7 +179,7 @@ async def start(
         humanize=humanize,
         profile=profile,
     )
-    ctx = await create_context(
+    raw_ctx = await create_context(
         tier=tier,
         headless=actual_headless,
         viewport_width=cfg.viewport_width,
@@ -189,6 +189,10 @@ async def start(
         extensions=extensions,
         proxy_url=proxy_url,
     )
+
+    from browserctl.browser.secure_ctx import SecureBrowserContext
+
+    ctx = SecureBrowserContext(raw_ctx, cfg)
     app["browser_ctx"] = ctx
     app["local_proxy"] = local_proxy
     app["bridge_token"] = bridge_token

@@ -51,6 +51,9 @@ class PageSnapshot:
     mode: str
     tree_text: str
     selector_map: dict[int, ElementRef] = field(default_factory=dict[int, ElementRef])
+    security_warnings: list[dict[str, str | int]] = field(
+        default_factory=list[dict[str, str | int]]
+    )
 
 
 @dataclass

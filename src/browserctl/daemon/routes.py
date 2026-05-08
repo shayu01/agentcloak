@@ -8,7 +8,7 @@ import orjson
 from aiohttp import WSMsgType, web
 from aiohttp.web import Request, Response
 
-from browserctl.browser.patchright_ctx import PatchrightContext, screenshot_to_base64
+from browserctl.browser.patchright_ctx import screenshot_to_base64
 
 __all__ = ["setup_routes"]
 
@@ -48,9 +48,8 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/cdp/endpoint", handle_cdp_endpoint)
 
 
-def _ctx(request: Request) -> PatchrightContext:
-    ctx: PatchrightContext = request.app["browser_ctx"]
-    return ctx
+def _ctx(request: Request) -> Any:
+    return request.app["browser_ctx"]
 
 
 async def handle_health(request: Request) -> Response:
@@ -112,6 +111,8 @@ async def handle_snapshot(request: Request) -> Response:
             for k, v in snap.selector_map.items()
         },
     }
+    if snap.security_warnings:
+        data["security_warnings"] = snap.security_warnings
     return _ok(data, seq=ctx.seq)
 
 
@@ -268,17 +269,13 @@ async def handle_capture_start(request: Request) -> Response:
 async def handle_capture_stop(request: Request) -> Response:
     ctx = _ctx(request)
     ctx.capture_store.stop()
-    return _ok(
-        {"recording": False, "entries": len(ctx.capture_store)}, seq=ctx.seq
-    )
+    return _ok({"recording": False, "entries": len(ctx.capture_store)}, seq=ctx.seq)
 
 
 async def handle_capture_status(request: Request) -> Response:
     ctx = _ctx(request)
     store = ctx.capture_store
-    return _ok(
-        {"recording": store.recording, "entries": len(store)}, seq=ctx.seq
-    )
+    return _ok({"recording": store.recording, "entries": len(store)}, seq=ctx.seq)
 
 
 async def handle_capture_export(request: Request) -> Response:
@@ -331,9 +328,7 @@ async def handle_capture_analyze(request: Request) -> Response:
             }
         )
 
-    return _ok(
-        {"patterns": patterns_data, "count": len(patterns_data)}, seq=ctx.seq
-    )
+    return _ok({"patterns": patterns_data, "count": len(patterns_data)}, seq=ctx.seq)
 
 
 async def handle_capture_clear(request: Request) -> Response:
