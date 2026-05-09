@@ -253,13 +253,27 @@ async def _connect_to_daemon(hub: BridgeHub, cfg: BridgeConfig) -> None:
         delay = min(delay * 1.5, RECONNECT_MAX)
 
 
+def _get_display_host(host: str) -> str:
+    """Return actual LAN IP when binding to 0.0.0.0 (wildcard)."""
+    if host != "0.0.0.0":
+        return host
+    import socket as _socket
+    try:
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return host
+
+
 def _write_bridge_info(host: str, port: int, token: str | None) -> None:
     """Write bridge connection info to ~/.browserctl/bridge.json (atomic)."""
     info_dir = Path.home() / ".browserctl"
     info_dir.mkdir(parents=True, exist_ok=True)
     info_path = info_dir / "bridge.json"
 
-    data = {"host": host, "port": port, "token": token}
+    display_host = _get_display_host(host)
+    data = {"host": display_host, "port": port, "token": token}
 
     # Atomic write: write to tmp file in same dir, then rename
     fd, tmp_path = tempfile.mkstemp(dir=str(info_dir), suffix=".tmp")
@@ -279,15 +293,17 @@ def _write_bridge_info(host: str, port: int, token: str | None) -> None:
 
 def _print_bridge_info(host: str, port: int, token: str | None) -> None:
     """Print structured bridge connection info to stderr."""
+    display_host = _get_display_host(host)
     config_json = json.dumps(
-        {"host": host, "port": port, "token": token}, ensure_ascii=False
+        {"host": display_host, "port": port, "token": token}, ensure_ascii=False
     )
     sys.stderr.write("\n")
     sys.stderr.write("  browserctl bridge ready\n")
-    sys.stderr.write(f"    address: {host}:{port}\n")
+    sys.stderr.write(f"    address: {display_host}:{port}\n")
     sys.stderr.write(f"    token:   {token or '(none)'}\n")
     sys.stderr.write(f"    config:  {config_json}\n")
     sys.stderr.write("\n")
+    sys.stderr.flush()  # ensure output visible in background processes (BUG-9)
 
 
 async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> None:
@@ -388,6 +404,7 @@ async def _wait_for_extension(hub: BridgeHub) -> None:
     sys.stderr.write("  3. Click 'Load unpacked' and select:\n")
     sys.stderr.write(f"     {ext_dir.resolve()}\n\n")
     sys.stderr.write("  Waiting for extension to connect...\n\n")
+    sys.stderr.flush()
 
     try:
         import webbrowser

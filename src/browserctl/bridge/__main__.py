@@ -3,11 +3,18 @@
 import argparse
 import asyncio
 import logging
+import os
 import sys
 
 import structlog
 
 from browserctl.bridge.server import start_bridge
+
+# Force unbuffered I/O so stderr output is visible immediately in background
+# processes (e.g. `python -m browserctl.bridge &`).
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)  # type: ignore[union-attr]
 
 
 def main() -> None:

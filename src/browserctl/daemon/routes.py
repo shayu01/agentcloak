@@ -121,12 +121,23 @@ async def handle_screenshot(request: Request) -> Response:
 async def handle_snapshot(request: Request) -> Response:
     ctx = _ctx(request)
     mode = request.query.get("mode", "accessible")
+    max_chars_raw = request.query.get("max_chars", "0")
+    max_chars = int(max_chars_raw) if max_chars_raw.isdigit() else 0
+
     snap = await ctx.snapshot(mode=mode)
+    tree_text = snap.tree_text
+    truncated = False
+    if max_chars and len(tree_text) > max_chars:
+        tree_text = tree_text[:max_chars] + "\n[...truncated...]"
+        truncated = True
+
     data: dict[str, Any] = {
         "url": snap.url,
         "title": snap.title,
         "mode": snap.mode,
-        "tree_text": snap.tree_text,
+        "tree_text": tree_text,
+        "tree_size": len(snap.tree_text),
+        "truncated": truncated,
         "selector_map": {
             str(k): {"index": v.index, "tag": v.tag, "role": v.role, "text": v.text}
             for k, v in snap.selector_map.items()

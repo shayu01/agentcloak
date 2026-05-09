@@ -137,9 +137,18 @@ class TestBridgeServer:
         info_path = tmp_path / ".browserctl" / "bridge.json"
         assert info_path.is_file()
         data = json.loads(info_path.read_text())
-        assert data["host"] == "0.0.0.0"
+        # 0.0.0.0 is replaced with the actual LAN IP — just verify it's not 0.0.0.0
+        assert data["host"] != "0.0.0.0"
         assert data["port"] == 18766
         assert data["token"] == "test-token"
+
+    def test_write_bridge_info_specific_host(self, tmp_path: Path) -> None:
+        with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):
+            _write_bridge_info("192.168.1.10", 18765, None)
+
+        info_path = tmp_path / ".browserctl" / "bridge.json"
+        data = json.loads(info_path.read_text())
+        assert data["host"] == "192.168.1.10"  # non-wildcard host kept as-is
 
     def test_write_bridge_info_no_token(self, tmp_path: Path) -> None:
         with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):

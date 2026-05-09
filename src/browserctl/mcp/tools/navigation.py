@@ -31,7 +31,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         return bridge._format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
-    async def browserctl_snapshot(mode: str = "accessible") -> str:
+    async def browserctl_snapshot(mode: str = "accessible", max_chars: int = 0) -> str:
         """Get page content as an accessibility tree with [N] element references.
 
         This is the primary way to see what's on the page. Each interactive
@@ -43,11 +43,16 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
                   redundant Chrome-internal nodes), 'compact' (interactive
                   elements + headings only — much smaller output), 'dom'
                   (raw HTML), or 'content' (text extraction)
+            max_chars: Truncate tree_text to this many characters (0 = no limit).
+                Large pages (>40K chars) should use max_chars or 'compact' mode.
 
         Returns:
-            JSON with url, title, tree_text (the a11y tree), and selector_map.
+            JSON with url, title, tree_text, tree_size, truncated, and selector_map.
         """
-        result = await bridge.request("GET", "/snapshot", params={"mode": mode})
+        params: dict[str, str] = {"mode": mode}
+        if max_chars:
+            params["max_chars"] = str(max_chars)
+        result = await bridge.request("GET", "/snapshot", params=params)
         return bridge._format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})

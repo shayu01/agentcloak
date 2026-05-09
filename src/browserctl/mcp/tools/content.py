@@ -42,7 +42,16 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         result = await bridge.request(
             "POST", "/evaluate", json_body={"js": js, "world": world, "max_return_size": max_return_size}
         )
-        return bridge._format_result(result)
+        data = result.get("data", result)
+        # Auto-unwrap: if JS returned a JSON.stringify() string, parse it so agent
+        # receives the object directly instead of a double-encoded string.
+        actual = data.get("result")
+        if isinstance(actual, str) and len(actual) > 1 and actual[0] in ("{", "["):
+            try:
+                data = {**data, "result": json.loads(actual)}
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return json.dumps(data)
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_fetch(
