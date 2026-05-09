@@ -57,6 +57,8 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/resume", handle_resume)
     app.router.add_post("/site/run", handle_site_run)
     app.router.add_get("/site/list", handle_site_list)
+    app.router.add_post("/capture/replay", handle_capture_replay)
+    app.router.add_post("/profile/create-from-current", handle_profile_create_from_current)
 
 
 def _ctx(request: Request) -> Any:
@@ -614,3 +616,111 @@ async def handle_site_list(request: Request) -> Response:
         for e in registry.list_all()
     ]
     return _ok({"adapters": adapters, "count": len(adapters)}, seq=_ctx(request).seq)
+
+
+_HOP_BY_HOP = frozenset({
+    "host", "content-length", "connection", "transfer-encoding",
+    "keep-alive", "te", "trailer", "upgrade",
+    "proxy-authorization", "proxy-authenticate",
+})
+
+
+async def handle_capture_replay(request: Request) -> Response:
+    """Replay the most recent captured entry matching url+method."""
+    body = await request.json()
+    url: str = body.get("url", "")
+    method: str = body.get("method", "GET")
+    ctx = _ctx(request)
+
+    if not url:
+        return _json(
+            {"ok": False, "error": "missing_url", "hint": "url is required", "action": "provide a URL to replay"},
+            status=400,
+        )
+
+    entry = ctx.capture_store.find_latest(url, method)
+    if entry is None:
+        return _json(
+            {
+                "ok": False,
+                "error": "capture_entry_not_found",
+                "hint": f"No captured {method.upper()} {url}",
+                "action": "run 'capture start', navigate to trigger the request, then replay",
+            },
+            status=404,
+        )
+
+    replay_headers = {
+        k: v for k, v in entry.request_headers.items()
+        if k.lower() not in _HOP_BY_HOP
+    }
+
+    result = await ctx.fetch(
+        url,
+        method=entry.method,
+        body=entry.request_body,
+        headers=replay_headers if replay_headers else None,
+    )
+    result["replayed_from"] = {"url": entry.url, "method": entry.method, "seq": entry.seq}
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_profile_create_from_current(request: Request) -> Response:
+    """Create a profile from the current browser session's cookies."""
+    body = await request.json()
+    name: str = body.get("name", "")
+    ctx = _ctx(request)
+
+    if not name:
+        return _json(
+            {"ok": False, "error": "missing_name", "hint": "name is required"},
+            status=400,
+        )
+
+    from browserctl.core.config import load_config
+
+    paths, _ = load_config()
+    profiles_dir = paths.profiles_dir
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve name — auto-increment if exists
+    actual_name = name
+    renamed = False
+    if (profiles_dir / actual_name).exists():
+        counter = 2
+        while (profiles_dir / f"{name}-{counter}").exists():
+            counter += 1
+        actual_name = f"{name}-{counter}"
+        renamed = True
+
+    profile_dir = profiles_dir / actual_name
+
+    # Export cookies from current session (local or bridge)
+    remote_ctx = request.app.get("remote_ctx")
+    if remote_ctx is not None:
+        from browserctl.browser.remote_ctx import RemoteBridgeContext
+        assert isinstance(remote_ctx, RemoteBridgeContext)
+        cookies: list[dict[str, Any]] = await remote_ctx.send_command("cookies", {})
+    else:
+        browser_context = ctx._get_browser_context()
+        cookies = await browser_context.cookies()
+
+    # Write cookies into a new persistent profile
+    try:
+        from patchright.async_api import async_playwright
+    except ImportError:
+        from playwright.async_api import async_playwright
+
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    pw = await async_playwright().start()
+    try:
+        tmp_ctx = await pw.chromium.launch_persistent_context(str(profile_dir), headless=True)
+        await tmp_ctx.add_cookies(cookies)
+        await tmp_ctx.close()
+    finally:
+        await pw.stop()
+
+    return _ok(
+        {"profile": actual_name, "renamed": renamed, "cookie_count": len(cookies)},
+        seq=ctx.seq,
+    )

@@ -72,9 +72,21 @@ def _write_profile_meta(pdir: Path, name: str) -> None:
 @app.command("create")
 def profile_create(
     name: str = typer.Argument(help="Profile name (kebab-case)."),
+    from_current: bool = typer.Option(
+        False, "--from-current", help="Copy cookies from current browser session."
+    ),
 ) -> None:
     """Create a new browser profile directory."""
     _validate_name(name)
+
+    if from_current:
+        from browserctl.cli.client import DaemonClient
+
+        client = DaemonClient()
+        result = asyncio.run(client.profile_create_from_current(name=name))
+        output_json(result.get("data", result), seq=result.get("seq", 0))
+        return
+
     paths, _ = load_config()
     pdir = paths.profiles_dir / name
 

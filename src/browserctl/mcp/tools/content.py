@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import TYPE_CHECKING
 
@@ -28,6 +29,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Note: if evaluate triggers async requests (AJAX/fetch), those requests
         are captured asynchronously. Use browserctl_network or capture tools
         to inspect them after a short delay.
+        Supports async/await via IIFE: `(async () => { return await fn(); })()`
 
         Args:
             js: JavaScript code to evaluate (runs in page context with full DOM access)
@@ -40,17 +42,17 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with the evaluation result. Complex objects are serialized.
         """
         result = await bridge.request(
-            "POST", "/evaluate", json_body={"js": js, "world": world, "max_return_size": max_return_size}
+            "POST",
+            "/evaluate",
+            json_body={"js": js, "world": world, "max_return_size": max_return_size},
         )
         data = result.get("data", result)
         # Auto-unwrap: if JS returned a JSON.stringify() string, parse it so agent
         # receives the object directly instead of a double-encoded string.
         actual = data.get("result")
         if isinstance(actual, str) and len(actual) > 1 and actual[0] in ("{", "["):
-            try:
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
                 data = {**data, "result": json.loads(actual)}
-            except (json.JSONDecodeError, ValueError):
-                pass
         return json.dumps(data)
 
     @mcp.tool(annotations={"readOnlyHint": True})

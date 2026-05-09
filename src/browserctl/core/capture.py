@@ -123,6 +123,14 @@ class CaptureStore:
             and e.status > 0
         ]
 
+    def find_latest(self, url: str, method: str = "GET") -> CaptureEntry | None:
+        """Return the most recent entry matching url and method (case-insensitive)."""
+        method_upper = method.upper()
+        for entry in reversed(self._entries):
+            if entry.method.upper() == method_upper and entry.url == url:
+                return entry
+        return None
+
     def to_dict_list(self) -> list[dict[str, Any]]:
         return [
             {

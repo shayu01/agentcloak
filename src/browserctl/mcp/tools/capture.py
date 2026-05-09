@@ -15,25 +15,34 @@ __all__ = ["register"]
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
     async def browserctl_capture_control(
-        action: Literal["start", "stop", "clear"],
+        action: Literal["start", "stop", "clear", "replay"],
+        url: str = "",
+        method: str = "GET",
     ) -> str:
         """Control network traffic recording for API analysis.
 
         Actions:
-          start — begin recording all network requests
-          stop  — pause recording (data preserved)
-          clear — delete all captured data
+          start  — begin recording all network requests
+          stop   — pause recording (data preserved)
+          clear  — delete all captured data
+          replay — replay the most recent captured request matching url+method
 
         Args:
-            action: Recording control — start, stop, or clear
+            action: Recording control — start, stop, clear, or replay
+            url: Request URL to replay (required for 'replay' action)
+            method: HTTP method for replay (default GET)
 
         Returns:
-            JSON with recording status and entry count.
+            JSON with recording status and entry count, or replay response.
         """
         if action == "clear":
             result = await bridge.request("POST", "/capture/clear")
         elif action == "stop":
             result = await bridge.request("POST", "/capture/stop")
+        elif action == "replay":
+            result = await bridge.request(
+                "POST", "/capture/replay", json_body={"url": url, "method": method}
+            )
         else:
             result = await bridge.request("POST", "/capture/start")
         return bridge._format_result(result)

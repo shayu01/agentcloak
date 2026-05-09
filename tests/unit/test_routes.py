@@ -237,3 +237,124 @@ class TestRoutes:
         assert data["data"]["ws_endpoint"] == "ws://127.0.0.1:19222/devtools/browser/abc"
         assert data["data"]["port"] == 19222
         assert data["data"]["http_url"] == "http://127.0.0.1:19222"
+
+    @pytest.mark.asyncio
+    async def test_capture_replay_entry_not_found(self, client: TestClient) -> None:
+        resp = await client.post(
+            "/capture/replay",
+            data=orjson.dumps({"url": "https://example.com/api", "method": "GET"}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 404
+        data = orjson.loads(await resp.read())
+        assert data["error"] == "capture_entry_not_found"
+
+    @pytest.mark.asyncio
+    async def test_capture_replay_ok(self, client: TestClient) -> None:
+        from browserctl.core.capture import CaptureEntry
+        from datetime import datetime, UTC
+
+        ctx = client.app["browser_ctx"]
+        ctx._capture_store.start()
+        entry = CaptureEntry(
+            seq=1,
+            timestamp=datetime.now(tz=UTC).isoformat(),
+            method="GET",
+            url="https://example.com/api/data",
+            status=200,
+            resource_type="xhr",
+            request_headers={"authorization": "Bearer tok", "host": "example.com"},
+            response_headers={},
+            content_type="application/json",
+        )
+        ctx._capture_store.add(entry)
+
+        fetch_result = {"status": 200, "body": '{"ok":true}', "headers": {}}
+        ctx.fetch = AsyncMock(return_value=fetch_result)
+
+        resp = await client.post(
+            "/capture/replay",
+            data=orjson.dumps({"url": "https://example.com/api/data", "method": "GET"}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert data["data"]["replayed_from"]["url"] == "https://example.com/api/data"
+        assert data["data"]["replayed_from"]["seq"] == 1
+        # hop-by-hop header 'host' must be filtered out
+        call_kwargs = ctx.fetch.call_args
+        passed_headers = call_kwargs.kwargs.get("headers") or {}
+        assert "host" not in passed_headers
+        assert "authorization" in passed_headers
+
+    @pytest.mark.asyncio
+    async def test_profile_create_from_current_ok(self, tmp_path: Any, client: TestClient) -> None:
+        ctx = client.app["browser_ctx"]
+        mock_bctx = MagicMock()
+        mock_bctx.cookies = AsyncMock(return_value=[{"name": "sid", "value": "abc"}])
+        ctx._get_browser_context = MagicMock(return_value=mock_bctx)
+
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.add_cookies = AsyncMock()
+        mock_pw_ctx.close = AsyncMock()
+        mock_pw = MagicMock()
+        mock_pw.chromium.launch_persistent_context = AsyncMock(return_value=mock_pw_ctx)
+        mock_pw.stop = AsyncMock()
+        mock_apw_obj = MagicMock()
+        mock_apw_obj.start = AsyncMock(return_value=mock_pw)
+
+        mock_paths = MagicMock()
+        mock_paths.profiles_dir = tmp_path / "profiles"
+
+        with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
+             patch("patchright.async_api.async_playwright", return_value=mock_apw_obj):
+            resp = await client.post(
+                "/profile/create-from-current",
+                data=orjson.dumps({"name": "my-profile"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert data["data"]["profile"] == "my-profile"
+        assert data["data"]["renamed"] is False
+        assert data["data"]["cookie_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_profile_create_from_current_renamed(self, tmp_path: Any, client: TestClient) -> None:
+        ctx = client.app["browser_ctx"]
+        mock_bctx = MagicMock()
+        mock_bctx.cookies = AsyncMock(return_value=[])
+        ctx._get_browser_context = MagicMock(return_value=mock_bctx)
+
+        mock_pw_ctx = MagicMock()
+        mock_pw_ctx.add_cookies = AsyncMock()
+        mock_pw_ctx.close = AsyncMock()
+        mock_pw = MagicMock()
+        mock_pw.chromium.launch_persistent_context = AsyncMock(return_value=mock_pw_ctx)
+        mock_pw.stop = AsyncMock()
+        mock_apw_obj = MagicMock()
+        mock_apw_obj.start = AsyncMock(return_value=mock_pw)
+
+        profiles_dir = tmp_path / "profiles"
+        profiles_dir.mkdir()
+        (profiles_dir / "my-site").mkdir()  # pre-existing profile
+
+        mock_paths = MagicMock()
+        mock_paths.profiles_dir = profiles_dir
+
+        with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
+             patch("patchright.async_api.async_playwright", return_value=mock_apw_obj):
+            resp = await client.post(
+                "/profile/create-from-current",
+                data=orjson.dumps({"name": "my-site"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert data["data"]["profile"] == "my-site-2"
+        assert data["data"]["renamed"] is True

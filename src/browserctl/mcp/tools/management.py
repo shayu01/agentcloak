@@ -156,6 +156,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     async def browserctl_profile(
         action: Literal["create", "list", "delete"] = "list",
         name: str = "",
+        from_current: bool = False,
     ) -> str:
         """Manage browser profiles for persistent cookies and login state.
 
@@ -167,10 +168,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Args:
             action: Profile action — create, list, or delete
             name: Profile name (required for create/delete)
+            from_current: For 'create' — copy cookies from the current browser
+                session into the new profile. Useful to save login state.
+                If name already exists, auto-appends suffix (-2, -3, ...).
 
         Returns:
             list: array of profile names.
             create/delete: confirmation.
+            create with from_current: {profile, renamed, cookie_count}.
         """
         from browserctl.core.config import load_config
 
@@ -190,6 +195,12 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
                     "action": "provide a name parameter",
                 }
             )
+
+        if action == "create" and from_current:
+            result = await bridge.request(
+                "POST", "/profile/create-from-current", json_body={"name": name}
+            )
+            return bridge._format_result(result)
 
         profile_path = profiles_dir / name
         if action == "create":
