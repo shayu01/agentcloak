@@ -55,6 +55,8 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/tab/close", handle_tab_close)
     app.router.add_post("/tab/switch", handle_tab_switch)
     app.router.add_get("/resume", handle_resume)
+    app.router.add_post("/site/run", handle_site_run)
+    app.router.add_get("/site/list", handle_site_list)
 
 
 def _ctx(request: Request) -> Any:
@@ -162,9 +164,18 @@ async def handle_evaluate(request: Request) -> Response:
     body = await request.json()
     js: str = body["js"]
     world: str = body.get("world", "main")
+    max_return_size: int = int(body.get("max_return_size", 50_000))
     ctx = _ctx(request)
     result = await ctx.evaluate(js, world=world)
-    return _ok({"result": result}, seq=ctx.seq)
+
+    # Truncate large results before they exceed MCP token limits.
+    result_bytes = orjson.dumps(result)
+    total_size = len(result_bytes)
+    if total_size > max_return_size:
+        result_repr = result_bytes[:max_return_size].decode("utf-8", errors="replace") + "\n[...truncated...]"
+        return _ok({"result": result_repr, "truncated": True, "total_size": total_size}, seq=ctx.seq)
+
+    return _ok({"result": result, "truncated": False, "total_size": total_size}, seq=ctx.seq)
 
 
 async def handle_network(request: Request) -> Response:
@@ -531,3 +542,64 @@ async def handle_resume(request: Request) -> Response:
         )
     snap = writer.current_snapshot
     return _ok(snap.to_dict(), seq=_ctx(request).seq)
+
+
+async def handle_site_run(request: Request) -> Response:
+    """Run a registered adapter with the daemon's live browser context."""
+    from browserctl.adapters.discovery import discover_adapters
+    from browserctl.adapters.executor import execute_adapter
+    from browserctl.adapters.registry import get_registry
+
+    body = await request.json()
+    name: str = body.get("name", "")
+    args: dict[str, Any] = body.get("args", {})
+    ctx = _ctx(request)
+
+    parts = name.split("/", 1)
+    if len(parts) != 2:
+        return _json(
+            {
+                "ok": False,
+                "error": "invalid_adapter_name",
+                "hint": f"Expected 'site/command', got '{name}'",
+                "action": "use format like 'httpbin/headers'",
+            },
+            status=400,
+        )
+
+    discover_adapters()
+    registry = get_registry()
+    entry = registry.get(parts[0], parts[1])
+    if entry is None:
+        available = [e.meta.full_name for e in registry.list_all()]
+        return _json(
+            {
+                "ok": False,
+                "error": "adapter_not_found",
+                "hint": f"No adapter '{name}'",
+                "action": f"available: {', '.join(available[:10])}",
+            },
+            status=404,
+        )
+
+    result = await execute_adapter(entry, args=args, browser=ctx)
+    return _ok({"result": result}, seq=ctx.seq)
+
+
+async def handle_site_list(request: Request) -> Response:
+    """List all registered adapters."""
+    from browserctl.adapters.discovery import discover_adapters
+    from browserctl.adapters.registry import get_registry
+
+    discover_adapters()
+    registry = get_registry()
+    adapters = [
+        {
+            "full_name": e.meta.full_name,
+            "strategy": e.meta.strategy.value,
+            "access": e.meta.access,
+            "description": e.meta.description,
+        }
+        for e in registry.list_all()
+    ]
+    return _ok({"adapters": adapters, "count": len(adapters)}, seq=_ctx(request).seq)

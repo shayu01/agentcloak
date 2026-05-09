@@ -15,7 +15,11 @@ __all__ = ["register"]
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
-    async def browserctl_evaluate(js: str, world: str = "main") -> str:
+    async def browserctl_evaluate(
+        js: str,
+        world: str = "main",
+        max_return_size: int = 50_000,
+    ) -> str:
         """Execute JavaScript in the browser page context. Can modify page state.
 
         By default runs in the page's main world, so page globals (jQuery, Vue,
@@ -29,12 +33,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             js: JavaScript code to evaluate (runs in page context with full DOM access)
             world: Execution context — 'main' (page globals visible)
                 or 'utility' (isolated)
+            max_return_size: Max bytes of serialized result to return (default 50000).
+                Large objects are truncated with a [truncated] marker.
 
         Returns:
             JSON with the evaluation result. Complex objects are serialized.
         """
         result = await bridge.request(
-            "POST", "/evaluate", json_body={"js": js, "world": world}
+            "POST", "/evaluate", json_body={"js": js, "world": world, "max_return_size": max_return_size}
         )
         return bridge._format_result(result)
 

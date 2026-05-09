@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from browserctl.core.types import Strategy
 
@@ -211,7 +211,17 @@ class PatternAnalyzer:
 
             if entry.request_body:
                 try:
-                    body_obj: Any = json.loads(entry.request_body)
+                    req_ct = next(
+                        (v for k, v in entry.request_headers.items() if k.lower() == "content-type"),
+                        "",
+                    ).split(";", 1)[0].strip().lower()
+                    if req_ct == "application/x-www-form-urlencoded":
+                        parsed_qs = parse_qs(entry.request_body, keep_blank_values=True)
+                        body_obj: Any = {
+                            k: v[0] if len(v) == 1 else v for k, v in parsed_qs.items()
+                        }
+                    else:
+                        body_obj = json.loads(entry.request_body)
                     schema: Any = _extract_schema(body_obj)
                     if isinstance(schema, dict):
                         req_schemas.append(cast("dict[str, Any]", schema))

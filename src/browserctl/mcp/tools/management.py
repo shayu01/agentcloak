@@ -125,6 +125,8 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         """Run a registered adapter by name.
 
         Adapters are reusable automation commands for specific websites.
+        Execution happens inside the daemon so the adapter has full browser
+        context (cookies, session, etc.).
         Use browserctl_adapter_list to see available adapters.
 
         Args:
@@ -134,45 +136,11 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with the adapter execution result.
         """
-        from browserctl.adapters.discovery import discover_adapters
-        from browserctl.adapters.executor import execute_adapter
-        from browserctl.adapters.registry import get_registry
-
-        discover_adapters()
-        parts = name.split("/", 1)
-        if len(parts) != 2:
-            return json.dumps(
-                {
-                    "error": "invalid_adapter_name",
-                    "hint": f"Expected 'site/command', got '{name}'",
-                    "action": "use format like 'httpbin/headers'",
-                }
-            )
-
-        registry = get_registry()
-        entry = registry.get(parts[0], parts[1])
-        if entry is None:
-            available = [e.meta.full_name for e in registry.list_all()]
-            return json.dumps(
-                {
-                    "error": "adapter_not_found",
-                    "hint": f"No adapter '{name}'",
-                    "action": f"available: {', '.join(available[:10])}",
-                }
-            )
-
         parsed_args: dict[str, Any] = json.loads(args_json)
-        try:
-            result = await execute_adapter(entry, args=parsed_args)
-            return json.dumps({"result": result})
-        except Exception as exc:
-            return json.dumps(
-                {
-                    "error": "adapter_execution_failed",
-                    "hint": str(exc),
-                    "action": "check adapter args and daemon status",
-                }
-            )
+        result = await bridge.request(
+            "POST", "/site/run", json_body={"name": name, "args": parsed_args}
+        )
+        return bridge._format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_adapter_list() -> str:
@@ -181,23 +149,8 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with adapters array (site, name, strategy, description).
         """
-        from browserctl.adapters.discovery import discover_adapters
-        from browserctl.adapters.registry import get_registry
-
-        discover_adapters()
-        registry = get_registry()
-        adapters: list[dict[str, Any]] = []
-        for entry in registry.list_all():
-            m = entry.meta
-            adapters.append(
-                {
-                    "full_name": m.full_name,
-                    "strategy": m.strategy.value,
-                    "access": m.access,
-                    "description": m.description,
-                }
-            )
-        return json.dumps({"adapters": adapters, "count": len(adapters)})
+        result = await bridge.request("GET", "/site/list")
+        return bridge._format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": False})
     async def browserctl_profile(

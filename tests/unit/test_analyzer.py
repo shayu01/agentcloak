@@ -175,3 +175,40 @@ class TestPatternAnalyzer:
         ]
         patterns = PatternAnalyzer(entries).analyze()
         assert patterns[0].call_count > patterns[1].call_count
+
+    def test_request_schema_json_body(self) -> None:
+        entries = [
+            _api_entry(
+                method="POST",
+                request_headers={"content-type": "application/json"},
+                request_body='{"post_id": 123, "page": 1}',
+            ),
+        ]
+        patterns = PatternAnalyzer(entries).analyze()
+        assert patterns[0].request_schema is not None
+        assert "post_id" in patterns[0].request_schema
+
+    def test_request_schema_url_encoded(self) -> None:
+        entries = [
+            _api_entry(
+                method="POST",
+                request_headers={"content-type": "application/x-www-form-urlencoded"},
+                request_body="post_id=78327&index=0&i=0",
+            ),
+        ]
+        patterns = PatternAnalyzer(entries).analyze()
+        assert patterns[0].request_schema is not None
+        assert "post_id" in patterns[0].request_schema
+        assert "index" in patterns[0].request_schema
+
+    def test_request_schema_url_encoded_with_charset(self) -> None:
+        entries = [
+            _api_entry(
+                method="POST",
+                request_headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+                request_body="action=get&id=42",
+            ),
+        ]
+        patterns = PatternAnalyzer(entries).analyze()
+        assert patterns[0].request_schema is not None
+        assert "action" in patterns[0].request_schema

@@ -169,6 +169,34 @@ class TestRoutes:
         assert "requests" in data["data"]
 
     @pytest.mark.asyncio
+    async def test_evaluate_small_result(self, client: TestClient) -> None:
+        # Small result should not be truncated
+        resp = await client.post(
+            "/evaluate",
+            data=orjson.dumps({"js": "1+1"}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert data["data"]["truncated"] is False
+        assert "total_size" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_evaluate_truncation(self, client: TestClient) -> None:
+        # Artificially low max_return_size triggers truncation
+        resp = await client.post(
+            "/evaluate",
+            data=orjson.dumps({"js": "1+1", "max_return_size": 1}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert data["data"]["truncated"] is True
+        assert "[...truncated...]" in data["data"]["result"]
+
+    @pytest.mark.asyncio
     async def test_cdp_endpoint_no_port(self, client: TestClient) -> None:
         # default _mock_ctx has no _cdp_port → 503
         resp = await client.get("/cdp/endpoint")
