@@ -44,14 +44,14 @@ class TestMCPServerCreation:
 
             pytest.skip("mcp package not installed")
 
-    def test_tool_count_is_17(self) -> None:
+    def test_tool_count_is_18(self) -> None:
         try:
             from browserctl.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
-            assert len(tools) == 17, (
-                f"Expected 17 tools, got {len(tools)}: {sorted(tools.keys())}"
+            assert len(tools) == 18, (
+                f"Expected 18 tools, got {len(tools)}: {sorted(tools.keys())}"
             )
         except ImportError:
             import pytest
@@ -94,6 +94,7 @@ class TestMCPServerCreation:
                 "browserctl_adapter_run",
                 "browserctl_adapter_list",
                 "browserctl_profile",
+                "browserctl_cookies",
                 "browserctl_doctor",
                 "browserctl_tab",
                 "browserctl_resume",

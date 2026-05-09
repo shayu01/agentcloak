@@ -69,6 +69,9 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         if body is not None:
             json_body["body"] = body
         if headers_json is not None:
-            json_body["headers"] = json.loads(headers_json)
+            if isinstance(headers_json, str):
+                json_body["headers"] = json.loads(headers_json)
+            else:
+                json_body["headers"] = headers_json
         result = await bridge.request("POST", "/fetch", json_body=json_body)
         return bridge._format_result(result)

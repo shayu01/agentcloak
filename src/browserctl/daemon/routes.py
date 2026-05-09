@@ -42,6 +42,7 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/shutdown", handle_shutdown)
     app.router.add_get("/bridge/ws", handle_bridge_ws)
     app.router.add_post("/cookies/export", handle_cookies_export)
+    app.router.add_post("/cookies/import", handle_cookies_import)
     app.router.add_post("/capture/start", handle_capture_start)
     app.router.add_post("/capture/stop", handle_capture_stop)
     app.router.add_get("/capture/status", handle_capture_status)
@@ -254,30 +255,61 @@ async def handle_bridge_ws(request: Request) -> web.WebSocketResponse:
 
 
 async def handle_cookies_export(request: Request) -> Response:
-    """Export cookies from remote Chrome via bridge."""
+    """Export cookies from local browser or remote bridge."""
     body = await request.json()
     url: str | None = body.get("url")
 
     remote_ctx = request.app.get("remote_ctx")
-    if remote_ctx is None:
+    if remote_ctx is not None:
+        from browserctl.browser.remote_ctx import RemoteBridgeContext
+
+        assert isinstance(remote_ctx, RemoteBridgeContext)
+        params: dict[str, Any] = {}
+        if url:
+            params["url"] = url
+        result = await remote_ctx.send_command("cookies", params)
+        return _ok({"cookies": result}, seq=0)
+
+    ctx = _ctx(request)
+    browser_context = ctx._get_browser_context()
+    if url:
+        cookies = await browser_context.cookies(url)
+    else:
+        cookies = await browser_context.cookies()
+    serializable = [
+        {
+            "name": c.get("name", ""),
+            "value": c.get("value", ""),
+            "domain": c.get("domain", ""),
+            "path": c.get("path", "/"),
+            "expires": c.get("expires", -1),
+            "httpOnly": c.get("httpOnly", False),
+            "secure": c.get("secure", False),
+            "sameSite": c.get("sameSite", "None"),
+        }
+        for c in cookies
+    ]
+    return _ok({"cookies": serializable, "count": len(serializable)}, seq=ctx.seq)
+
+
+async def handle_cookies_import(request: Request) -> Response:
+    """Import cookies into the local browser context."""
+    body = await request.json()
+    cookies: list[dict[str, Any]] = body.get("cookies", [])
+    if not cookies:
         return _json(
             {
                 "ok": False,
-                "error": "no_bridge",
-                "hint": "No bridge connected",
-                "action": "start bridge process on the remote machine",
+                "error": "no_cookies",
+                "hint": "No cookies provided",
+                "action": "pass cookies as JSON array in 'cookies' field",
             },
-            status=503,
+            status=400,
         )
-
-    from browserctl.browser.remote_ctx import RemoteBridgeContext
-
-    assert isinstance(remote_ctx, RemoteBridgeContext)
-    params: dict[str, Any] = {}
-    if url:
-        params["url"] = url
-    result = await remote_ctx.send_command("cookies", params)
-    return _ok({"cookies": result}, seq=0)
+    ctx = _ctx(request)
+    browser_context = ctx._get_browser_context()
+    await browser_context.add_cookies(cookies)
+    return _ok({"imported": len(cookies)}, seq=ctx.seq)
 
 
 async def handle_capture_start(request: Request) -> Response:

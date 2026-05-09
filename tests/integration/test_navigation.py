@@ -16,12 +16,12 @@ async def test_navigate_local_page(browser_context: Any, local_server: str) -> N
     assert result["seq"] > 0
 
 
-async def test_screenshot_returns_png(browser_context: Any, local_server: str) -> None:
-    """Screenshot should return valid PNG bytes."""
+async def test_screenshot_default_jpeg(browser_context: Any, local_server: str) -> None:
+    """Default screenshot format is JPEG."""
     await browser_context.navigate(f"{local_server}/index.html")
     raw = await browser_context.screenshot()
     assert isinstance(raw, bytes)
-    assert raw[:4] == b"\x89PNG"
+    assert raw[:2] == b"\xff\xd8"  # JPEG magic bytes
 
 
 async def test_snapshot_accessible(browser_context: Any, local_server: str) -> None:
