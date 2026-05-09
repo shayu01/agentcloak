@@ -32,6 +32,10 @@ def _default_page(
 
 def _mock_cdp_session(eval_value: Any = "result") -> MagicMock:
     cdp = MagicMock()
+    _listeners: dict[str, list] = {}
+
+    def _on(event: str, callback: Any) -> None:
+        _listeners.setdefault(event, []).append(callback)
 
     async def _send(method: str, params: Any = None) -> Any:
         if method == "Accessibility.getFullAXTree":
@@ -41,10 +45,25 @@ def _mock_cdp_session(eval_value: Any = "result") -> MagicMock:
                     {"role": {"value": "link"}, "name": {"value": "Click me"}},
                 ]
             }
+        if method == "Runtime.enable":
+            main_ctx = {
+                "context": {
+                    "id": 1,
+                    "origin": "https://example.com",
+                    "name": "",
+                    "auxData": {"isDefault": True, "type": "default", "frameId": "F1"},
+                }
+            }
+            for cb in _listeners.get("Runtime.executionContextCreated", []):
+                cb(main_ctx)
+            return {}
+        if method == "Runtime.disable":
+            return {}
         if method == "Runtime.evaluate":
             return {"result": {"type": "object", "value": eval_value}}
         return {}
 
+    cdp.on = MagicMock(side_effect=_on)
     cdp.send = AsyncMock(side_effect=_send)
     cdp.detach = AsyncMock()
     return cdp

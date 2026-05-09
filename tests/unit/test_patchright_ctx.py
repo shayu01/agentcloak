@@ -30,14 +30,37 @@ def _ax_tree_response() -> dict[str, Any]:
 
 def _mock_cdp_session() -> MagicMock:
     cdp = MagicMock()
+    # Track event listeners so Runtime.enable can replay contexts.
+    _listeners: dict[str, list] = {}
+
+    def _on(event: str, callback: Any) -> None:
+        _listeners.setdefault(event, []).append(callback)
 
     async def _send(method: str, params: Any = None) -> Any:
         if method == "Accessibility.getFullAXTree":
             return _ax_tree_response()
+        if method == "Runtime.enable":
+            # Replay existing execution contexts — simulates CDP behavior.
+            main_ctx = {
+                "context": {
+                    "id": 1,
+                    "origin": "https://example.com",
+                    "name": "",
+                    "auxData": {
+                        "isDefault": True, "type": "default", "frameId": "F1",
+                    },
+                }
+            }
+            for cb in _listeners.get("Runtime.executionContextCreated", []):
+                cb(main_ctx)
+            return {}
+        if method == "Runtime.disable":
+            return {}
         if method == "Runtime.evaluate":
             return {"result": {"type": "string", "value": "result"}}
         return {}
 
+    cdp.on = MagicMock(side_effect=_on)
     cdp.send = AsyncMock(side_effect=_send)
     cdp.detach = AsyncMock()
     return cdp
@@ -208,8 +231,28 @@ class TestEvaluate:
     async def test_evaluate_cdp_exception_details(self) -> None:
         """CDP exceptionDetails in response raises BackendError."""
         cdp = MagicMock()
+        _listeners: dict[str, list] = {}
+
+        def _on(event: str, callback: Any) -> None:
+            _listeners.setdefault(event, []).append(callback)
 
         async def _send(method: str, params: Any = None) -> Any:
+            if method == "Runtime.enable":
+                main_ctx = {
+                    "context": {
+                        "id": 1,
+                        "origin": "",
+                        "name": "",
+                        "auxData": {
+                        "isDefault": True, "type": "default", "frameId": "F1",
+                    },
+                    }
+                }
+                for cb in _listeners.get("Runtime.executionContextCreated", []):
+                    cb(main_ctx)
+                return {}
+            if method == "Runtime.disable":
+                return {}
             if method == "Runtime.evaluate":
                 return {
                     "result": {"type": "object"},
@@ -217,6 +260,7 @@ class TestEvaluate:
                 }
             return {}
 
+        cdp.on = MagicMock(side_effect=_on)
         cdp.send = AsyncMock(side_effect=_send)
         cdp.detach = AsyncMock()
         page = _default_page()
@@ -230,12 +274,33 @@ class TestEvaluate:
     async def test_evaluate_undefined_returns_none(self) -> None:
         """CDP result type 'undefined' returns Python None."""
         cdp = MagicMock()
+        _listeners: dict[str, list] = {}
+
+        def _on(event: str, callback: Any) -> None:
+            _listeners.setdefault(event, []).append(callback)
 
         async def _send(method: str, params: Any = None) -> Any:
+            if method == "Runtime.enable":
+                main_ctx = {
+                    "context": {
+                        "id": 1,
+                        "origin": "",
+                        "name": "",
+                        "auxData": {
+                        "isDefault": True, "type": "default", "frameId": "F1",
+                    },
+                    }
+                }
+                for cb in _listeners.get("Runtime.executionContextCreated", []):
+                    cb(main_ctx)
+                return {}
+            if method == "Runtime.disable":
+                return {}
             if method == "Runtime.evaluate":
                 return {"result": {"type": "undefined"}}
             return {}
 
+        cdp.on = MagicMock(side_effect=_on)
         cdp.send = AsyncMock(side_effect=_send)
         cdp.detach = AsyncMock()
         page = _default_page()
@@ -243,6 +308,71 @@ class TestEvaluate:
         ctx = _make_ctx(page=page)
         result = await ctx.evaluate("void 0")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_evaluate_main_world_passes_context_id(self) -> None:
+        """Main world evaluate passes contextId from Runtime.enable discovery."""
+        cdp = MagicMock()
+        _listeners: dict[str, list] = {}
+        captured_params: dict[str, Any] = {}
+
+        def _on(event: str, callback: Any) -> None:
+            _listeners.setdefault(event, []).append(callback)
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Runtime.enable":
+                main_ctx = {
+                    "context": {
+                        "id": 42,
+                        "origin": "https://example.com",
+                        "name": "",
+                        "auxData": {
+                        "isDefault": True, "type": "default", "frameId": "F1",
+                    },
+                    }
+                }
+                for cb in _listeners.get("Runtime.executionContextCreated", []):
+                    cb(main_ctx)
+                return {}
+            if method == "Runtime.disable":
+                return {}
+            if method == "Runtime.evaluate":
+                captured_params.update(params or {})
+                return {"result": {"type": "string", "value": "ok"}}
+            return {}
+
+        cdp.on = MagicMock(side_effect=_on)
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        result = await ctx.evaluate("window.jQuery")
+        assert result == "ok"
+        assert captured_params["contextId"] == 42
+
+    @pytest.mark.asyncio
+    async def test_evaluate_main_world_no_context_raises(self) -> None:
+        """Raises BackendError when no main world context is found."""
+        cdp = MagicMock()
+
+        def _on(event: str, callback: Any) -> None:
+            pass  # never fires any context events
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method in ("Runtime.enable", "Runtime.disable"):
+                return {}
+            return {}
+
+        cdp.on = MagicMock(side_effect=_on)
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        with pytest.raises(BackendError) as exc_info:
+            await ctx.evaluate("1+1")
+        assert "main world" in exc_info.value.hint
 
 
 class TestScreenshot:

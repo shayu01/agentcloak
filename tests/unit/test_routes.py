@@ -18,14 +18,39 @@ from browserctl.daemon.routes import setup_routes
 
 def _mock_cdp() -> MagicMock:
     cdp = MagicMock()
-    cdp.send = AsyncMock(
-        return_value={
-            "nodes": [
-                {"role": {"value": "RootWebArea"}, "name": {"value": "Test"}},
-                {"role": {"value": "link"}, "name": {"value": "A link"}},
-            ]
-        }
-    )
+    _listeners: dict[str, list] = {}
+
+    def _on(event: str, callback: Any) -> None:
+        _listeners.setdefault(event, []).append(callback)
+
+    async def _send(method: str, params: Any = None) -> Any:
+        if method == "Accessibility.getFullAXTree":
+            return {
+                "nodes": [
+                    {"role": {"value": "RootWebArea"}, "name": {"value": "Test"}},
+                    {"role": {"value": "link"}, "name": {"value": "A link"}},
+                ]
+            }
+        if method == "Runtime.enable":
+            main_ctx = {
+                "context": {
+                    "id": 1,
+                    "origin": "https://example.com",
+                    "name": "",
+                    "auxData": {"isDefault": True, "type": "default", "frameId": "F1"},
+                }
+            }
+            for cb in _listeners.get("Runtime.executionContextCreated", []):
+                cb(main_ctx)
+            return {}
+        if method == "Runtime.disable":
+            return {}
+        if method == "Runtime.evaluate":
+            return {"result": {"type": "string", "value": "hello"}}
+        return {}
+
+    cdp.on = MagicMock(side_effect=_on)
+    cdp.send = AsyncMock(side_effect=_send)
     cdp.detach = AsyncMock()
     return cdp
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import shutil
 from datetime import UTC
 from pathlib import Path
@@ -644,20 +645,51 @@ class PatchrightContext:
         return result
 
     async def _evaluate_main_world(self, js: str) -> Any:
-        """Evaluate JS in the page's main execution context via CDP."""
+        """Evaluate JS in the page's main execution context via CDP.
+
+        The CDP session created by Playwright defaults to Playwright's utility
+        world, not the page's main world.  We call Runtime.enable to discover
+        execution contexts, pick the one with auxData.isDefault == True (the
+        page's main world), and pass its contextId to Runtime.evaluate.
+        """
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
-            # Wrap expression so statements work (e.g. `var x = 1; x`)
-            expression = js
+            # Collect execution contexts reported by Runtime.enable.
+            contexts: list[dict[str, Any]] = []
+
+            def _on_ctx(params: dict[str, Any]) -> None:
+                contexts.append(params["context"])
+
+            cdp.on("Runtime.executionContextCreated", _on_ctx)
+            await cdp.send("Runtime.enable")
+
+            # Find the page's main world (isDefault == True).
+            main_ctx_id: int | None = None
+            for ec in contexts:
+                aux: dict[str, Any] = ec.get("auxData", {})
+                if aux.get("isDefault") is True:
+                    main_ctx_id = ec["id"]
+                    break
+
+            if main_ctx_id is None:
+                raise BackendError(
+                    error="evaluate_failed",
+                    hint="could not find main world execution context",
+                    action="ensure page is loaded before evaluating",
+                )
+
             resp = await cdp.send(
                 "Runtime.evaluate",
                 {
-                    "expression": expression,
+                    "expression": js,
+                    "contextId": main_ctx_id,
                     "returnByValue": True,
                     "awaitPromise": True,
                     "userGesture": True,
                 },
             )
+        except BackendError:
+            raise
         except Exception as exc:
             raise BackendError(
                 error="evaluate_failed",
@@ -665,6 +697,8 @@ class PatchrightContext:
                 action="check JS syntax and page context",
             ) from exc
         finally:
+            with contextlib.suppress(Exception):
+                await cdp.send("Runtime.disable")
             await cdp.detach()
 
         if "exceptionDetails" in resp:
