@@ -59,7 +59,9 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/site/run", handle_site_run)
     app.router.add_get("/site/list", handle_site_list)
     app.router.add_post("/capture/replay", handle_capture_replay)
-    app.router.add_post("/profile/create-from-current", handle_profile_create_from_current)
+    app.router.add_post(
+        "/profile/create-from-current", handle_profile_create_from_current
+    )
 
 
 def _ctx(request: Request) -> Any:
@@ -186,10 +188,18 @@ async def handle_evaluate(request: Request) -> Response:
     result_bytes = orjson.dumps(result)
     total_size = len(result_bytes)
     if total_size > max_return_size:
-        result_repr = result_bytes[:max_return_size].decode("utf-8", errors="replace") + "\n[...truncated...]"
-        return _ok({"result": result_repr, "truncated": True, "total_size": total_size}, seq=ctx.seq)
+        result_repr = (
+            result_bytes[:max_return_size].decode("utf-8", errors="replace")
+            + "\n[...truncated...]"
+        )
+        return _ok(
+            {"result": result_repr, "truncated": True, "total_size": total_size},
+            seq=ctx.seq,
+        )
 
-    return _ok({"result": result, "truncated": False, "total_size": total_size}, seq=ctx.seq)
+    return _ok(
+        {"result": result, "truncated": False, "total_size": total_size}, seq=ctx.seq
+    )
 
 
 async def handle_network(request: Request) -> Response:
@@ -635,7 +645,8 @@ async def handle_capture_replay(request: Request) -> Response:
 
     if not url:
         return _json(
-            {"ok": False, "error": "missing_url", "hint": "url is required", "action": "provide a URL to replay"},
+            {"ok": False, "error": "missing_url", "hint": "url is required",
+             "action": "provide a URL to replay"},
             status=400,
         )
 
@@ -646,7 +657,7 @@ async def handle_capture_replay(request: Request) -> Response:
                 "ok": False,
                 "error": "capture_entry_not_found",
                 "hint": f"No captured {method.upper()} {url}",
-                "action": "run 'capture start', navigate to trigger the request, then replay",
+                "action": "run 'capture start', navigate to trigger the request, then replay",  # noqa: E501
             },
             status=404,
         )
@@ -662,7 +673,9 @@ async def handle_capture_replay(request: Request) -> Response:
         body=entry.request_body,
         headers=replay_headers if replay_headers else None,
     )
-    result["replayed_from"] = {"url": entry.url, "method": entry.method, "seq": entry.seq}
+    result["replayed_from"] = {
+        "url": entry.url, "method": entry.method, "seq": entry.seq
+    }
     return _ok(result, seq=ctx.seq)
 
 
