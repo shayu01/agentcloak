@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -96,6 +97,7 @@ def _mock_ctx() -> PatchrightContext:
 async def client() -> Any:
     app = web.Application(middlewares=[error_middleware])
     app["browser_ctx"] = _mock_ctx()
+    app["shutdown_event"] = asyncio.Event()
     setup_routes(app)
     async with TestClient(TestServer(app)) as c:
         yield c
@@ -295,20 +297,15 @@ class TestRoutes:
         mock_bctx.cookies = AsyncMock(return_value=[{"name": "sid", "value": "abc"}])
         ctx._get_browser_context = MagicMock(return_value=mock_bctx)
 
-        mock_pw_ctx = MagicMock()
-        mock_pw_ctx.add_cookies = AsyncMock()
-        mock_pw_ctx.close = AsyncMock()
-        mock_pw = MagicMock()
-        mock_pw.chromium.launch_persistent_context = AsyncMock(return_value=mock_pw_ctx)
-        mock_pw.stop = AsyncMock()
-        mock_apw_obj = MagicMock()
-        mock_apw_obj.start = AsyncMock(return_value=mock_pw)
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
 
         mock_paths = MagicMock()
         mock_paths.profiles_dir = tmp_path / "profiles"
 
         with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
-             patch("patchright.async_api.async_playwright", return_value=mock_apw_obj):
+             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
             resp = await client.post(
                 "/profile/create-from-current",
                 data=orjson.dumps({"name": "my-profile"}),
@@ -329,14 +326,9 @@ class TestRoutes:
         mock_bctx.cookies = AsyncMock(return_value=[])
         ctx._get_browser_context = MagicMock(return_value=mock_bctx)
 
-        mock_pw_ctx = MagicMock()
-        mock_pw_ctx.add_cookies = AsyncMock()
-        mock_pw_ctx.close = AsyncMock()
-        mock_pw = MagicMock()
-        mock_pw.chromium.launch_persistent_context = AsyncMock(return_value=mock_pw_ctx)
-        mock_pw.stop = AsyncMock()
-        mock_apw_obj = MagicMock()
-        mock_apw_obj.start = AsyncMock(return_value=mock_pw)
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
 
         profiles_dir = tmp_path / "profiles"
         profiles_dir.mkdir()
@@ -346,7 +338,7 @@ class TestRoutes:
         mock_paths.profiles_dir = profiles_dir
 
         with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
-             patch("patchright.async_api.async_playwright", return_value=mock_apw_obj):
+             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
             resp = await client.post(
                 "/profile/create-from-current",
                 data=orjson.dumps({"name": "my-site"}),
@@ -358,3 +350,40 @@ class TestRoutes:
         assert data["ok"] is True
         assert data["data"]["profile"] == "my-site-2"
         assert data["data"]["renamed"] is True
+
+    @pytest.mark.asyncio
+    async def test_shutdown_sets_event(self, client: TestClient) -> None:
+        """POST /shutdown must set shutdown_event without raising."""
+        event: asyncio.Event = client.app["shutdown_event"]
+        assert not event.is_set()
+        resp = await client.post("/shutdown")
+        assert resp.status == 200
+        assert event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_profile_create_from_current_writer_error(self, tmp_path: Any, client: TestClient) -> None:
+        """Subprocess failure returns 500 with error info."""
+        ctx = client.app["browser_ctx"]
+        mock_bctx = MagicMock()
+        mock_bctx.cookies = AsyncMock(return_value=[])
+        ctx._get_browser_context = MagicMock(return_value=mock_bctx)
+
+        mock_proc = MagicMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"launch failed"))
+        mock_proc.returncode = 1
+
+        mock_paths = MagicMock()
+        mock_paths.profiles_dir = tmp_path / "profiles"
+
+        with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
+             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
+            resp = await client.post(
+                "/profile/create-from-current",
+                data=orjson.dumps({"name": "my-profile"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+        assert resp.status == 500
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is False
+        assert data["error"] == "profile_writer_failed"

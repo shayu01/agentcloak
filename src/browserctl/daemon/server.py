@@ -232,6 +232,10 @@ async def start(
 
     app.on_shutdown.append(on_shutdown)
 
+    # Shutdown signal: set by handle_shutdown route or OS signals
+    shutdown_event = asyncio.Event()
+    app["shutdown_event"] = shutdown_event
+
     logger.info("daemon_starting", host=actual_host, port=actual_port)
 
     loop = asyncio.get_event_loop()
@@ -244,7 +248,7 @@ async def start(
     await runner.setup()
     site = web.TCPSite(runner, actual_host, actual_port)
     await site.start()
-    logger.info("daemon_ready", host=actual_host, port=actual_port)
+    logger.info("daemon_ready", host=actual_host, port=actual_port, tier=tier.value)
 
     resume_writer.start_background()
 
@@ -253,7 +257,7 @@ async def start(
         app["_idle_watchdog"] = _watchdog
 
     try:
-        await asyncio.Event().wait()
+        await shutdown_event.wait()  # woken by handle_shutdown or _graceful_shutdown
     finally:
         await runner.cleanup()
 
@@ -272,9 +276,11 @@ async def _idle_watchdog(app: web.Application, timeout: float) -> None:
 
 
 async def _graceful_shutdown(app: web.Application) -> None:
-    await app.shutdown()
-    await app.cleanup()
-    raise SystemExit(0)
+    event: asyncio.Event | None = app.get("shutdown_event")
+    if event is not None:
+        event.set()
+    else:
+        raise SystemExit(0)
 
 
 async def stop(*, host: str | None = None, port: int | None = None) -> bool:

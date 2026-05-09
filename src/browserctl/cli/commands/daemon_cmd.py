@@ -59,12 +59,18 @@ def daemon_start(
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+        from browserctl.core.config import load_config, resolve_tier
+
+        _, cfg = load_config()
+        raw_tier = "cloak" if stealth else cfg.default_tier
+        resolved_tier = resolve_tier(raw_tier)
         output_json(
             {
                 "pid": proc.pid,
                 "background": True,
                 "profile": profile,
                 "stealth": stealth,
+                "tier": resolved_tier,
             },
             seq=0,
         )

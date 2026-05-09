@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import orjson
@@ -235,8 +236,8 @@ async def handle_fetch(request: Request) -> Response:
 
 
 async def handle_shutdown(request: Request) -> Response:
-    await request.app["browser_ctx"].close()
-    raise web.GracefulExit
+    request.app["shutdown_event"].set()
+    return _ok({}, seq=0)
 
 
 def _check_bridge_token(request: Request) -> bool:
@@ -705,14 +706,12 @@ async def handle_profile_create_from_current(request: Request) -> Response:
         browser_context = ctx._get_browser_context()
         cookies = await browser_context.cookies()
 
-    # Write cookies into a new persistent profile
-    try:
-        from patchright.async_api import async_playwright
-    except ImportError:
-        from playwright.async_api import async_playwright
+    # Write cookies into a new persistent profile via subprocess (keeps daemon stable)
+    import json as _json_mod
+    import sys
 
     profile_dir.mkdir(parents=True, exist_ok=True)
-    # Prefer CloakBrowser binary → patchright/playwright executable (headless_shell may not be installed)
+
     exec_path: str | None = None
     try:
         import cloakbrowser as _cb
@@ -722,19 +721,26 @@ async def handle_profile_create_from_current(request: Request) -> Response:
     except ImportError:
         pass
 
-    pw = await async_playwright().start()
-    try:
-        if exec_path is None:
-            exec_path = pw.chromium.executable_path
-        tmp_ctx = await pw.chromium.launch_persistent_context(
-            str(profile_dir),
-            headless=True,
-            executable_path=exec_path,
+    cmd = [
+        sys.executable, "-m", "browserctl.browser._profile_writer",
+        "--profile-dir", str(profile_dir),
+        "--cookies-json", _json_mod.dumps(cookies),
+    ]
+    if exec_path:
+        cmd.extend(["--executable-path", exec_path])
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr_bytes = await proc.communicate()
+    if proc.returncode != 0:
+        err_msg = stderr_bytes.decode(errors="replace")[:300]
+        return _json(
+            {"ok": False, "error": "profile_writer_failed", "hint": err_msg},
+            status=500,
         )
-        await tmp_ctx.add_cookies(cookies)
-        await tmp_ctx.close()
-    finally:
-        await pw.stop()
 
     return _ok(
         {"profile": actual_name, "renamed": renamed, "cookie_count": len(cookies)},
