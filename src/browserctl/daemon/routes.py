@@ -712,9 +712,25 @@ async def handle_profile_create_from_current(request: Request) -> Response:
         from playwright.async_api import async_playwright
 
     profile_dir.mkdir(parents=True, exist_ok=True)
+    # Prefer CloakBrowser binary → patchright/playwright executable (headless_shell may not be installed)
+    exec_path: str | None = None
+    try:
+        import cloakbrowser as _cb
+        info = _cb.binary_info()
+        if info.get("installed"):
+            exec_path = info["binary_path"]
+    except ImportError:
+        pass
+
     pw = await async_playwright().start()
     try:
-        tmp_ctx = await pw.chromium.launch_persistent_context(str(profile_dir), headless=True)
+        if exec_path is None:
+            exec_path = pw.chromium.executable_path
+        tmp_ctx = await pw.chromium.launch_persistent_context(
+            str(profile_dir),
+            headless=True,
+            executable_path=exec_path,
+        )
         await tmp_ctx.add_cookies(cookies)
         await tmp_ctx.close()
     finally:
