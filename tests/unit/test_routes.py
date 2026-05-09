@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import orjson
 import pytest
@@ -167,3 +167,45 @@ class TestRoutes:
         data = orjson.loads(await resp.read())
         assert data["ok"] is True
         assert "requests" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_cdp_endpoint_no_port(self, client: TestClient) -> None:
+        # default _mock_ctx has no _cdp_port → 503
+        resp = await client.get("/cdp/endpoint")
+        assert resp.status == 503
+        data = orjson.loads(await resp.read())
+        assert data["error"] == "no_cdp_port"
+
+    @pytest.mark.asyncio
+    async def test_cdp_endpoint_ok(self) -> None:
+        # Build a ctx with a cdp_port set
+        ctx = _mock_ctx()
+        ctx._cdp_port = 19222
+
+        app = web.Application(middlewares=[error_middleware])
+        app["browser_ctx"] = ctx
+        setup_routes(app)
+
+        # Mock the aiohttp GET to /json/version
+        mock_get_resp = MagicMock()
+        mock_get_resp.__aenter__ = AsyncMock(return_value=mock_get_resp)
+        mock_get_resp.__aexit__ = AsyncMock(return_value=None)
+        mock_get_resp.json = AsyncMock(
+            return_value={"webSocketDebuggerUrl": "ws://127.0.0.1:19222/devtools/browser/abc"}
+        )
+
+        mock_session = MagicMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=None)
+        mock_session.get = MagicMock(return_value=mock_get_resp)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            async with TestClient(TestServer(app)) as c:
+                resp = await c.get("/cdp/endpoint")
+                assert resp.status == 200
+                data = orjson.loads(await resp.read())
+
+        assert data["ok"] is True
+        assert data["data"]["ws_endpoint"] == "ws://127.0.0.1:19222/devtools/browser/abc"
+        assert data["data"]["port"] == 19222
+        assert data["data"]["http_url"] == "http://127.0.0.1:19222"

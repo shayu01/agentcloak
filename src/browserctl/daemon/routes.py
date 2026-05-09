@@ -405,23 +405,44 @@ async def handle_capture_clear(request: Request) -> Response:
 
 async def handle_cdp_endpoint(request: Request) -> Response:
     """Return the CDP WebSocket URL for jshookmcp browser_attach."""
+    import aiohttp
+
     ctx = _ctx(request)
-    browser = getattr(ctx, "_browser", None)
-    if browser is None:
+    cdp_port: int | None = getattr(ctx, "_cdp_port", None)
+    if not cdp_port:
         return _json(
             {
                 "ok": False,
-                "error": "no_browser",
-                "hint": "No browser instance available",
-                "action": "navigate to a URL first to initialize the browser",
+                "error": "no_cdp_port",
+                "hint": "No CDP port available",
+                "action": "restart daemon — CDP port is allocated at browser launch",
             },
             status=503,
         )
+
+    http_url = f"http://127.0.0.1:{cdp_port}"
     try:
-        ws_endpoint: str = browser.contexts[0].browser.ws_endpoint  # type: ignore[union-attr]
-    except (AttributeError, IndexError):
-        ws_endpoint = getattr(browser, "ws_endpoint", "")
-    return _ok({"ws_endpoint": ws_endpoint}, seq=ctx.seq)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{http_url}/json/version", timeout=aiohttp.ClientTimeout(total=3)
+            ) as resp:
+                info = await resp.json(content_type=None)
+        ws_endpoint: str = info.get("webSocketDebuggerUrl", "")
+    except Exception as exc:
+        return _json(
+            {
+                "ok": False,
+                "error": "cdp_unreachable",
+                "hint": f"DevTools HTTP API at port {cdp_port} unreachable: {exc}",
+                "action": "ensure browser is running and CDP port is open",
+            },
+            status=503,
+        )
+
+    return _ok(
+        {"ws_endpoint": ws_endpoint, "http_url": http_url, "port": cdp_port},
+        seq=ctx.seq,
+    )
 
 
 async def handle_tab_list(request: Request) -> Response:

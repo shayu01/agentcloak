@@ -6,6 +6,7 @@ import asyncio
 import base64
 import contextlib
 import shutil
+import socket
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,13 @@ _HEADING_ROLES = frozenset({"heading", "banner", "navigation", "main", "region"}
 _SNAP_CHROMIUM = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
 
 
+def _find_free_port() -> int:
+    """Bind to port 0 and return the OS-assigned free port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def _find_chromium() -> str | None:
     if Path(_SNAP_CHROMIUM).is_file():
         return _SNAP_CHROMIUM
@@ -84,6 +92,7 @@ class PatchrightContext:
         browser_context: Any | None = None,
         proxy_url: str | None = None,
         capture_store: CaptureStore | None = None,
+        cdp_port: int | None = None,
     ) -> None:
         # Multi-tab state: map tab_id -> Page, initial page is tab 0
         self._tabs: dict[int, Any] = {0: page}
@@ -98,6 +107,7 @@ class PatchrightContext:
         self._capture_store = capture_store or CaptureStore()
         self._backend_node_map: dict[int, int] = {}
         self._pending_captures: set[asyncio.Task[None]] = set()
+        self._cdp_port: int | None = cdp_port
         self._setup_network_listeners(page)
 
     @property
@@ -996,7 +1006,9 @@ async def launch_patchright(
     pw = await async_playwright().start()
     executable = _find_chromium()
 
-    chrome_args = ["--no-sandbox"]
+    # Allocate a free port for CDP; Chrome 90+ supports pipe+port coexistence.
+    cdp_port = _find_free_port()
+    chrome_args = ["--no-sandbox", f"--remote-debugging-port={cdp_port}"]
 
     if profile_dir is not None:
         # Persistent context: cookies/localStorage/etc. persist to disk
@@ -1035,6 +1047,7 @@ async def launch_patchright(
             ring_buffer=ring_buffer,
             browser_context=browser_context,
             proxy_url=proxy_url,
+            cdp_port=cdp_port,
         )
 
     # Ephemeral context: no persistent state
@@ -1067,4 +1080,5 @@ async def launch_patchright(
         seq_counter=seq_counter,
         ring_buffer=ring_buffer,
         proxy_url=proxy_url,
+        cdp_port=cdp_port,
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from browserctl.browser.patchright_ctx import PatchrightContext
+from browserctl.browser.patchright_ctx import PatchrightContext, _find_free_port
 from browserctl.core.errors import BackendError
 from browserctl.core.seq import RingBuffer, SeqCounter
 from browserctl.core.types import StealthTier
@@ -62,6 +62,10 @@ async def launch_cloak(
 
     ext_args = _build_extension_args(extensions)
 
+    # Allocate a free port for CDP; Chrome 90+ supports pipe+port coexistence.
+    cdp_port = _find_free_port()
+    all_args = ext_args + [f"--remote-debugging-port={cdp_port}"]
+
     seq_counter = SeqCounter()
     ring_buffer = RingBuffer()
 
@@ -70,7 +74,7 @@ async def launch_cloak(
         browser_context = await cb.launch_persistent_context_async(
             user_data_dir=str(profile_dir),
             headless=headless,
-            args=ext_args or None,
+            args=all_args,
             humanize=humanize,
             backend="patchright",
             viewport={"width": viewport_width, "height": viewport_height},
@@ -87,11 +91,12 @@ async def launch_cloak(
             ring_buffer=ring_buffer,
             browser_context=browser_context,
             proxy_url=proxy_url,
+            cdp_port=cdp_port,
         )
 
     browser = await cb.launch_async(
         headless=headless,
-        args=ext_args or None,
+        args=all_args,
         humanize=humanize,
         backend="patchright",
     )
@@ -108,4 +113,5 @@ async def launch_cloak(
         seq_counter=seq_counter,
         ring_buffer=ring_buffer,
         proxy_url=proxy_url,
+        cdp_port=cdp_port,
     )
