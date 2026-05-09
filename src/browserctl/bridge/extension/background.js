@@ -1,23 +1,170 @@
 // browserctl Bridge — Chrome MV3 service worker
-// Connects to local bridge process via WebSocket, executes commands.
+// Connects to bridge process via WebSocket with auto-discovery.
 
-const BRIDGE_PORT = 18765;
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 18765;
+const PORT_RANGE_START = 18765;
+const PORT_RANGE_END = 18774;
+const PROBE_TIMEOUT = 2000;
 const RECONNECT_BASE = 1000;
 const RECONNECT_MAX = 30000;
 
 let ws = null;
 let reconnectDelay = RECONNECT_BASE;
 let attachedTabs = new Map();
+let currentHost = null;
+let currentPort = null;
+let isReconnecting = false;
 
-function connect() {
+// --- Badge ---
+
+function setBadge(state) {
+  const badges = {
+    on: { text: "ON", color: "#4caf50" },
+    off: { text: "OFF", color: "#f44336" },
+    wait: { text: "...", color: "#ff9800" },
+  };
+  const b = badges[state] || badges.off;
+  chrome.action.setBadgeText({ text: b.text });
+  chrome.action.setBadgeBackgroundColor({ color: b.color });
+}
+
+setBadge("off");
+
+// --- Config ---
+
+async function loadConfig() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      [
+        "bridge_host",
+        "bridge_port",
+        "bridge_token",
+        "last_connected_host",
+        "last_connected_port",
+      ],
+      (data) => resolve(data || {})
+    );
+  });
+}
+
+async function saveLastConnected(host, port) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(
+      { last_connected_host: host, last_connected_port: port },
+      resolve
+    );
+  });
+}
+
+// --- Auto-Discovery ---
+
+async function probeHealth(host, port) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT);
+  try {
+    const resp = await fetch(`http://${host}:${port}/health`, {
+      signal: controller.signal,
+    });
+    const data = await resp.json();
+    clearTimeout(timer);
+    if (data.ok && data.service === "browserctl-bridge") {
+      return { host, port };
+    }
+    return null;
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+async function discoverBridge(config) {
+  // Build candidate host list (ordered by priority)
+  const hosts = [];
+  if (config.last_connected_host) hosts.push(config.last_connected_host);
+  if (config.bridge_host && !hosts.includes(config.bridge_host)) {
+    hosts.push(config.bridge_host);
+  }
+  if (!hosts.includes(DEFAULT_HOST)) hosts.push(DEFAULT_HOST);
+
+  // If user set a specific port, try that first on each host
+  const userPort = config.bridge_port || null;
+
+  for (const host of hosts) {
+    // Try specific port first if configured
+    if (userPort) {
+      const result = await probeHealth(host, userPort);
+      if (result) return result;
+    }
+
+    // Try last-connected port if different from user port
+    if (
+      config.last_connected_port &&
+      config.last_connected_port !== userPort &&
+      host === config.last_connected_host
+    ) {
+      const result = await probeHealth(host, config.last_connected_port);
+      if (result) return result;
+    }
+
+    // Probe port range in parallel
+    const probes = [];
+    for (let p = PORT_RANGE_START; p <= PORT_RANGE_END; p++) {
+      if (p === userPort || p === config.last_connected_port) continue;
+      probes.push(probeHealth(host, p));
+    }
+    const results = await Promise.allSettled(probes);
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) return r.value;
+    }
+  }
+
+  // Fallback: user-configured or default (will attempt WS even without health)
+  return {
+    host: config.bridge_host || DEFAULT_HOST,
+    port: config.bridge_port || DEFAULT_PORT,
+  };
+}
+
+// --- WebSocket Connection ---
+
+async function connect() {
   if (ws && ws.readyState <= 1) return;
 
-  ws = new WebSocket(`ws://127.0.0.1:${BRIDGE_PORT}/ext`);
+  isReconnecting = true;
+  setBadge("wait");
+
+  const config = await loadConfig();
+  const target = await discoverBridge(config);
+  const wsUrl = `ws://${target.host}:${target.port}/ext`;
+
+  console.log(`[browserctl] connecting to ${wsUrl}`);
+
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (e) {
+    console.log(`[browserctl] WebSocket creation failed: ${e.message}`);
+    scheduleReconnect();
+    return;
+  }
 
   ws.onopen = () => {
-    console.log("[browserctl] connected to bridge");
+    console.log(`[browserctl] connected to bridge at ${target.host}:${target.port}`);
     reconnectDelay = RECONNECT_BASE;
-    ws.send(JSON.stringify({ type: "hello", agent: "browserctl-extension" }));
+    isReconnecting = false;
+    currentHost = target.host;
+    currentPort = target.port;
+    setBadge("on");
+
+    // Save successful connection for next time
+    saveLastConnected(target.host, target.port);
+
+    // Send hello with token if configured
+    const hello = { type: "hello", agent: "browserctl-extension" };
+    if (config.bridge_token) {
+      hello.token = config.bridge_token;
+    }
+    ws.send(JSON.stringify(hello));
   };
 
   ws.onmessage = async (event) => {
@@ -32,8 +179,13 @@ function connect() {
     ws.send(JSON.stringify({ id: msg.id, ...result }));
   };
 
-  ws.onclose = () => {
-    console.log("[browserctl] bridge disconnected, reconnecting...");
+  ws.onclose = (event) => {
+    console.log(
+      `[browserctl] bridge disconnected (code=${event.code}, reason=${event.reason})`
+    );
+    currentHost = null;
+    currentPort = null;
+    setBadge("off");
     scheduleReconnect();
   };
 
@@ -43,11 +195,43 @@ function connect() {
 }
 
 function scheduleReconnect() {
+  isReconnecting = true;
+  setBadge("wait");
   setTimeout(() => {
     reconnectDelay = Math.min(reconnectDelay * 1.5, RECONNECT_MAX);
     connect();
   }, reconnectDelay);
 }
+
+// Reconnect when config changes in options page
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  const relevant = ["bridge_host", "bridge_port", "bridge_token"];
+  if (relevant.some((k) => k in changes)) {
+    console.log("[browserctl] config changed, reconnecting...");
+    reconnectDelay = RECONNECT_BASE;
+    if (ws && ws.readyState <= 1) {
+      ws.close();
+    } else {
+      connect();
+    }
+  }
+});
+
+// Respond to status queries from options page
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "get_status") {
+    sendResponse({
+      connected: ws !== null && ws.readyState === WebSocket.OPEN,
+      reconnecting: isReconnecting,
+      host: currentHost,
+      port: currentPort,
+    });
+    return true;
+  }
+});
+
+// --- Command Handlers ---
 
 async function handleCommand(msg) {
   try {

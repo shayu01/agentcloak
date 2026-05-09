@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from browserctl.bridge.config import BridgeConfig, load_bridge_config
+from browserctl.bridge.server import _is_localhost, _write_bridge_info
 from browserctl.browser.remote_ctx import RemoteBridgeContext
 from browserctl.cli.app import app
 from browserctl.core.types import StealthTier
@@ -21,6 +22,7 @@ runner = CliRunner()
 class TestBridgeConfig:
     def test_default_config(self) -> None:
         cfg = BridgeConfig()
+        assert cfg.host == "127.0.0.1"
         assert cfg.bridge_port == 18765
         assert len(cfg.daemon_candidates) >= 1
         assert cfg.token is None
@@ -31,7 +33,19 @@ class TestBridgeConfig:
             return_value=Path("/nonexistent/bridge.toml"),
         ):
             cfg = load_bridge_config()
+            assert cfg.host == "127.0.0.1"
             assert cfg.bridge_port == 18765
+
+    def test_load_with_host(self, tmp_path: Path) -> None:
+        toml_file = tmp_path / "bridge.toml"
+        toml_file.write_text('[bridge]\nhost = "0.0.0.0"\nport = 18770\n')
+        with patch(
+            "browserctl.bridge.config._config_path",
+            return_value=toml_file,
+        ):
+            cfg = load_bridge_config()
+            assert cfg.host == "0.0.0.0"
+            assert cfg.bridge_port == 18770
 
 
 class TestRemoteBridgeContext:
@@ -108,6 +122,34 @@ class TestBridgeCLI:
         assert "extension" in path
 
 
+class TestBridgeServer:
+    def test_is_localhost(self) -> None:
+        assert _is_localhost("127.0.0.1") is True
+        assert _is_localhost("::1") is True
+        assert _is_localhost("localhost") is True
+        assert _is_localhost("192.168.1.108") is False
+        assert _is_localhost(None) is False
+
+    def test_write_bridge_info(self, tmp_path: Path) -> None:
+        with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):
+            _write_bridge_info("0.0.0.0", 18766, "test-token")
+
+        info_path = tmp_path / ".browserctl" / "bridge.json"
+        assert info_path.is_file()
+        data = json.loads(info_path.read_text())
+        assert data["host"] == "0.0.0.0"
+        assert data["port"] == 18766
+        assert data["token"] == "test-token"
+
+    def test_write_bridge_info_no_token(self, tmp_path: Path) -> None:
+        with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):
+            _write_bridge_info("127.0.0.1", 18765, None)
+
+        info_path = tmp_path / ".browserctl" / "bridge.json"
+        data = json.loads(info_path.read_text())
+        assert data["token"] is None
+
+
 class TestExtensionFiles:
     def test_manifest_exists(self) -> None:
         ext_dir = (
@@ -119,6 +161,8 @@ class TestExtensionFiles:
         )
         assert (ext_dir / "manifest.json").is_file()
         assert (ext_dir / "background.js").is_file()
+        assert (ext_dir / "options.html").is_file()
+        assert (ext_dir / "options.js").is_file()
 
     def test_manifest_valid(self) -> None:
         ext_dir = (
@@ -133,4 +177,6 @@ class TestExtensionFiles:
         assert "debugger" in data["permissions"]
         assert "cookies" in data["permissions"]
         assert "tabs" in data["permissions"]
+        assert "storage" in data["permissions"]
         assert "<all_urls>" in data["host_permissions"]
+        assert data.get("options_page") == "options.html"

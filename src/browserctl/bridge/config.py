@@ -16,6 +16,7 @@ _DEFAULT_CANDIDATES = [
 
 @dataclass
 class BridgeConfig:
+    host: str = "127.0.0.1"
     bridge_port: int = _DEFAULT_BRIDGE_PORT
     daemon_candidates: list[str] = field(
         default_factory=lambda: list(_DEFAULT_CANDIDATES)
@@ -39,6 +40,7 @@ def load_bridge_config() -> BridgeConfig:
     bridge = raw.get("bridge", {})
     daemon = raw.get("daemon", {})
 
+    cfg.host = bridge.get("host", cfg.host)
     cfg.bridge_port = bridge.get("port", cfg.bridge_port)
     cfg.token = bridge.get("token")
 

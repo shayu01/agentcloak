@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>browserctl Bridge Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .container {
+      width: 400px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 24px;
+      color: #fff;
+    }
+    .field {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: #aaa;
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      padding: 8px 12px;
+      background: #16213e;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 14px;
+      outline: none;
+    }
+    input:focus {
+      border-color: #5c6bc0;
+    }
+    input::placeholder {
+      color: #666;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    button {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #save-btn {
+      background: #5c6bc0;
+      color: #fff;
+    }
+    #save-btn:hover {
+      background: #7986cb;
+    }
+    #reset-btn {
+      background: #333;
+      color: #ccc;
+    }
+    #reset-btn:hover {
+      background: #444;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .status-connected {
+      background: #1b5e20;
+      color: #a5d6a7;
+    }
+    .status-disconnected {
+      background: #b71c1c33;
+      color: #ef9a9a;
+    }
+    .status-reconnecting {
+      background: #e65100;
+      color: #ffcc80;
+    }
+    .saved-msg {
+      color: #81c784;
+      font-size: 13px;
+      margin-top: 8px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .saved-msg.show {
+      opacity: 1;
+    }
+    .info {
+      margin-top: 16px;
+      font-size: 12px;
+      color: #777;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>browserctl Bridge</h1>
+
+    <div class="field">
+      <label>Bridge Host</label>
+      <input type="text" id="host" placeholder="127.0.0.1 (auto-detect)">
+    </div>
+
+    <div class="field">
+      <label>Bridge Port</label>
+      <input type="number" id="port" placeholder="18765 (auto-detect)" min="1" max="65535">
+    </div>
+
+    <div class="field">
+      <label>Token</label>
+      <input type="password" id="token" placeholder="Leave empty for local connections">
+    </div>
+
+    <div class="actions">
+      <button id="save-btn">Save</button>
+      <button id="reset-btn">Reset</button>
+    </div>
+
+    <div class="saved-msg" id="saved-msg">Settings saved. Reconnecting...</div>
+
+    <div class="status status-disconnected" id="status">
+      Checking connection...
+    </div>
+
+    <div class="info">
+      Leave host and port empty to use auto-detection.<br>
+      Auto-detection probes ports 18765-18774 on the configured or last-known host.<br>
+      Token is required for remote (non-localhost) connections if the bridge enforces auth.
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

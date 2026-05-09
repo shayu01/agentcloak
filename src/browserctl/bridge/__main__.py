@@ -12,7 +12,7 @@ from browserctl.bridge.server import start_bridge
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="browserctl bridge process")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
 
@@ -26,7 +26,12 @@ def main() -> None:
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
     )
 
-    asyncio.run(start_bridge(host=args.host, port=args.port))
+    # host precedence: CLI --host > bridge.toml > default 127.0.0.1
+    from browserctl.bridge.config import load_bridge_config
+
+    cfg = load_bridge_config()
+    host = args.host or cfg.host
+    asyncio.run(start_bridge(host=host, port=args.port))
 
 
 main()
