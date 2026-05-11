@@ -28,6 +28,10 @@ async def execute_adapter(
     meta = entry.meta
     log.info("adapter.execute", adapter=meta.full_name, strategy=meta.strategy)
 
+    for arg_def in meta.args:
+        if arg_def.name not in args and arg_def.default is not None:
+            args[arg_def.name] = arg_def.default
+
     if meta.needs_browser and browser is None:
         raise AgentBrowserError(
             error="adapter_no_browser",
