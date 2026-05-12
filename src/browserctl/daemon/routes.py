@@ -62,6 +62,9 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post(
         "/profile/create-from-current", handle_profile_create_from_current
     )
+    app.router.add_get("/profile/list", handle_profile_list)
+    app.router.add_post("/profile/create", handle_profile_create)
+    app.router.add_post("/profile/delete", handle_profile_delete)
 
 
 def _ctx(request: Request) -> Any:
@@ -228,7 +231,16 @@ async def handle_action(request: Request) -> Response:
     extra = {k: v for k, v in body.items() if k not in ("kind", "index", "target")}
     ctx = _ctx(request)
     result = await ctx.action(kind, target, **extra)
-    _update_resume(request, action_summary={"kind": kind, "target": target})
+    summary: dict[str, Any] = {"kind": kind, "target": target}
+    if kind in ("fill", "type"):
+        summary["text"] = extra.get("text", "")
+    elif kind == "press":
+        summary["key"] = extra.get("key", "")
+    elif kind == "scroll":
+        summary["direction"] = extra.get("direction", "down")
+    elif kind == "select":
+        summary["value"] = extra.get("value", "")
+    _update_resume(request, action_summary=summary)
     return _ok(result, seq=ctx.seq)
 
 
@@ -536,12 +548,17 @@ def _update_resume(
     ctx = _ctx(request)
 
     url = ""
+    title = ""
     tabs: list[dict[str, Any]] = []
     try:
         inner = getattr(ctx, "_inner", ctx)
         page = getattr(inner, "_page", None)
         if page is not None:
             url = str(page.url)
+            try:
+                title = str(page.title())
+            except Exception:
+                title = ""
         tab_dict: dict[int, Any] = getattr(inner, "_tabs", {})
         for tid, pg in tab_dict.items():
             try:
@@ -553,7 +570,7 @@ def _update_resume(
 
     writer.mark_dirty(
         url=url,
-        title="",
+        title=title,
         tabs=tabs,
         action_summary=action_summary,
         capture_active=ctx.capture_store.recording,
@@ -769,3 +786,57 @@ async def handle_profile_create_from_current(request: Request) -> Response:
         {"profile": actual_name, "renamed": renamed, "cookie_count": len(cookies)},
         seq=ctx.seq,
     )
+
+
+async def handle_profile_list(request: Request) -> Response:
+    from browserctl.core.config import load_config
+
+    paths, _ = load_config()
+    profiles_dir = paths.profiles_dir
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    names = sorted(d.name for d in profiles_dir.iterdir() if d.is_dir())
+    return _ok({"profiles": names, "count": len(names)})
+
+
+async def handle_profile_create(request: Request) -> Response:
+    from browserctl.core.config import load_config
+
+    body = await request.json()
+    name: str = body.get("name", "")
+    if not name:
+        return _json(
+            {"ok": False, "error": "missing_name", "hint": "Profile name is required", "action": "provide 'name' parameter"},
+            status=400,
+        )
+    paths, _ = load_config()
+    profile_path = paths.profiles_dir / name
+    if profile_path.exists():
+        return _json(
+            {"ok": False, "error": "profile_exists", "hint": f"Profile '{name}' already exists", "action": "use a different name or delete first"},
+            status=409,
+        )
+    profile_path.mkdir(parents=True)
+    return _ok({"created": name})
+
+
+async def handle_profile_delete(request: Request) -> Response:
+    import shutil
+
+    from browserctl.core.config import load_config
+
+    body = await request.json()
+    name: str = body.get("name", "")
+    if not name:
+        return _json(
+            {"ok": False, "error": "missing_name", "hint": "Profile name is required", "action": "provide 'name' parameter"},
+            status=400,
+        )
+    paths, _ = load_config()
+    profile_path = paths.profiles_dir / name
+    if not profile_path.exists():
+        return _json(
+            {"ok": False, "error": "profile_not_found", "hint": f"Profile '{name}' does not exist", "action": "use profile list to see available profiles"},
+            status=404,
+        )
+    shutil.rmtree(profile_path)
+    return _ok({"deleted": name})

@@ -562,8 +562,8 @@ class PatchrightContext:
         if index is None:
             raise ElementNotFoundError(
                 error="element_not_found",
-                hint="click requires --index N or --x/--y coordinates",
-                action="provide an element index or coordinate pair",
+                hint="click requires a target element",
+                action="provide 'target' as '[N]' ref from snapshot, or use (x, y) coordinates",
             )
 
         element = await self._resolve_element(index)
@@ -575,8 +575,8 @@ class PatchrightContext:
         if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
-                hint="fill requires --index N",
-                action="provide an element index from the selector_map",
+                hint="fill requires a target element",
+                action="provide 'target' as '[N]' ref from snapshot",
             )
         index = int(target)
         text = kw.get("text", "")
@@ -589,8 +589,8 @@ class PatchrightContext:
         if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
-                hint="type requires --index N",
-                action="provide an element index from the selector_map",
+                hint="type requires a target element",
+                action="provide 'target' as '[N]' ref from snapshot",
             )
         index = int(target)
         text = kw.get("text", "")
@@ -635,8 +635,8 @@ class PatchrightContext:
         if index is None:
             raise ElementNotFoundError(
                 error="element_not_found",
-                hint="hover requires --index N or --x/--y coordinates",
-                action="provide an element index or coordinate pair",
+                hint="hover requires a target element",
+                action="provide 'target' as '[N]' ref from snapshot, or use (x, y) coordinates",
             )
 
         element = await self._resolve_element(index)
@@ -648,8 +648,8 @@ class PatchrightContext:
         if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
-                hint="select requires --index N",
-                action="provide an element index from the selector_map",
+                hint="select requires a target element",
+                action="provide 'target' as '[N]' ref from snapshot",
             )
         index = int(target)
         value = kw.get("value")
@@ -663,8 +663,8 @@ class PatchrightContext:
         else:
             raise BackendError(
                 error="select_missing_option",
-                hint="select requires --value or --label",
-                action="provide --value 'option_value' or --label 'Option Text'",
+                hint="select requires 'value' or 'label' parameter",
+                action="provide 'value' (option value) or 'label' (visible text)",
             )
 
         ref = self._get_ref(index)
@@ -681,8 +681,8 @@ class PatchrightContext:
         if not key:
             raise BackendError(
                 error="press_missing_key",
-                hint="press requires --key argument",
-                action="provide --key 'Enter', --key 'Escape', etc.",
+                hint="press requires 'key' parameter",
+                action="provide 'key' (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown')",
             )
         if target:
             index = int(target)
@@ -899,7 +899,7 @@ class PatchrightContext:
             raise BrowserTimeoutError(
                 error="fetch_timeout",
                 hint=f"HTTP request to {url} timed out after {timeout}s",
-                action="retry with a longer --timeout or check the URL",
+                action="retry with a larger 'timeout' value, or check the URL",
             ) from exc
         except httpx.RequestError as exc:
             raise BackendError(
@@ -956,10 +956,28 @@ class PatchrightContext:
             )
         )
 
+        _useful_headers = {
+            "content-type", "content-length", "content-encoding",
+            "set-cookie", "location", "cache-control",
+            "x-ratelimit-remaining", "x-ratelimit-limit",
+            "retry-after", "www-authenticate",
+        }
+        filtered_headers = {
+            k: v for k, v in resp.headers.items()
+            if k.lower() in _useful_headers
+        }
+
+        parsed_body: Any = resp_body
+        if body_encoding == "text" and "json" in content_type:
+            import contextlib
+            import json as _json
+            with contextlib.suppress(Exception):
+                parsed_body = _json.loads(resp_body if isinstance(resp_body, str) else resp.text)
+
         return {
             "status": resp.status_code,
-            "headers": dict(resp.headers),
-            "body": resp_body,
+            "headers": filtered_headers,
+            "body": parsed_body,
             "body_encoding": body_encoding,
             "truncated": truncated,
             "content_type": content_type,
