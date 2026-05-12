@@ -134,6 +134,40 @@ def _register_commands() -> None:
 _register_commands()
 
 
+def _register_shortcuts() -> None:
+    """Top-level shortcut commands (bctl open, bctl snapshot, bctl click, etc.)."""
+    from browserctl.cli.commands.action import (
+        do_click,
+        do_fill,
+        do_hover,
+        do_press,
+        do_scroll,
+        do_select,
+        do_type,
+    )
+    from browserctl.cli.commands.browser import (
+        browser_open,
+        browser_resume,
+        browser_screenshot,
+        browser_snapshot,
+    )
+
+    app.command("open", hidden=True)(browser_open)
+    app.command("snapshot", hidden=True)(browser_snapshot)
+    app.command("screenshot", hidden=True)(browser_screenshot)
+    app.command("resume", hidden=True)(browser_resume)
+    app.command("click", hidden=True)(do_click)
+    app.command("fill", hidden=True)(do_fill)
+    app.command("type", hidden=True)(do_type)
+    app.command("press", hidden=True)(do_press)
+    app.command("scroll", hidden=True)(do_scroll)
+    app.command("hover", hidden=True)(do_hover)
+    app.command("select", hidden=True)(do_select)
+
+
+_register_shortcuts()
+
+
 def main() -> None:
     from browserctl.cli.output import output_error
 
