@@ -105,7 +105,7 @@ async def handle_navigate(request: Request) -> Response:
     timeout: float = body.get("timeout", 30.0)
     ctx = _ctx(request)
     result = await ctx.navigate(url, timeout=timeout)
-    _update_resume(request, action_summary={"kind": "navigate", "url": url})
+    await _update_resume(request, action_summary={"kind": "navigate", "url": url})
     return _ok(result, seq=ctx.seq)
 
 
@@ -240,7 +240,7 @@ async def handle_action(request: Request) -> Response:
         summary["direction"] = extra.get("direction", "down")
     elif kind == "select":
         summary["value"] = extra.get("value", "")
-    _update_resume(request, action_summary=summary)
+    await _update_resume(request, action_summary=summary)
     return _ok(result, seq=ctx.seq)
 
 
@@ -536,7 +536,7 @@ async def handle_tab_switch(request: Request) -> Response:
     return _ok(result, seq=ctx.seq)
 
 
-def _update_resume(
+async def _update_resume(
     request: Request,
     *,
     action_summary: dict[str, Any] | None = None,
@@ -556,7 +556,7 @@ def _update_resume(
         if page is not None:
             url = str(page.url)
             try:
-                title = str(page.title())
+                title = str(await page.title())
             except Exception:
                 title = ""
         tab_dict: dict[int, Any] = getattr(inner, "_tabs", {})
@@ -795,7 +795,7 @@ async def handle_profile_list(request: Request) -> Response:
     profiles_dir = paths.profiles_dir
     profiles_dir.mkdir(parents=True, exist_ok=True)
     names = sorted(d.name for d in profiles_dir.iterdir() if d.is_dir())
-    return _ok({"profiles": names, "count": len(names)})
+    return _json({"ok": True, "profiles": names, "count": len(names)})
 
 
 async def handle_profile_create(request: Request) -> Response:
@@ -816,7 +816,7 @@ async def handle_profile_create(request: Request) -> Response:
             status=409,
         )
     profile_path.mkdir(parents=True)
-    return _ok({"created": name})
+    return _json({"ok": True, "created": name})
 
 
 async def handle_profile_delete(request: Request) -> Response:
@@ -839,4 +839,4 @@ async def handle_profile_delete(request: Request) -> Response:
             status=404,
         )
     shutil.rmtree(profile_path)
-    return _ok({"deleted": name})
+    return _json({"ok": True, "deleted": name})
