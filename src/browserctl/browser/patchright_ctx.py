@@ -520,6 +520,11 @@ class PatchrightContext:
 
         with contextlib.suppress(Exception):
             await self._page.wait_for_load_state("domcontentloaded", timeout=800)
+        with contextlib.suppress(Exception):
+            await self._page.evaluate(
+                "document.querySelectorAll('[data-bctl-ref]')"
+                ".forEach(e=>e.removeAttribute('data-bctl-ref'))"
+            )
 
         post_url = self._page.url
         caused_navigation = post_url != pre_url
