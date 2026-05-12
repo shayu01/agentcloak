@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import structlog
 
 from browserctl.browser.state import ElementRef, PageSnapshot, TabInfo
 from browserctl.core.capture import CaptureEntry, CaptureStore
@@ -26,6 +27,8 @@ from browserctl.core.seq import RingBuffer, SeqCounter, SeqEvent
 from browserctl.core.types import StealthTier
 
 __all__ = ["PatchrightContext"]
+
+logger = structlog.get_logger()
 
 _INTERACTIVE_ROLES = frozenset(
     {
@@ -106,6 +109,7 @@ class PatchrightContext:
         self._proxy_url = proxy_url
         self._capture_store = capture_store or CaptureStore()
         self._backend_node_map: dict[int, int] = {}
+        self._selector_map: dict[int, ElementRef] = {}
         self._pending_captures: set[asyncio.Task[None]] = set()
         self._cdp_port: int | None = cdp_port
         self._setup_network_listeners(page)
@@ -297,6 +301,7 @@ class PatchrightContext:
                 lines.append(f"{role}: {name}")
 
         self._backend_node_map = backend_node_map
+        self._selector_map = selector_map
 
         return PageSnapshot(
             seq=self._seq_counter.value,
@@ -338,6 +343,7 @@ class PatchrightContext:
                 lines.append(f"{role}: {name}")
 
         self._backend_node_map = backend_node_map
+        self._selector_map = selector_map
 
         return PageSnapshot(
             seq=self._seq_counter.value,
@@ -372,10 +378,19 @@ class PatchrightContext:
         )
 
     async def _resolve_element(self, index: int) -> Any:
-        """Resolve a selector_map index to a Playwright Locator."""
-        snap = await self.snapshot(mode="accessible")
-        if index not in snap.selector_map:
-            count = len(snap.selector_map)
+        """Resolve a selector_map index to a Playwright ElementHandle.
+
+        Uses backendDOMNodeId from the last snapshot for exact matching.
+        Falls back to role+name locator if CDP resolve fails.
+        """
+        if not self._selector_map:
+            raise ElementNotFoundError(
+                error="no_snapshot",
+                hint="No snapshot taken yet — selector_map is empty",
+                action="run 'snapshot' first to populate the selector_map",
+            )
+        if index not in self._selector_map:
+            count = len(self._selector_map)
             raise ElementNotFoundError(
                 error="element_not_found",
                 hint=f"Index [{index}] not in selector_map ({count} entries)",
@@ -383,25 +398,97 @@ class PatchrightContext:
                 "selector_map, then retry with a valid index",
             )
 
-        ref = snap.selector_map[index]
+        backend_node_id = self._backend_node_map.get(index)
+        if backend_node_id is not None:
+            try:
+                return await self._resolve_by_backend_node(backend_node_id, index)
+            except Exception as exc:
+                logger.debug(
+                    "cdp_resolve_fallback",
+                    index=index,
+                    backend_node_id=backend_node_id,
+                    error=str(exc),
+                )
+
+        return await self._resolve_by_role(index)
+
+    async def _resolve_by_backend_node(
+        self, backend_node_id: int, index: int
+    ) -> Any:
+        """Resolve via CDP backendDOMNodeId — exact match, no re-snapshot."""
+        marker = f"__bctl_{index}"
+        cdp = await self._page.context.new_cdp_session(self._page)
+        try:
+            result = await cdp.send(
+                "DOM.resolveNode", {"backendNodeId": backend_node_id}
+            )
+            object_id = result["object"]["objectId"]
+            await cdp.send(
+                "Runtime.callFunctionOn",
+                {
+                    "objectId": object_id,
+                    "functionDeclaration": "function() {"
+                    f" this.setAttribute('data-bctl-ref','{marker}');"
+                    " }",
+                },
+            )
+        finally:
+            await cdp.detach()
+        locator = self._page.locator(f'[data-bctl-ref="{marker}"]')
+        if await locator.count() == 0:
+            raise BackendError(
+                error="element_resolve_failed",
+                hint=f"CDP resolved [{index}] but locator found nothing",
+                action="the element may have been removed — run 'snapshot' to refresh",
+            )
+        return locator.first
+
+    async def _resolve_by_role(self, index: int) -> Any:
+        """Fallback: resolve via role + name from cached selector_map."""
+        ref = self._selector_map[index]
         role_name = ref.role.lower()
 
-        # Primary: role + name (exact match for the AX tree entry)
         if ref.text:
             locator = self._page.get_by_role(role_name, name=ref.text, exact=False)
             try:
-                if await locator.count() > 0:
+                count = await locator.count()
+                if count > 0:
+                    if count > 1:
+                        logger.debug(
+                            "role_resolve_ambiguous",
+                            index=index,
+                            role=role_name,
+                            name=ref.text,
+                            matches=count,
+                        )
                     return locator.first
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    "role_name_resolve_failed",
+                    index=index,
+                    role=role_name,
+                    name=ref.text,
+                    error=str(exc),
+                )
 
-        # Fallback: role only (less precise but still valid)
         locator = self._page.get_by_role(role_name)
         try:
-            if await locator.count() > 0:
+            count = await locator.count()
+            if count > 0:
+                logger.debug(
+                    "role_only_resolve",
+                    index=index,
+                    role=role_name,
+                    matches=count,
+                )
                 return locator.first
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "role_only_resolve_failed",
+                index=index,
+                role=role_name,
+                error=str(exc),
+            )
 
         raise BackendError(
             error="element_resolve_failed",
@@ -430,6 +517,9 @@ class PatchrightContext:
         }[kind]
 
         result = await handler(target, **kw)
+
+        with contextlib.suppress(Exception):
+            await self._page.wait_for_load_state("domcontentloaded", timeout=800)
 
         post_url = self._page.url
         caused_navigation = post_url != pre_url
@@ -581,7 +671,7 @@ class PatchrightContext:
             "element": ref,
         }
 
-    async def _action_press(self, _target: str, **kw: Any) -> dict[str, Any]:
+    async def _action_press(self, target: str, **kw: Any) -> dict[str, Any]:
         key = kw.get("key", "")
         if not key:
             raise BackendError(
@@ -589,6 +679,12 @@ class PatchrightContext:
                 hint="press requires --key argument",
                 action="provide --key 'Enter', --key 'Escape', etc.",
             )
+        if target:
+            index = int(target)
+            element = await self._resolve_element(index)
+            await element.press(str(key))
+            ref = self._get_ref(index)
+            return {"pressed": True, "key": key, "index": index, "element": ref}
         await self._page.keyboard.press(str(key))
         return {"pressed": True, "key": key}
 
