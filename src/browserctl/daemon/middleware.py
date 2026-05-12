@@ -41,7 +41,7 @@ async def error_middleware(
                 "ok": False,
                 "error": "internal_error",
                 "hint": str(exc),
-                "action": "check daemon logs for details",
+                "action": "retry the request, or run 'snapshot' to refresh page state",
             },
             status=500,
         )

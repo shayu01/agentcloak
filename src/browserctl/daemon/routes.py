@@ -129,6 +129,10 @@ async def handle_snapshot(request: Request) -> Response:
     max_chars_raw = request.query.get("max_chars", "0")
     max_chars = int(max_chars_raw) if max_chars_raw.isdigit() else 0
 
+    include_sm = request.query.get(
+        "include_selector_map", "true"
+    ).lower() != "false"
+
     snap = await ctx.snapshot(mode=mode)
     tree_text = snap.tree_text
     truncated = False
@@ -143,11 +147,17 @@ async def handle_snapshot(request: Request) -> Response:
         "tree_text": tree_text,
         "tree_size": len(snap.tree_text),
         "truncated": truncated,
-        "selector_map": {
-            str(k): {"index": v.index, "tag": v.tag, "role": v.role, "text": v.text}
-            for k, v in snap.selector_map.items()
-        },
     }
+    if include_sm:
+        data["selector_map"] = {
+            str(k): {
+                "index": v.index,
+                "tag": v.tag,
+                "role": v.role,
+                "text": v.text,
+            }
+            for k, v in snap.selector_map.items()
+        }
     if snap.security_warnings:
         data["security_warnings"] = snap.security_warnings
     return _ok(data, seq=ctx.seq)

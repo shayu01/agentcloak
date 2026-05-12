@@ -51,7 +51,10 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with url, title, tree_text, tree_size, truncated, and selector_map.
         """
-        params: dict[str, str] = {"mode": mode}
+        params: dict[str, str] = {
+            "mode": mode,
+            "include_selector_map": "false",
+        }
         if max_chars:
             params["max_chars"] = str(max_chars)
         result = await bridge.request("GET", "/snapshot", params=params)
