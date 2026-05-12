@@ -24,12 +24,14 @@ def _run(coro: Any) -> Any:
 @app.command("click")
 def do_click(
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
+    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     x: float | None = typer.Option(None, "--x", help="X coordinate (fallback)."),
     y: float | None = typer.Option(None, "--y", help="Y coordinate (fallback)."),
     button: str = typer.Option("left", "--button", help="Mouse button."),
     click_count: int = typer.Option(1, "--click-count", help="Number of clicks."),
 ) -> None:
     """Click an element by index or coordinates."""
+    resolved = target if index is None else index
     client = DaemonClient()
     kwargs: dict[str, Any] = {
         "button": button,
@@ -39,7 +41,7 @@ def do_click(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    result = _run(client.action("click", index=index, **kwargs))
+    result = _run(client.action("click", index=resolved, **kwargs))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -47,12 +49,17 @@ def do_click(
 
 @app.command("fill")
 def do_fill(
-    index: int = typer.Option(..., "--index", "-i", help="Element index [N]."),
+    index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
+    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     text: str = typer.Option(..., "--text", "-t", help="Text to fill."),
 ) -> None:
     """Fill an input element (clear then set value)."""
+    resolved = target if index is None else index
+    if resolved is None:
+        typer.echo("Error: provide --target or --index", err=True)
+        raise typer.Exit(2)
     client = DaemonClient()
-    result = _run(client.action("fill", index=index, text=text))
+    result = _run(client.action("fill", index=resolved, text=text))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -60,13 +67,18 @@ def do_fill(
 
 @app.command("type")
 def do_type(
-    index: int = typer.Option(..., "--index", "-i", help="Element index [N]."),
+    index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
+    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     text: str = typer.Option(..., "--text", "-t", help="Text to type."),
     delay: float = typer.Option(0, "--delay", help="Delay between keystrokes in ms."),
 ) -> None:
     """Type text character by character (per-key events)."""
+    resolved = target if index is None else index
+    if resolved is None:
+        typer.echo("Error: provide --target or --index", err=True)
+        raise typer.Exit(2)
     client = DaemonClient()
-    result = _run(client.action("type", index=index, text=text, delay=delay))
+    result = _run(client.action("type", index=resolved, text=text, delay=delay))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -75,17 +87,19 @@ def do_type(
 @app.command("scroll")
 def do_scroll(
     index: int | None = typer.Option(None, "--index", "-i", help="Element to scroll."),
+    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     direction: str = typer.Option(
         "down", "--direction", "-d", help="up/down/left/right."
     ),
     amount: int = typer.Option(300, "--amount", help="Scroll amount in pixels."),
 ) -> None:
     """Scroll the page or an element into view."""
+    resolved = target if index is None else index
     client = DaemonClient()
     result = _run(
         client.action(
             "scroll",
-            index=index,
+            index=resolved,
             direction=direction,
             amount=amount,
         )
@@ -98,17 +112,19 @@ def do_scroll(
 @app.command("hover")
 def do_hover(
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
+    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     x: float | None = typer.Option(None, "--x", help="X coordinate (fallback)."),
     y: float | None = typer.Option(None, "--y", help="Y coordinate (fallback)."),
 ) -> None:
     """Hover over an element or coordinates."""
+    resolved = target if index is None else index
     client = DaemonClient()
     kwargs: dict[str, Any] = {}
     if x is not None:
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    result = _run(client.action("hover", index=index, **kwargs))
+    result = _run(client.action("hover", index=resolved, **kwargs))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -116,18 +132,23 @@ def do_hover(
 
 @app.command("select")
 def do_select(
-    index: int = typer.Option(..., "--index", "-i", help="Element index [N]."),
+    index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
+    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     value: str | None = typer.Option(None, "--value", help="Option value."),
     label: str | None = typer.Option(None, "--label", help="Option display text."),
 ) -> None:
     """Select a dropdown option."""
+    resolved = target if index is None else index
+    if resolved is None:
+        typer.echo("Error: provide --target or --index", err=True)
+        raise typer.Exit(2)
     client = DaemonClient()
     kwargs: dict[str, Any] = {}
     if value is not None:
         kwargs["value"] = value
     if label is not None:
         kwargs["label"] = label
-    result = _run(client.action("select", index=index, **kwargs))
+    result = _run(client.action("select", index=resolved, **kwargs))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -136,10 +157,13 @@ def do_select(
 @app.command("press")
 def do_press(
     key: str = typer.Option(..., "--key", "-k", help="Key to press (Enter, etc.)."),
+    target: int | None = typer.Option(
+        None, "--target", help="Element index [N] to focus before pressing."
+    ),
 ) -> None:
     """Press a keyboard key."""
     client = DaemonClient()
-    result = _run(client.action("press", key=key))
+    result = _run(client.action("press", index=target, key=key))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)

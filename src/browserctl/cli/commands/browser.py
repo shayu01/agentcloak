@@ -75,10 +75,15 @@ def browser_snapshot(
         "-m",
         help="Snapshot mode: accessible, compact, dom, content.",
     ),
+    max_chars: int = typer.Option(
+        30000,
+        "--max-chars",
+        help="Truncate tree_text to this many characters (0 = no limit).",
+    ),
 ) -> None:
     """Get page snapshot (accessible tree, DOM, or text content)."""
     client = DaemonClient()
-    result = _run(client.snapshot(mode=mode))
+    result = _run(client.snapshot(mode=mode, max_chars=max_chars))
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

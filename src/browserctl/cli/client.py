@@ -201,8 +201,13 @@ class DaemonClient:
             params["full_page"] = "true"
         return await self._request("GET", "/screenshot", params=params)
 
-    async def snapshot(self, *, mode: str = "accessible") -> dict[str, Any]:
-        return await self._request("GET", "/snapshot", params={"mode": mode})
+    async def snapshot(
+        self, *, mode: str = "accessible", max_chars: int = 0
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {"mode": mode}
+        if max_chars:
+            params["max_chars"] = str(max_chars)
+        return await self._request("GET", "/snapshot", params=params)
 
     async def state(self) -> dict[str, Any]:
         return await self._request("GET", "/state")
