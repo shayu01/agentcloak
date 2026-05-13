@@ -1,10 +1,25 @@
 [project]
 name = "browserctl"
 version = "0.1.0"
-description = "Browser CLI toolchain for AI agents"
+description = "Browser automation toolkit for AI agents — CLI + MCP dual interface, multi-backend stealth, remote bridge"
 requires-python = ">=3.12"
 license = "MIT"
+readme = "README.md"
 authors = [{ name = "shayu", email = "deadshark_c137@proton.me" }]
+keywords = [
+    "browser", "automation", "ai-agent", "cli", "mcp",
+    "playwright", "stealth", "web-scraping", "accessibility",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 dependencies = [
     "typer>=0.15",
     "orjson>=3.10",
@@ -36,6 +51,12 @@ dev = [
     "pyright>=1.1",
     "ruff>=0.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/shayu01/browserctl"
+Repository = "https://github.com/shayu01/browserctl"
+Issues = "https://github.com/shayu01/browserctl/issues"
+Changelog = "https://github.com/shayu01/browserctl/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
