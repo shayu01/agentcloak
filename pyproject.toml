@@ -5,7 +5,7 @@ description = "Browser automation toolkit for AI agents — CLI + MCP dual inter
 requires-python = ">=3.12"
 license = "MIT"
 readme = "README.md"
-authors = [{ name = "shayu", email = "deadshark_c137@proton.me" }]
+authors = [{ name = "shayu", email = "lincmars@gmail.com" }]
 keywords = [
     "browser", "automation", "ai-agent", "cli", "mcp",
     "playwright", "stealth", "web-scraping", "accessibility",
