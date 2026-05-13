@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from browserctl.mcp.client import DaemonBridge
+from agentcloak.mcp.client import DaemonBridge
 
 
 class TestDaemonBridge:
@@ -35,7 +35,7 @@ class TestMCPServerCreation:
         try:
             from mcp.server.fastmcp import FastMCP
 
-            from browserctl.mcp.server import create_server
+            from agentcloak.mcp.server import create_server
 
             mcp = create_server()
             assert isinstance(mcp, FastMCP)
@@ -46,7 +46,7 @@ class TestMCPServerCreation:
 
     def test_tool_count_is_18(self) -> None:
         try:
-            from browserctl.mcp.server import create_server
+            from agentcloak.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
@@ -60,13 +60,13 @@ class TestMCPServerCreation:
 
     def test_tool_names_have_prefix(self) -> None:
         try:
-            from browserctl.mcp.server import create_server
+            from agentcloak.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
             for name in tools:
-                assert name.startswith("browserctl_"), (
-                    f"Tool '{name}' missing browserctl_ prefix"
+                assert name.startswith("agentcloak_"), (
+                    f"Tool '{name}' missing agentcloak_ prefix"
                 )
         except ImportError:
             import pytest
@@ -75,29 +75,29 @@ class TestMCPServerCreation:
 
     def test_expected_tools_present(self) -> None:
         try:
-            from browserctl.mcp.server import create_server
+            from agentcloak.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
             expected = {
-                "browserctl_navigate",
-                "browserctl_snapshot",
-                "browserctl_screenshot",
-                "browserctl_action",
-                "browserctl_evaluate",
-                "browserctl_fetch",
-                "browserctl_network",
-                "browserctl_capture_control",
-                "browserctl_capture_query",
-                "browserctl_status",
-                "browserctl_launch",
-                "browserctl_adapter_run",
-                "browserctl_adapter_list",
-                "browserctl_profile",
-                "browserctl_cookies",
-                "browserctl_doctor",
-                "browserctl_tab",
-                "browserctl_resume",
+                "agentcloak_navigate",
+                "agentcloak_snapshot",
+                "agentcloak_screenshot",
+                "agentcloak_action",
+                "agentcloak_evaluate",
+                "agentcloak_fetch",
+                "agentcloak_network",
+                "agentcloak_capture_control",
+                "agentcloak_capture_query",
+                "agentcloak_status",
+                "agentcloak_launch",
+                "agentcloak_adapter_run",
+                "agentcloak_adapter_list",
+                "agentcloak_profile",
+                "agentcloak_cookies",
+                "agentcloak_doctor",
+                "agentcloak_tab",
+                "agentcloak_resume",
             }
             assert set(tools.keys()) == expected
         except ImportError:
@@ -108,17 +108,17 @@ class TestMCPServerCreation:
 
 class TestResolveTier:
     def test_patchright_passthrough(self) -> None:
-        from browserctl.core.config import resolve_tier
+        from agentcloak.core.config import resolve_tier
 
         assert resolve_tier("patchright") == "patchright"
 
     def test_cloak_passthrough(self) -> None:
-        from browserctl.core.config import resolve_tier
+        from agentcloak.core.config import resolve_tier
 
         assert resolve_tier("cloak") == "cloak"
 
     def test_auto_resolves(self) -> None:
-        from browserctl.core.config import resolve_tier
+        from agentcloak.core.config import resolve_tier
 
         result = resolve_tier("auto")
         assert result in ("patchright", "cloak")

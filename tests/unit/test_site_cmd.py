@@ -6,8 +6,8 @@ import json
 
 from typer.testing import CliRunner
 
-from browserctl.adapters.registry import get_registry
-from browserctl.cli.app import app
+from agentcloak.adapters.registry import get_registry
+from agentcloak.cli.app import app
 
 runner = CliRunner()
 
@@ -24,7 +24,7 @@ class TestSiteList:
         assert data["data"]["count"] >= 0
 
     def test_list_after_discovery(self) -> None:
-        from browserctl.adapters.discovery import discover_adapters
+        from agentcloak.adapters.discovery import discover_adapters
 
         discover_adapters()
         result = runner.invoke(app, ["adapter", "list"])
@@ -36,7 +36,7 @@ class TestSiteList:
 class TestSiteInfo:
     def setup_method(self) -> None:
         get_registry().clear()
-        from browserctl.adapters.discovery import discover_adapters
+        from agentcloak.adapters.discovery import discover_adapters
         discover_adapters()
 
     def test_info_existing(self) -> None:
@@ -60,7 +60,7 @@ class TestSiteInfo:
 class TestSiteRun:
     def setup_method(self) -> None:
         get_registry().clear()
-        from browserctl.adapters.discovery import discover_adapters
+        from agentcloak.adapters.discovery import discover_adapters
         discover_adapters()
 
     def test_run_browser_required_adapter_fails_without_daemon(self) -> None:
@@ -73,14 +73,14 @@ class TestDiscovery:
         get_registry().clear()
 
     def test_discover_builtin(self) -> None:
-        from browserctl.adapters.discovery import discover_adapters
+        from agentcloak.adapters.discovery import discover_adapters
 
         counts = discover_adapters()
         assert counts["builtin"] >= 2
         assert counts["total"] >= 2
 
     def test_discover_idempotent(self) -> None:
-        from browserctl.adapters.discovery import discover_adapters
+        from agentcloak.adapters.discovery import discover_adapters
 
         discover_adapters()
         count_first = len(get_registry())

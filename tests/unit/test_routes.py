@@ -11,10 +11,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from browserctl.browser.patchright_ctx import PatchrightContext
-from browserctl.core.seq import RingBuffer, SeqCounter, SeqEvent
-from browserctl.daemon.middleware import error_middleware
-from browserctl.daemon.routes import setup_routes
+from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
+from agentcloak.daemon.middleware import error_middleware
+from agentcloak.daemon.routes import setup_routes
 
 
 def _mock_cdp() -> MagicMock:
@@ -255,7 +255,7 @@ class TestRoutes:
     async def test_capture_replay_ok(self, client: TestClient) -> None:
         from datetime import UTC, datetime
 
-        from browserctl.core.capture import CaptureEntry
+        from agentcloak.core.capture import CaptureEntry
 
         ctx = client.app["browser_ctx"]
         ctx._capture_store.start()
@@ -305,7 +305,7 @@ class TestRoutes:
         mock_paths = MagicMock()
         mock_paths.profiles_dir = tmp_path / "profiles"
 
-        with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
+        with patch("agentcloak.core.config.load_config", return_value=(mock_paths, MagicMock())), \
              patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
             resp = await client.post(
                 "/profile/create-from-current",
@@ -338,7 +338,7 @@ class TestRoutes:
         mock_paths = MagicMock()
         mock_paths.profiles_dir = profiles_dir
 
-        with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
+        with patch("agentcloak.core.config.load_config", return_value=(mock_paths, MagicMock())), \
              patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
             resp = await client.post(
                 "/profile/create-from-current",
@@ -376,7 +376,7 @@ class TestRoutes:
         mock_paths = MagicMock()
         mock_paths.profiles_dir = tmp_path / "profiles"
 
-        with patch("browserctl.core.config.load_config", return_value=(mock_paths, MagicMock())), \
+        with patch("agentcloak.core.config.load_config", return_value=(mock_paths, MagicMock())), \
              patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
             resp = await client.post(
                 "/profile/create-from-current",

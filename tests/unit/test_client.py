@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browserctl.cli.client import DaemonClient
-from browserctl.core.errors import AgentBrowserError, DaemonConnectionError
+from agentcloak.cli.client import DaemonClient
+from agentcloak.core.errors import AgentBrowserError, DaemonConnectionError
 
 
 class TestDaemonClient:

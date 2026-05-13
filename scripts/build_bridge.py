@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""PyInstaller build script for browserctl-bridge.exe.
+"""PyInstaller build script for agentcloak-bridge.exe.
 
 Run on Windows:
     pip install pyinstaller
     python scripts/build_bridge.py
 
-Produces: dist/browserctl-bridge.exe
+Produces: dist/agentcloak-bridge.exe
 """
 
 import subprocess
@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-BRIDGE_ENTRY = ROOT / "src" / "browserctl" / "bridge" / "__main__.py"
-EXTENSION_DIR = ROOT / "src" / "browserctl" / "bridge" / "extension"
+BRIDGE_ENTRY = ROOT / "src" / "agentcloak" / "bridge" / "__main__.py"
+EXTENSION_DIR = ROOT / "src" / "agentcloak" / "bridge" / "extension"
 
 
 def main() -> None:
@@ -28,15 +28,15 @@ def main() -> None:
         "PyInstaller",
         "--onefile",
         "--name",
-        "browserctl-bridge",
+        "agentcloak-bridge",
         "--add-data",
         f"{EXTENSION_DIR}{';' if sys.platform == 'win32' else ':'}extension",
         "--hidden-import",
-        "browserctl.bridge",
+        "agentcloak.bridge",
         "--hidden-import",
-        "browserctl.bridge.server",
+        "agentcloak.bridge.server",
         "--hidden-import",
-        "browserctl.bridge.config",
+        "agentcloak.bridge.config",
         "--hidden-import",
         "aiohttp",
         "--hidden-import",
@@ -46,7 +46,7 @@ def main() -> None:
 
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
-    print("\nDone! Output: dist/browserctl-bridge.exe")
+    print("\nDone! Output: dist/agentcloak-bridge.exe")
 
 
 if __name__ == "__main__":

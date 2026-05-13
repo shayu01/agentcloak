@@ -12,7 +12,7 @@ import pytest
 @pytest.mark.parametrize("backend", ["patchright"])
 async def test_profile_cookie_persistence(backend: str, local_server: str) -> None:
     """Set cookie via Playwright API, close context, reopen, verify cookie."""
-    from browserctl.browser.patchright_ctx import launch_patchright
+    from agentcloak.browser.patchright_ctx import launch_patchright
 
     parsed = urlparse(local_server)
 

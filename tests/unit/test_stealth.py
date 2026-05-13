@@ -10,15 +10,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from browserctl.browser.cloak_ctx import (
+from agentcloak.browser.cloak_ctx import (
     TURNSTILE_PATCH_DIR,
     CloakContext,
     _build_extension_args,
 )
-from browserctl.browser.xvfb import XvfbManager
-from browserctl.cli.app import app
-from browserctl.core.errors import BackendError
-from browserctl.core.types import StealthTier
+from agentcloak.browser.xvfb import XvfbManager
+from agentcloak.cli.app import app
+from agentcloak.core.errors import BackendError
+from agentcloak.core.types import StealthTier
 
 runner = CliRunner()
 
@@ -74,7 +74,7 @@ class TestCloakContext:
 
 class TestEnsureCloakbrowser:
     def test_import_error_raises_backend_error(self) -> None:
-        from browserctl.browser.cloak_ctx import _ensure_cloakbrowser
+        from agentcloak.browser.cloak_ctx import _ensure_cloakbrowser
 
         with patch.dict("sys.modules", {"cloakbrowser": None}):
             with pytest.raises(BackendError, match="CloakBrowser"):
@@ -175,7 +175,7 @@ class TestDaemonStealthFlag:
 class TestCreateContextFactory:
     @pytest.mark.asyncio
     async def test_cloak_tier_without_package_raises(self) -> None:
-        from browserctl.browser import create_context
+        from agentcloak.browser import create_context
 
         with patch.dict("sys.modules", {"cloakbrowser": None}):
             with pytest.raises(BackendError, match="CloakBrowser"):
@@ -184,8 +184,8 @@ class TestCreateContextFactory:
 
 class TestProxyUrlIntegration:
     def test_patchright_context_stores_proxy_url(self) -> None:
-        from browserctl.browser.patchright_ctx import PatchrightContext
-        from browserctl.core.seq import RingBuffer, SeqCounter
+        from agentcloak.browser.patchright_ctx import PatchrightContext
+        from agentcloak.core.seq import RingBuffer, SeqCounter
 
         page = MagicMock()
         page.on = MagicMock()

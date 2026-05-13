@@ -1,0 +1,37 @@
+"""Entry point for background daemon: python -m agentcloak.daemon."""
+
+import argparse
+import asyncio
+
+from agentcloak.daemon.server import start
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--profile", default=None, help="Browser profile name.")
+    parser.add_argument(
+        "--stealth", action="store_true", help="Enable CloakBrowser stealth mode."
+    )
+    parser.add_argument(
+        "--no-humanize",
+        action="store_true",
+        help="Disable humanize layer in stealth mode.",
+    )
+    args = parser.parse_args()
+    humanize: bool | None = False if args.no_humanize else None
+    asyncio.run(
+        start(
+            host=args.host,
+            port=args.port,
+            headless=not args.headed,
+            profile=args.profile,
+            stealth=args.stealth,
+            humanize=humanize,
+        )
+    )
+
+
+main()

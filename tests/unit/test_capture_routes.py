@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, PropertyMock
 import pytest
 from aiohttp import web
 
-from browserctl.core.capture import CaptureStore
-from browserctl.daemon.routes import setup_routes
+from agentcloak.core.capture import CaptureStore
+from agentcloak.daemon.routes import setup_routes
 
 
 def _make_app() -> web.Application:

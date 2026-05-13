@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browserctl.adapters.pipeline.engine import execute_pipeline
-from browserctl.core.errors import AgentBrowserError
+from agentcloak.adapters.pipeline.engine import execute_pipeline
+from agentcloak.core.errors import AgentBrowserError
 
 
 class TestPipelineSelect:
     async def test_select_dict_key(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_select
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_select
 
         ctx = StepContext(args={})
         data = {"items": [1, 2, 3], "total": 3}
@@ -20,7 +20,7 @@ class TestPipelineSelect:
         assert result == [1, 2, 3]
 
     async def test_select_nested_path(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_select
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_select
 
         ctx = StepContext(args={})
         data = {"response": {"data": {"users": ["a", "b"]}}}
@@ -30,7 +30,7 @@ class TestPipelineSelect:
 
 class TestPipelineMap:
     async def test_map_transforms_items(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_map
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_map
 
         ctx = StepContext(args={})
         data = [
@@ -45,7 +45,7 @@ class TestPipelineMap:
         ]
 
     async def test_map_with_index(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_map
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_map
 
         ctx = StepContext(args={})
         data = [{"title": "A"}, {"title": "B"}]
@@ -55,7 +55,7 @@ class TestPipelineMap:
         assert result[1]["rank"] == 1
 
     async def test_map_non_list_raises(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_map
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_map
 
         ctx = StepContext(args={})
         with pytest.raises(AgentBrowserError) as exc_info:
@@ -65,7 +65,7 @@ class TestPipelineMap:
 
 class TestPipelineFilter:
     async def test_filter_truthy(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_filter
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_filter
 
         ctx = StepContext(args={})
         data = [
@@ -79,7 +79,7 @@ class TestPipelineFilter:
         assert result[1]["name"] == "Carol"
 
     async def test_filter_non_list_raises(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_filter
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_filter
 
         ctx = StepContext(args={})
         with pytest.raises(AgentBrowserError) as exc_info:
@@ -89,7 +89,7 @@ class TestPipelineFilter:
 
 class TestPipelineLimit:
     async def test_limit_truncates(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_limit
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_limit
 
         ctx = StepContext(args={"n": 2})
         data = [1, 2, 3, 4, 5]
@@ -97,7 +97,7 @@ class TestPipelineLimit:
         assert result == [1, 2]
 
     async def test_limit_larger_than_data(self) -> None:
-        from browserctl.adapters.pipeline.steps import StepContext, _step_limit
+        from agentcloak.adapters.pipeline.steps import StepContext, _step_limit
 
         ctx = StepContext(args={})
         data = [1, 2]
@@ -140,7 +140,7 @@ class TestPipelineEngine:
             {"limit": "1"},
         )
 
-        with patch("browserctl.adapters.pipeline.steps.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentcloak.adapters.pipeline.steps.httpx.AsyncClient", return_value=mock_client):
             result = await execute_pipeline(pipeline, args={})
 
         assert result == [{"id": 1, "name": "First"}]

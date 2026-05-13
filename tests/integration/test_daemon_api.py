@@ -12,8 +12,8 @@ from aiohttp.test_utils import TestClient, TestServer
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-from browserctl.daemon.middleware import error_middleware
-from browserctl.daemon.routes import setup_routes
+from agentcloak.daemon.middleware import error_middleware
+from agentcloak.daemon.routes import setup_routes
 
 
 @pytest_asyncio.fixture
@@ -21,8 +21,8 @@ async def daemon_test_client(
     fresh_context: Any,
 ) -> AsyncGenerator[TestClient, None]:
     """Create an aiohttp TestClient with real browser context."""
-    from browserctl.core.config import load_config
-    from browserctl.core.resume import ResumeWriter
+    from agentcloak.core.config import load_config
+    from agentcloak.core.resume import ResumeWriter
 
     paths, _ = load_config()
 

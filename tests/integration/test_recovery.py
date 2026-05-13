@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from browserctl.core.errors import DaemonConnectionError
+from agentcloak.core.errors import DaemonConnectionError
 
 
 async def test_connection_error_structured() -> None:
@@ -12,7 +12,7 @@ async def test_connection_error_structured() -> None:
     err = DaemonConnectionError(
         error="daemon_unreachable",
         hint="Cannot connect to daemon at 127.0.0.1:9222",
-        action="run 'browserctl daemon start' first",
+        action="run 'agentcloak daemon start' first",
     )
     d = err.to_dict()
     assert d["ok"] is False
@@ -23,7 +23,7 @@ async def test_connection_error_structured() -> None:
 
 async def test_client_auto_start_flag() -> None:
     """DaemonClient should have auto_start capability."""
-    from browserctl.cli.client import DaemonClient
+    from agentcloak.cli.client import DaemonClient
 
     # With auto_start disabled, should raise immediately on connect failure
     client = DaemonClient(port=19999, auto_start=False)
@@ -34,7 +34,7 @@ async def test_client_auto_start_flag() -> None:
 
 async def test_client_auto_started_flag_prevents_loop() -> None:
     """After one auto-start attempt, should not retry indefinitely."""
-    from browserctl.cli.client import DaemonClient
+    from agentcloak.cli.client import DaemonClient
 
     client = DaemonClient(port=19998, auto_start=True)
     # Simulate that auto-start already happened

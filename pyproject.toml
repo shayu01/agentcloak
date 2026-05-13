@@ -1,5 +1,5 @@
 [project]
-name = "browserctl"
+name = "agentcloak"
 version = "0.1.0"
 description = "Browser automation toolkit for AI agents — CLI + MCP dual interface, multi-backend stealth, remote bridge"
 requires-python = ">=3.12"
@@ -30,9 +30,9 @@ dependencies = [
 ]
 
 [project.scripts]
-browserctl = "browserctl.cli.app:main"
-bctl = "browserctl.cli.app:main"
-browserctl-mcp = "browserctl.mcp.server:main"
+agentcloak = "agentcloak.cli.app:main"
+cloak = "agentcloak.cli.app:main"
+agentcloak-mcp = "agentcloak.mcp.server:main"
 
 [project.optional-dependencies]
 stealth = [
@@ -53,17 +53,17 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/shayu01/browserctl"
-Repository = "https://github.com/shayu01/browserctl"
-Issues = "https://github.com/shayu01/browserctl/issues"
-Changelog = "https://github.com/shayu01/browserctl/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/shayu01/agentcloak"
+Repository = "https://github.com/shayu01/agentcloak"
+Issues = "https://github.com/shayu01/agentcloak/issues"
+Changelog = "https://github.com/shayu01/agentcloak/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/browserctl"]
+packages = ["src/agentcloak"]
 
 [tool.ruff]
 target-version = "py312"
@@ -90,7 +90,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["browserctl"]
+known-first-party = ["agentcloak"]
 
 [tool.pyright]
 pythonVersion = "3.12"

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from browserctl.adapters.context import AdapterContext
-from browserctl.adapters.registry import AdapterRegistry, adapter, get_registry
-from browserctl.adapters.types import AdapterEntry, AdapterMeta, Arg
-from browserctl.core.types import Strategy
+from agentcloak.adapters.context import AdapterContext
+from agentcloak.adapters.registry import AdapterRegistry, adapter, get_registry
+from agentcloak.adapters.types import AdapterEntry, AdapterMeta, Arg
+from agentcloak.core.types import Strategy
 
 
 class TestAdapterMeta:

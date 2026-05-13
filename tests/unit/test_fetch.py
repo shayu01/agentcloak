@@ -11,14 +11,14 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from browserctl.browser.patchright_ctx import PatchrightContext
-from browserctl.core.errors import BackendError, BrowserTimeoutError
-from browserctl.core.seq import RingBuffer, SeqCounter
-from browserctl.daemon.middleware import error_middleware
-from browserctl.daemon.routes import setup_routes
+from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.core.errors import BackendError, BrowserTimeoutError
+from agentcloak.core.seq import RingBuffer, SeqCounter
+from agentcloak.daemon.middleware import error_middleware
+from agentcloak.daemon.routes import setup_routes
 
 _HTTPX_CLIENT = (
-    "browserctl.browser.patchright_ctx.httpx.AsyncClient"
+    "agentcloak.browser.patchright_ctx.httpx.AsyncClient"
 )
 
 

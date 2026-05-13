@@ -1,12 +1,12 @@
 """Tests for adapters/analyzer.py — API pattern recognition."""
 
-from browserctl.adapters.analyzer import (
+from agentcloak.adapters.analyzer import (
     PatternAnalyzer,
     _extract_schema,
     _normalize_path,
 )
-from browserctl.core.capture import CaptureEntry
-from browserctl.core.types import Strategy
+from agentcloak.core.capture import CaptureEntry
+from agentcloak.core.types import Strategy
 
 
 def _api_entry(

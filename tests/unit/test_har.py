@@ -1,7 +1,7 @@
 """Tests for core/har.py — HAR serialization."""
 
-from browserctl.core.capture import CaptureEntry
-from browserctl.core.har import to_har
+from agentcloak.core.capture import CaptureEntry
+from agentcloak.core.har import to_har
 
 
 def _make_entry(**kw: object) -> CaptureEntry:
@@ -27,7 +27,7 @@ class TestToHar:
     def test_basic_structure(self) -> None:
         har = to_har([_make_entry()])
         assert har["log"]["version"] == "1.2"
-        assert har["log"]["creator"]["name"] == "browserctl"
+        assert har["log"]["creator"]["name"] == "agentcloak"
         assert len(har["log"]["entries"]) == 1
 
     def test_entry_fields(self) -> None:

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from browserctl.browser.patchright_ctx import PatchrightContext
-from browserctl.core.errors import BackendError, BrowserTimeoutError, NavigationError
-from browserctl.core.seq import RingBuffer, SeqCounter
+from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.core.errors import BackendError, BrowserTimeoutError, NavigationError
+from agentcloak.core.seq import RingBuffer, SeqCounter
 
 
 def _cdp_node(role: str, name: str) -> dict[str, Any]:

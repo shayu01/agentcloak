@@ -13,8 +13,8 @@ import pytest
 import pytest_asyncio
 from aiohttp import web
 
-# Headless by default; set BROWSERCTL_TEST_HEADED=1 to run headed
-_HEADLESS = os.environ.get("BROWSERCTL_TEST_HEADED", "").lower() not in ("1", "true")
+# Headless by default; set AGENTCLOAK_TEST_HEADED=1 to run headed
+_HEADLESS = os.environ.get("AGENTCLOAK_TEST_HEADED", "").lower() not in ("1", "true")
 
 # ---------------------------------------------------------------------------
 # Local HTTP server serving test HTML pages
@@ -80,7 +80,7 @@ async def browser_context(
 
     if backend == "cloak":
         pytest.importorskip("cloakbrowser")
-        from browserctl.browser.cloak_ctx import launch_cloak
+        from agentcloak.browser.cloak_ctx import launch_cloak
 
         ctx = await launch_cloak(
             headless=_HEADLESS,
@@ -88,7 +88,7 @@ async def browser_context(
             viewport_height=720,
         )
     else:
-        from browserctl.browser.patchright_ctx import launch_patchright
+        from agentcloak.browser.patchright_ctx import launch_patchright
 
         ctx = await launch_patchright(
             headless=_HEADLESS,
@@ -103,7 +103,7 @@ async def browser_context(
 @pytest_asyncio.fixture
 async def fresh_context() -> AsyncGenerator[Any, None]:
     """Function-scoped patchright context for tests that need isolation."""
-    from browserctl.browser.patchright_ctx import launch_patchright
+    from agentcloak.browser.patchright_ctx import launch_patchright
 
     ctx = await launch_patchright(
         headless=_HEADLESS,

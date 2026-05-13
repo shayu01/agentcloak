@@ -1,6 +1,6 @@
 """Tests for core/errors.py — three-field envelope and exception hierarchy."""
 
-from browserctl.core.errors import (
+from agentcloak.core.errors import (
     AgentBrowserError,
     BackendError,
     BrowserTimeoutError,

@@ -83,7 +83,7 @@ async def test_type_action(browser_context: Any, local_server: str) -> None:
 
 async def test_invalid_action_kind(browser_context: Any, local_server: str) -> None:
     """Invalid action kind should raise BackendError."""
-    from browserctl.core.errors import BackendError
+    from agentcloak.core.errors import BackendError
 
     await browser_context.navigate(f"{local_server}/index.html")
     with pytest.raises(BackendError):
@@ -92,7 +92,7 @@ async def test_invalid_action_kind(browser_context: Any, local_server: str) -> N
 
 async def test_element_not_found(browser_context: Any, local_server: str) -> None:
     """Clicking non-existent element index should raise."""
-    from browserctl.core.errors import ElementNotFoundError
+    from agentcloak.core.errors import ElementNotFoundError
 
     await browser_context.navigate(f"{local_server}/index.html")
     with pytest.raises(ElementNotFoundError):
@@ -114,7 +114,7 @@ async def test_search_bing(browser_context: Any) -> None:
     if searchbox_index is None:
         pytest.skip("Could not find search box on Bing")
 
-    await browser_context.action("fill", str(searchbox_index), text="browserctl test")
+    await browser_context.action("fill", str(searchbox_index), text="agentcloak test")
     await browser_context.action("press", "", key="Enter")
     await asyncio.sleep(2)
 

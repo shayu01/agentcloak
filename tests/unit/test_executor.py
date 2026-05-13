@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from browserctl.adapters.context import AdapterContext
-from browserctl.adapters.executor import execute_adapter
-from browserctl.adapters.types import AdapterEntry, AdapterMeta
-from browserctl.core.errors import AgentBrowserError
-from browserctl.core.types import Strategy
+from agentcloak.adapters.context import AdapterContext
+from agentcloak.adapters.executor import execute_adapter
+from agentcloak.adapters.types import AdapterEntry, AdapterMeta
+from agentcloak.core.errors import AgentBrowserError
+from agentcloak.core.types import Strategy
 
 
 class TestExecuteAdapter:
@@ -81,7 +81,7 @@ class TestExecuteAdapter:
         )
         entry = AdapterEntry(meta=meta)
 
-        with patch("browserctl.adapters.pipeline.steps.httpx.AsyncClient", return_value=mock_client):
+        with patch("agentcloak.adapters.pipeline.steps.httpx.AsyncClient", return_value=mock_client):
             result = await execute_adapter(entry, args={})
 
         assert result == [42]

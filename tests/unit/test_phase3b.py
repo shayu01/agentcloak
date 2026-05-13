@@ -7,15 +7,15 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from browserctl.cli.app import app
-from browserctl.core.discovery import _has_zeroconf, discover_daemon, register_daemon
+from agentcloak.cli.app import app
+from agentcloak.core.discovery import _has_zeroconf, discover_daemon, register_daemon
 
 runner = CliRunner()
 
 
 class TestTokenAuth:
     def test_check_bridge_token_localhost_bypass(self) -> None:
-        from browserctl.daemon.routes import _check_bridge_token
+        from agentcloak.daemon.routes import _check_bridge_token
 
         request = MagicMock()
         transport = MagicMock()
@@ -26,7 +26,7 @@ class TestTokenAuth:
         assert _check_bridge_token(request) is True
 
     def test_check_bridge_token_valid(self) -> None:
-        from browserctl.daemon.routes import _check_bridge_token
+        from agentcloak.daemon.routes import _check_bridge_token
 
         request = MagicMock()
         transport = MagicMock()
@@ -38,7 +38,7 @@ class TestTokenAuth:
         assert _check_bridge_token(request) is True
 
     def test_check_bridge_token_invalid(self) -> None:
-        from browserctl.daemon.routes import _check_bridge_token
+        from agentcloak.daemon.routes import _check_bridge_token
 
         request = MagicMock()
         transport = MagicMock()
@@ -50,7 +50,7 @@ class TestTokenAuth:
         assert _check_bridge_token(request) is False
 
     def test_check_bridge_token_missing(self) -> None:
-        from browserctl.daemon.routes import _check_bridge_token
+        from agentcloak.daemon.routes import _check_bridge_token
 
         request = MagicMock()
         transport = MagicMock()
@@ -62,7 +62,7 @@ class TestTokenAuth:
         assert _check_bridge_token(request) is False
 
     def test_check_bridge_token_no_token_set(self) -> None:
-        from browserctl.daemon.routes import _check_bridge_token
+        from agentcloak.daemon.routes import _check_bridge_token
 
         request = MagicMock()
         transport = MagicMock()
@@ -92,13 +92,13 @@ class TestMDNS:
 
     def test_discover_daemon_without_zeroconf(self) -> None:
         with patch(
-            "browserctl.core.discovery._has_zeroconf", return_value=False
+            "agentcloak.core.discovery._has_zeroconf", return_value=False
         ):
             assert discover_daemon() is None
 
     def test_register_daemon_without_zeroconf(self) -> None:
         with patch(
-            "browserctl.core.discovery._has_zeroconf", return_value=False
+            "agentcloak.core.discovery._has_zeroconf", return_value=False
         ):
             assert register_daemon(9222) is False
 
@@ -119,6 +119,6 @@ class TestPyInstallerSpec:
 
 class TestRemoteBridgeContextPublicAPI:
     def test_send_command_exists(self) -> None:
-        from browserctl.browser.remote_ctx import RemoteBridgeContext
+        from agentcloak.browser.remote_ctx import RemoteBridgeContext
 
         assert hasattr(RemoteBridgeContext, "send_command")

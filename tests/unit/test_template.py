@@ -1,6 +1,6 @@
 """Tests for adapters/pipeline/template.py — template engine."""
 
-from browserctl.adapters.pipeline.template import render, render_deep
+from agentcloak.adapters.pipeline.template import render, render_deep
 
 
 class TestRender:

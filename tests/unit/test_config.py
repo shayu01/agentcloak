@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from browserctl.core.config import BrowserctlConfig, Paths, load_config
+from agentcloak.core.config import AgentcloakConfig, Paths, load_config
 
 
 class TestPaths:
@@ -16,7 +16,7 @@ class TestPaths:
         assert p.active_session_file == tmp_path / "active-session.json"
 
     def test_ensure_dirs_creates_structure(self, tmp_path: Path) -> None:
-        root = tmp_path / "browserctl_test"
+        root = tmp_path / "agentcloak_test"
         p = Paths(root=root)
         p.ensure_dirs()
         assert root.is_dir()
@@ -26,7 +26,7 @@ class TestPaths:
 
 class TestDefaults:
     def test_default_config_values(self) -> None:
-        cfg = BrowserctlConfig()
+        cfg = AgentcloakConfig()
         assert cfg.daemon_host == "127.0.0.1"
         assert cfg.daemon_port == 9222
         assert cfg.default_tier == "auto"
@@ -58,13 +58,13 @@ class TestLoadConfig:
     ) -> None:
         config_file = tmp_path / "config.toml"
         config_file.write_text("[daemon]\nport = 8888\n")
-        monkeypatch.setenv("BROWSERCTL_PORT", "7777")
+        monkeypatch.setenv("AGENTCLOAK_PORT", "7777")
         _, cfg = load_config(root=tmp_path)
         assert cfg.daemon_port == 7777
 
     def test_env_domain_whitelist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("BROWSERCTL_DOMAIN_WHITELIST", "example.com, test.org")
+        monkeypatch.setenv("AGENTCLOAK_DOMAIN_WHITELIST", "example.com, test.org")
         _, cfg = load_config(root=tmp_path)
         assert cfg.domain_whitelist == ["example.com", "test.org"]

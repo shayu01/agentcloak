@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from browserctl.browser.patchright_ctx import PatchrightContext
-from browserctl.core.errors import ElementNotFoundError
-from browserctl.core.seq import RingBuffer, SeqCounter
+from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.core.errors import ElementNotFoundError
+from agentcloak.core.seq import RingBuffer, SeqCounter
 
 
 def _default_page(

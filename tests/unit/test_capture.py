@@ -1,6 +1,6 @@
 """Tests for core/capture.py — CaptureStore and CaptureEntry."""
 
-from browserctl.core.capture import CaptureEntry, CaptureStore
+from agentcloak.core.capture import CaptureEntry, CaptureStore
 
 
 def _make_entry(

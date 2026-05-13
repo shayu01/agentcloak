@@ -1,8 +1,8 @@
 """Tests for adapters/generator.py — adapter code generation."""
 
-from browserctl.adapters.analyzer import EndpointPattern
-from browserctl.adapters.generator import generate_adapter, generate_adapters
-from browserctl.core.types import Strategy
+from agentcloak.adapters.analyzer import EndpointPattern
+from agentcloak.adapters.generator import generate_adapter, generate_adapters
+from agentcloak.core.types import Strategy
 
 
 def _pattern(
@@ -87,8 +87,8 @@ class TestGenerateAdapter:
 class TestGenerateAdapters:
     def test_module_has_imports(self) -> None:
         code = generate_adapters("example", [_pattern()])
-        assert "from browserctl.adapters.registry import adapter" in code
-        assert "from browserctl.core.types import Strategy" in code
+        assert "from agentcloak.adapters.registry import adapter" in code
+        assert "from agentcloak.core.types import Strategy" in code
 
     def test_skips_telemetry(self) -> None:
         patterns = [

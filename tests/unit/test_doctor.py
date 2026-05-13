@@ -4,7 +4,7 @@ import json
 
 from typer.testing import CliRunner
 
-from browserctl.cli.app import app
+from agentcloak.cli.app import app
 
 runner = CliRunner()
 

@@ -9,14 +9,14 @@ Initial release.
 - 45 commands across navigation, interaction, content, capture, profile, tab, adapter, and daemon management
 - JSON output envelope with `ok`/`seq`/`data` on success, `error`/`hint`/`action` on failure
 - Batch action execution via `--calls-file` with auto-abort on navigation
-- Top-level shortcuts: `bctl open`, `bctl snapshot`, `bctl click`, etc.
-- `bctl doctor` diagnostics self-check
+- Top-level shortcuts: `cloak open`, `cloak snapshot`, `cloak click`, etc.
+- `cloak doctor` diagnostics self-check
 
 ### MCP Server
 
 - 18 tools covering navigation, interaction, content, network, capture, and management
 - Auto-start daemon on first MCP request
-- `pip install browserctl[mcp]` optional dependency
+- `pip install agentcloak[mcp]` optional dependency
 
 ### Browser Backends
 

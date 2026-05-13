@@ -59,7 +59,7 @@ async def test_evaluate_js_complex(browser_context: Any, local_server: str) -> N
 
 async def test_navigate_invalid_url(fresh_context: Any) -> None:
     """Navigating to invalid URL should raise NavigationError."""
-    from browserctl.core.errors import AgentBrowserError
+    from agentcloak.core.errors import AgentBrowserError
 
     with pytest.raises(AgentBrowserError):
         await fresh_context.navigate("http://this-domain-does-not-exist-12345.invalid")

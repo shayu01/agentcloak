@@ -10,11 +10,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from browserctl.bridge.config import BridgeConfig, load_bridge_config
-from browserctl.bridge.server import _is_localhost, _write_bridge_info
-from browserctl.browser.remote_ctx import RemoteBridgeContext
-from browserctl.cli.app import app
-from browserctl.core.types import StealthTier
+from agentcloak.bridge.config import BridgeConfig, load_bridge_config
+from agentcloak.bridge.server import _is_localhost, _write_bridge_info
+from agentcloak.browser.remote_ctx import RemoteBridgeContext
+from agentcloak.cli.app import app
+from agentcloak.core.types import StealthTier
 
 runner = CliRunner()
 
@@ -29,7 +29,7 @@ class TestBridgeConfig:
 
     def test_load_missing_file(self) -> None:
         with patch(
-            "browserctl.bridge.config._config_path",
+            "agentcloak.bridge.config._config_path",
             return_value=Path("/nonexistent/bridge.toml"),
         ):
             cfg = load_bridge_config()
@@ -40,7 +40,7 @@ class TestBridgeConfig:
         toml_file = tmp_path / "bridge.toml"
         toml_file.write_text('[bridge]\nhost = "0.0.0.0"\nport = 18770\n')
         with patch(
-            "browserctl.bridge.config._config_path",
+            "agentcloak.bridge.config._config_path",
             return_value=toml_file,
         ):
             cfg = load_bridge_config()
@@ -90,7 +90,7 @@ class TestRemoteBridgeContext:
 
     @pytest.mark.asyncio
     async def test_send_raises_when_disconnected(self) -> None:
-        from browserctl.core.errors import BackendError
+        from agentcloak.core.errors import BackendError
 
         ws = MagicMock()
         ws.closed = True
@@ -131,10 +131,10 @@ class TestBridgeServer:
         assert _is_localhost(None) is False
 
     def test_write_bridge_info(self, tmp_path: Path) -> None:
-        with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):
+        with patch("agentcloak.bridge.server.Path.home", return_value=tmp_path):
             _write_bridge_info("0.0.0.0", 18766, "test-token")
 
-        info_path = tmp_path / ".browserctl" / "bridge.json"
+        info_path = tmp_path / ".agentcloak" / "bridge.json"
         assert info_path.is_file()
         data = json.loads(info_path.read_text())
         # 0.0.0.0 is replaced with the actual LAN IP — just verify it's not 0.0.0.0
@@ -143,18 +143,18 @@ class TestBridgeServer:
         assert data["token"] == "test-token"
 
     def test_write_bridge_info_specific_host(self, tmp_path: Path) -> None:
-        with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):
+        with patch("agentcloak.bridge.server.Path.home", return_value=tmp_path):
             _write_bridge_info("192.168.1.10", 18765, None)
 
-        info_path = tmp_path / ".browserctl" / "bridge.json"
+        info_path = tmp_path / ".agentcloak" / "bridge.json"
         data = json.loads(info_path.read_text())
         assert data["host"] == "192.168.1.10"  # non-wildcard host kept as-is
 
     def test_write_bridge_info_no_token(self, tmp_path: Path) -> None:
-        with patch("browserctl.bridge.server.Path.home", return_value=tmp_path):
+        with patch("agentcloak.bridge.server.Path.home", return_value=tmp_path):
             _write_bridge_info("127.0.0.1", 18765, None)
 
-        info_path = tmp_path / ".browserctl" / "bridge.json"
+        info_path = tmp_path / ".agentcloak" / "bridge.json"
         data = json.loads(info_path.read_text())
         assert data["token"] is None
 
@@ -164,7 +164,7 @@ class TestExtensionFiles:
         ext_dir = (
             Path(__file__).parent.parent.parent
             / "src"
-            / "browserctl"
+            / "agentcloak"
             / "bridge"
             / "extension"
         )
@@ -177,7 +177,7 @@ class TestExtensionFiles:
         ext_dir = (
             Path(__file__).parent.parent.parent
             / "src"
-            / "browserctl"
+            / "agentcloak"
             / "bridge"
             / "extension"
         )

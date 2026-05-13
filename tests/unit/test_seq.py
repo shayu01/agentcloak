@@ -1,6 +1,6 @@
 """Tests for core/seq.py — SeqCounter and RingBuffer."""
 
-from browserctl.core.seq import RingBuffer, SeqCounter, SeqEvent
+from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 
 
 class TestSeqCounter:

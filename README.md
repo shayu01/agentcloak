@@ -1,4 +1,4 @@
-# browserctl
+# agentcloak
 
 Browser automation toolkit for AI agents. Provides a CLI and MCP server that let AI agents see and interact with web pages -- navigate, read content via accessibility tree snapshots, click buttons, fill forms, take screenshots, and more. Supports anti-bot stealth and remote browser control.
 
@@ -23,10 +23,10 @@ Browser automation toolkit for AI agents. Provides a CLI and MCP server that let
 ### Basic install
 
 ```bash
-pip install browserctl
+pip install agentcloak
 ```
 
-This installs the CLI tools (`browserctl` and `bctl` shorthand) plus the background daemon. The default browser backend is Patchright (a Chromium-based automation library). The Python package is included, but you need to download the Chromium browser binary separately:
+This installs the CLI tools (`agentcloak` and `cloak` shorthand) plus the background daemon. The default browser backend is Patchright (a Chromium-based automation library). The Python package is included, but you need to download the Chromium browser binary separately:
 
 ```bash
 python -m patchright install chromium
@@ -37,9 +37,9 @@ This downloads ~120MB to a local cache. You only need to run it once.
 ### Optional extras
 
 ```bash
-pip install browserctl[stealth]       # adds CloakBrowser high-stealth backend
-pip install browserctl[mcp]           # adds MCP server support (browserctl-mcp command)
-pip install browserctl[mcp,stealth]   # everything
+pip install agentcloak[stealth]       # adds CloakBrowser high-stealth backend
+pip install agentcloak[mcp]           # adds MCP server support (agentcloak-mcp command)
+pip install agentcloak[mcp,stealth]   # everything
 ```
 
 **What each extra adds:**
@@ -48,7 +48,7 @@ pip install browserctl[mcp,stealth]   # everything
 |-------|-----------------|----------------|
 | *(base)* | CLI + daemon + Patchright backend | Run `python -m patchright install chromium` (~120MB) |
 | `stealth` | CloakBrowser patched Chromium + httpcloak proxy | Auto-downloads on first `--stealth` use (~200MB to `~/.cloakbrowser/`). No manual step. |
-| `mcp` | MCP server (`browserctl-mcp` command) | No additional binary needed |
+| `mcp` | MCP server (`agentcloak-mcp` command) | No additional binary needed |
 
 **Note on Patchright vs CloakBrowser:** The `patchright` Python package is always installed because CloakBrowser's code depends on it. However, if you only plan to use CloakBrowser (`--stealth` flag), you do NOT need to run `python -m patchright install chromium` -- CloakBrowser ships its own browser binary.
 
@@ -58,10 +58,10 @@ The daemon starts automatically on first command. No setup step needed.
 
 ```bash
 # Navigate to a page
-bctl open "https://example.com"
+cloak open "https://example.com"
 
 # Get accessibility tree with [N] element refs
-bctl snapshot
+cloak snapshot
 
 # Output:
 # [1] <link> About
@@ -69,14 +69,14 @@ bctl snapshot
 # [3] <combobox> Search
 
 # Interact using [N] refs from snapshot
-bctl fill --target 3 --text "search query"
-bctl press --key Enter --target 3
+cloak fill --target 3 --text "search query"
+cloak press --key Enter --target 3
 
 # Re-snapshot after navigation (refs change on page update)
-bctl snapshot
+cloak snapshot
 
 # Take a screenshot
-bctl screenshot --output page.png
+cloak screenshot --output page.png
 ```
 
 ### Observe-Act Loop
@@ -84,24 +84,24 @@ bctl screenshot --output page.png
 The core workflow: **snapshot first, then act**. Element refs `[N]` are only valid for the current page state -- they change whenever the page navigates or the DOM updates.
 
 ```bash
-bctl open "https://example.com/login"
-bctl snapshot --mode compact          # interactive elements only
-bctl fill --target 3 --text "user"    # fill username
-bctl fill --target 4 --text "pass"    # fill password
-bctl click --target 5                 # submit
-bctl snapshot                         # re-snapshot after navigation
-bctl profile create my-session        # save login state
+cloak open "https://example.com/login"
+cloak snapshot --mode compact          # interactive elements only
+cloak fill --target 3 --text "user"    # fill username
+cloak fill --target 4 --text "pass"    # fill password
+cloak click --target 5                 # submit
+cloak snapshot                         # re-snapshot after navigation
+cloak profile create my-session        # save login state
 ```
 
 ### Capture API Traffic
 
 ```bash
-bctl capture start
-bctl open "https://api-heavy-site.com"
+cloak capture start
+cloak open "https://api-heavy-site.com"
 # interact with the page...
-bctl capture stop
-bctl capture export --format har -o traffic.har
-bctl capture analyze                  # detect API patterns
+cloak capture stop
+cloak capture export --format har -o traffic.har
+cloak capture analyze                  # detect API patterns
 ```
 
 ## Output Format
@@ -121,44 +121,44 @@ Errors include a recovery hint that tells the agent (or you) what to try next:
 `seq` is a monotonic counter that increments on every browser state change. Parse with `jq`:
 
 ```bash
-bctl snapshot | jq -r '.data.tree_text'
+cloak snapshot | jq -r '.data.tree_text'
 ```
 
 ## Usage Modes
 
-browserctl provides two usage modes. Choose based on your AI client:
+agentcloak provides two usage modes. Choose based on your AI client:
 
 | | Skill + CLI | MCP Server |
 |---|---|---|
-| **How it works** | Claude Code Skill auto-loads when browser is needed; agent calls `bctl` via Bash | `browserctl-mcp` runs as an MCP server exposing 18 tools |
+| **How it works** | Claude Code Skill auto-loads when browser is needed; agent calls `cloak` via Bash | `agentcloak-mcp` runs as an MCP server exposing 18 tools |
 | **Best for** | Claude Code, any Bash-capable agent | MCP-native AI clients (Claude Code, Codex, Cursor, etc.) |
 | **Context cost** | On-demand -- Skill file loads only when needed | Persistent -- MCP tool definitions stay in context |
 | **Setup** | Copy one Skill file | One config line |
 
 ### Skill + CLI (recommended for Claude Code)
 
-The Skill file teaches Claude Code how to use `bctl` commands. It auto-loads when the agent needs browser capabilities.
+The Skill file teaches Claude Code how to use `cloak` commands. It auto-loads when the agent needs browser capabilities.
 
 **Install the Skill into your project:**
 
 ```bash
-mkdir -p .claude/skills/browserctl
-curl -o .claude/skills/browserctl/SKILL.md \
-  https://raw.githubusercontent.com/shayu01/browserctl/main/.claude/skills/browserctl/SKILL.md
+mkdir -p .claude/skills/agentcloak
+curl -o .claude/skills/agentcloak/SKILL.md \
+  https://raw.githubusercontent.com/shayu01/agentcloak/main/.claude/skills/agentcloak/SKILL.md
 ```
 
 After this, Claude Code will automatically pick up the Skill when a task involves web pages. No further configuration needed.
 
 ### MCP Server
 
-Run `browserctl-mcp` as an MCP server. The daemon auto-starts when the MCP server receives its first request.
+Run `agentcloak-mcp` as an MCP server. The daemon auto-starts when the MCP server receives its first request.
 
 #### Claude Code
 
 One command, no file editing needed:
 
 ```bash
-claude mcp add browserctl -- browserctl-mcp
+claude mcp add agentcloak -- agentcloak-mcp
 ```
 
 #### Codex
@@ -168,8 +168,8 @@ Add to `.codex/mcp.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "browserctl": {
-      "command": "browserctl-mcp"
+    "agentcloak": {
+      "command": "agentcloak-mcp"
     }
   }
 }
@@ -182,8 +182,8 @@ Add to Cursor Settings > MCP Servers, or create `.cursor/mcp.json` in your proje
 ```json
 {
   "mcpServers": {
-    "browserctl": {
-      "command": "browserctl-mcp"
+    "agentcloak": {
+      "command": "agentcloak-mcp"
     }
   }
 }
@@ -191,18 +191,18 @@ Add to Cursor Settings > MCP Servers, or create `.cursor/mcp.json` in your proje
 
 #### Other MCP clients
 
-Use the same pattern. The MCP server command is `browserctl-mcp` (stdio transport, no additional args needed).
+Use the same pattern. The MCP server command is `agentcloak-mcp` (stdio transport, no additional args needed).
 
 #### With uvx (no install needed)
 
-If you do not want to install browserctl globally, use `uvx` to run it on-the-fly:
+If you do not want to install agentcloak globally, use `uvx` to run it on-the-fly:
 
 ```json
 {
   "mcpServers": {
-    "browserctl": {
+    "agentcloak": {
       "command": "uvx",
-      "args": ["browserctl[mcp]"]
+      "args": ["agentcloak[mcp]"]
     }
   }
 }
@@ -212,18 +212,18 @@ If you do not want to install browserctl globally, use `uvx` to run it on-the-fl
 
 ### Agent-dedicated browsers
 
-These are Chromium instances managed by browserctl. They run headless by default, and no user interaction is needed.
+These are Chromium instances managed by agentcloak. They run headless by default, and no user interaction is needed.
 
 **Patchright (default)** -- standard Chromium with mid-level stealth patches. Headless by default. Good for most sites.
 
 ```bash
-bctl open "https://example.com"
+cloak open "https://example.com"
 ```
 
-**CloakBrowser (`--stealth`)** -- patched Chromium binary with behavioral humanization (realistic mouse movement, typing cadence). Runs in headed mode for anti-detection. On servers without a display, browserctl auto-starts Xvfb (a virtual framebuffer).
+**CloakBrowser (`--stealth`)** -- patched Chromium binary with behavioral humanization (realistic mouse movement, typing cadence). Runs in headed mode for anti-detection. On servers without a display, agentcloak auto-starts Xvfb (a virtual framebuffer).
 
 ```bash
-bctl open "https://protected-site.com" --stealth
+cloak open "https://protected-site.com" --stealth
 ```
 
 ### User browser bridging
@@ -231,7 +231,7 @@ bctl open "https://protected-site.com" --stealth
 **RemoteBridge (`--backend bridge`)** -- connects to a real Chrome browser on another machine (e.g., your Windows desktop) via a Chrome extension and WebSocket. The browser keeps its real fingerprint and login sessions.
 
 ```bash
-bctl open "https://example.com" --backend bridge
+cloak open "https://example.com" --backend bridge
 ```
 
 See the [Remote Bridge](#remote-bridge) section below for setup instructions.
@@ -240,11 +240,11 @@ See the [Remote Bridge](#remote-bridge) section below for setup instructions.
 
 | Mode | Command | Display needed? | System dependencies |
 |------|---------|----------------|-------------------|
-| Headless (default) | `bctl open URL` | No | None |
-| Headed | `bctl daemon start --headed` | Yes (desktop or VNC) | None |
-| Stealth (CloakBrowser) | `bctl open URL --stealth` | Auto (uses Xvfb) | `xvfb` on headless Linux |
+| Headless (default) | `cloak open URL` | No | None |
+| Headed | `cloak daemon start --headed` | Yes (desktop or VNC) | None |
+| Stealth (CloakBrowser) | `cloak open URL --stealth` | Auto (uses Xvfb) | `xvfb` on headless Linux |
 
-CloakBrowser runs in headed mode because anti-bot systems detect headless browsers. On a Linux server without a display, browserctl automatically starts Xvfb (a virtual framebuffer that simulates a screen). Install it with:
+CloakBrowser runs in headed mode because anti-bot systems detect headless browsers. On a Linux server without a display, agentcloak automatically starts Xvfb (a virtual framebuffer that simulates a screen). Install it with:
 
 ```bash
 sudo apt-get install -y xvfb
@@ -258,13 +258,13 @@ Remote Bridge lets you control a real Chrome browser on another machine -- for e
 
 ### How it works
 
-1. A Chrome extension runs on the user's machine and connects to the browserctl daemon via WebSocket
+1. A Chrome extension runs on the user's machine and connects to the agentcloak daemon via WebSocket
 2. The daemon routes commands to the extension, which executes them in the real browser
 3. Results flow back through the same WebSocket connection
 
 ### Setup
 
-1. **Get the extension files.** They are bundled in the source at `src/browserctl/bridge/extension/`.
+1. **Get the extension files.** They are bundled in the source at `src/agentcloak/bridge/extension/`.
 
 2. **Install in Chrome:**
    - Open `chrome://extensions` in Chrome
@@ -275,7 +275,7 @@ Remote Bridge lets you control a real Chrome browser on another machine -- for e
 
 4. **Use it:**
    ```bash
-   bctl open "https://example.com" --backend bridge
+   cloak open "https://example.com" --backend bridge
    ```
 
 ## Command Reference
@@ -284,59 +284,59 @@ Remote Bridge lets you control a real Chrome browser on another machine -- for e
 
 | Command | Purpose |
 |---------|---------|
-| `bctl open URL` | Navigate to URL |
-| `bctl snapshot` | Accessibility tree with `[N]` refs |
-| `bctl snapshot --mode compact` | Interactive elements only |
-| `bctl snapshot --mode content` | Text extraction |
-| `bctl screenshot` | Take screenshot |
-| `bctl resume` | Current state: URL, tabs, last actions |
+| `cloak open URL` | Navigate to URL |
+| `cloak snapshot` | Accessibility tree with `[N]` refs |
+| `cloak snapshot --mode compact` | Interactive elements only |
+| `cloak snapshot --mode content` | Text extraction |
+| `cloak screenshot` | Take screenshot |
+| `cloak resume` | Current state: URL, tabs, last actions |
 
 ### Interaction
 
 | Command | Purpose |
 |---------|---------|
-| `bctl click --target N` | Click element |
-| `bctl fill --target N --text "value"` | Clear + set input value |
-| `bctl type --target N --text "value"` | Type character by character |
-| `bctl press --key Enter` | Press keyboard key |
-| `bctl scroll --direction down` | Scroll page |
-| `bctl hover --target N` | Hover over element |
-| `bctl select --target N --value "opt"` | Select dropdown option |
+| `cloak click --target N` | Click element |
+| `cloak fill --target N --text "value"` | Clear + set input value |
+| `cloak type --target N --text "value"` | Type character by character |
+| `cloak press --key Enter` | Press keyboard key |
+| `cloak scroll --direction down` | Scroll page |
+| `cloak hover --target N` | Hover over element |
+| `cloak select --target N --value "opt"` | Select dropdown option |
 
 ### Content and Network
 
 | Command | Purpose |
 |---------|---------|
-| `bctl js eval "expression"` | Execute JavaScript |
-| `bctl fetch URL` | HTTP GET with browser cookies |
-| `bctl network requests` | Recent network requests |
-| `bctl network console` | Console messages |
+| `cloak js eval "expression"` | Execute JavaScript |
+| `cloak fetch URL` | HTTP GET with browser cookies |
+| `cloak network requests` | Recent network requests |
+| `cloak network console` | Console messages |
 
 ### Capture and Adapters
 
 | Command | Purpose |
 |---------|---------|
-| `bctl capture start/stop` | Record network traffic |
-| `bctl capture export --format har` | Export as HAR |
-| `bctl capture analyze` | Detect API patterns |
-| `bctl adapter list` | List site adapters |
-| `bctl adapter run NAME` | Run named adapter |
+| `cloak capture start/stop` | Record network traffic |
+| `cloak capture export --format har` | Export as HAR |
+| `cloak capture analyze` | Detect API patterns |
+| `cloak adapter list` | List site adapters |
+| `cloak adapter run NAME` | Run named adapter |
 
 ### Management
 
 | Command | Purpose |
 |---------|---------|
-| `bctl profile create/list/launch/delete` | Browser profile management |
-| `bctl tab list/new/close/switch` | Tab management |
-| `bctl doctor` | Diagnostics self-check |
-| `bctl daemon start/stop/health` | Daemon lifecycle |
+| `cloak profile create/list/launch/delete` | Browser profile management |
+| `cloak tab list/new/close/switch` | Tab management |
+| `cloak doctor` | Diagnostics self-check |
+| `cloak daemon start/stop/health` | Daemon lifecycle |
 
 ## Architecture
 
 ```
 +--------------+     +--------------+     +----------------------+
 |  CLI (typer) |---->| Daemon (HTTP)|---->| Browser Backend      |
-|  bctl / MCP  |     |  aiohttp     |     |  +- PatchrightContext |
+|  cloak / MCP  |     |  aiohttp     |     |  +- PatchrightContext |
 +--------------+     |  seq counter |     |  +- CloakContext      |
                      |  ring buffer |     |  +- RemoteBridgeCtx   |
                      +--------------+     +----------------------+
@@ -351,8 +351,8 @@ Layer isolation is strictly enforced: CLI cannot import browser internals, daemo
 ## Development
 
 ```bash
-git clone https://github.com/shayu01/browserctl.git
-cd browserctl
+git clone https://github.com/shayu01/agentcloak.git
+cd agentcloak
 pip install -e ".[dev,mcp,stealth]"
 python -m patchright install chromium
 ```
@@ -415,10 +415,10 @@ MIT
 ### 基本安装
 
 ```bash
-pip install browserctl
+pip install agentcloak
 ```
 
-安装 CLI 工具（`browserctl` 及其简写 `bctl`）和后台守护进程。默认浏览器后端是 Patchright（基于 Chromium 的自动化库）。Python 包会自动安装，但需要单独下载 Chromium 浏览器二进制文件：
+安装 CLI 工具（`agentcloak` 及其简写 `cloak`）和后台守护进程。默认浏览器后端是 Patchright（基于 Chromium 的自动化库）。Python 包会自动安装，但需要单独下载 Chromium 浏览器二进制文件：
 
 ```bash
 python -m patchright install chromium
@@ -429,9 +429,9 @@ python -m patchright install chromium
 ### 可选扩展
 
 ```bash
-pip install browserctl[stealth]       # 添加 CloakBrowser 高隐蔽后端
-pip install browserctl[mcp]           # 添加 MCP 服务器支持（browserctl-mcp 命令）
-pip install browserctl[mcp,stealth]   # 全部安装
+pip install agentcloak[stealth]       # 添加 CloakBrowser 高隐蔽后端
+pip install agentcloak[mcp]           # 添加 MCP 服务器支持（agentcloak-mcp 命令）
+pip install agentcloak[mcp,stealth]   # 全部安装
 ```
 
 **各扩展安装内容：**
@@ -440,7 +440,7 @@ pip install browserctl[mcp,stealth]   # 全部安装
 |------|---------|------------|
 | *（基础）* | CLI + 守护进程 + Patchright 后端 | 运行 `python -m patchright install chromium`（约 120MB） |
 | `stealth` | CloakBrowser 修补版 Chromium + httpcloak 代理 | 首次使用 `--stealth` 时自动下载（约 200MB 到 `~/.cloakbrowser/`），无需手动操作 |
-| `mcp` | MCP 服务器（`browserctl-mcp` 命令） | 无需额外二进制 |
+| `mcp` | MCP 服务器（`agentcloak-mcp` 命令） | 无需额外二进制 |
 
 **关于 Patchright 与 CloakBrowser：** `patchright` Python 包始终会安装，因为 CloakBrowser 的代码依赖它。但如果你只使用 CloakBrowser（`--stealth` 标志），不需要运行 `python -m patchright install chromium` -- CloakBrowser 自带浏览器二进制文件。
 
@@ -450,10 +450,10 @@ pip install browserctl[mcp,stealth]   # 全部安装
 
 ```bash
 # 导航到页面
-bctl open "https://example.com"
+cloak open "https://example.com"
 
 # 获取无障碍树，带 [N] 元素索引
-bctl snapshot
+cloak snapshot
 
 # 输出示例:
 # [1] <link> About
@@ -461,14 +461,14 @@ bctl snapshot
 # [3] <combobox> Search
 
 # 用快照中的 [N] 索引进行交互
-bctl fill --target 3 --text "搜索内容"
-bctl press --key Enter --target 3
+cloak fill --target 3 --text "搜索内容"
+cloak press --key Enter --target 3
 
 # 页面变化后重新获取快照（索引会变）
-bctl snapshot
+cloak snapshot
 
 # 截图
-bctl screenshot --output page.png
+cloak screenshot --output page.png
 ```
 
 ### 观察-行动循环
@@ -476,24 +476,24 @@ bctl screenshot --output page.png
 核心工作流：**先快照，再操作**。元素索引 `[N]` 仅对当前页面状态有效，页面导航或 DOM 更新后索引会改变。
 
 ```bash
-bctl open "https://example.com/login"
-bctl snapshot --mode compact          # 仅交互元素
-bctl fill --target 3 --text "用户名"   # 填写用户名
-bctl fill --target 4 --text "密码"     # 填写密码
-bctl click --target 5                 # 提交
-bctl snapshot                         # 导航后重新快照
-bctl profile create my-session        # 保存登录状态
+cloak open "https://example.com/login"
+cloak snapshot --mode compact          # 仅交互元素
+cloak fill --target 3 --text "用户名"   # 填写用户名
+cloak fill --target 4 --text "密码"     # 填写密码
+cloak click --target 5                 # 提交
+cloak snapshot                         # 导航后重新快照
+cloak profile create my-session        # 保存登录状态
 ```
 
 ### 捕获 API 流量
 
 ```bash
-bctl capture start
-bctl open "https://api-heavy-site.com"
+cloak capture start
+cloak open "https://api-heavy-site.com"
 # 与页面交互...
-bctl capture stop
-bctl capture export --format har -o traffic.har
-bctl capture analyze                  # 检测 API 模式
+cloak capture stop
+cloak capture export --format har -o traffic.har
+cloak capture analyze                  # 检测 API 模式
 ```
 
 ## 输出格式
@@ -513,44 +513,44 @@ bctl capture analyze                  # 检测 API 模式
 `seq` 是单调递增计数器，每次浏览器状态变化都会递增。用 `jq` 解析：
 
 ```bash
-bctl snapshot | jq -r '.data.tree_text'
+cloak snapshot | jq -r '.data.tree_text'
 ```
 
 ## 使用模式
 
-browserctl 提供两种使用模式，按你的 AI 客户端选择：
+agentcloak 提供两种使用模式，按你的 AI 客户端选择：
 
 | | Skill + CLI | MCP 服务器 |
 |---|---|---|
-| **工作方式** | Claude Code Skill 在需要浏览器时自动加载，agent 通过 Bash 调用 `bctl` | `browserctl-mcp` 作为 MCP 服务器运行，暴露 18 个工具 |
+| **工作方式** | Claude Code Skill 在需要浏览器时自动加载，agent 通过 Bash 调用 `cloak` | `agentcloak-mcp` 作为 MCP 服务器运行，暴露 18 个工具 |
 | **适用于** | Claude Code，任何支持 Bash 的 agent | MCP 原生 AI 客户端（Claude Code、Codex、Cursor 等） |
 | **上下文开销** | 按需加载 -- Skill 文件仅在需要时加载 | 持续 -- MCP 工具定义常驻上下文 |
 | **配置方式** | 复制一个 Skill 文件 | 一行配置 |
 
 ### Skill + CLI（推荐用于 Claude Code）
 
-Skill 文件教会 Claude Code 如何使用 `bctl` 命令。当 agent 需要浏览器能力时，Skill 自动加载。
+Skill 文件教会 Claude Code 如何使用 `cloak` 命令。当 agent 需要浏览器能力时，Skill 自动加载。
 
 **将 Skill 安装到你的项目：**
 
 ```bash
-mkdir -p .claude/skills/browserctl
-curl -o .claude/skills/browserctl/SKILL.md \
-  https://raw.githubusercontent.com/shayu01/browserctl/main/.claude/skills/browserctl/SKILL.md
+mkdir -p .claude/skills/agentcloak
+curl -o .claude/skills/agentcloak/SKILL.md \
+  https://raw.githubusercontent.com/shayu01/agentcloak/main/.claude/skills/agentcloak/SKILL.md
 ```
 
 安装后，Claude Code 在遇到涉及网页的任务时会自动识别并加载 Skill，无需其他配置。
 
 ### MCP 服务器
 
-运行 `browserctl-mcp` 作为 MCP 服务器。守护进程在 MCP 服务器收到第一个请求时自动启动。
+运行 `agentcloak-mcp` 作为 MCP 服务器。守护进程在 MCP 服务器收到第一个请求时自动启动。
 
 #### Claude Code
 
 一条命令，无需编辑文件：
 
 ```bash
-claude mcp add browserctl -- browserctl-mcp
+claude mcp add agentcloak -- agentcloak-mcp
 ```
 
 #### Codex
@@ -560,8 +560,8 @@ claude mcp add browserctl -- browserctl-mcp
 ```json
 {
   "mcpServers": {
-    "browserctl": {
-      "command": "browserctl-mcp"
+    "agentcloak": {
+      "command": "agentcloak-mcp"
     }
   }
 }
@@ -574,8 +574,8 @@ claude mcp add browserctl -- browserctl-mcp
 ```json
 {
   "mcpServers": {
-    "browserctl": {
-      "command": "browserctl-mcp"
+    "agentcloak": {
+      "command": "agentcloak-mcp"
     }
   }
 }
@@ -583,18 +583,18 @@ claude mcp add browserctl -- browserctl-mcp
 
 #### 其他 MCP 客户端
 
-使用相同格式。MCP 服务器命令是 `browserctl-mcp`（stdio 传输，无需额外参数）。
+使用相同格式。MCP 服务器命令是 `agentcloak-mcp`（stdio 传输，无需额外参数）。
 
 #### 使用 uvx（无需安装）
 
-如果不想全局安装 browserctl，可以用 `uvx` 直接运行：
+如果不想全局安装 agentcloak，可以用 `uvx` 直接运行：
 
 ```json
 {
   "mcpServers": {
-    "browserctl": {
+    "agentcloak": {
       "command": "uvx",
-      "args": ["browserctl[mcp]"]
+      "args": ["agentcloak[mcp]"]
     }
   }
 }
@@ -604,18 +604,18 @@ claude mcp add browserctl -- browserctl-mcp
 
 ### Agent 专用浏览器
 
-由 browserctl 管理的 Chromium 实例，默认无头运行，无需用户交互。
+由 agentcloak 管理的 Chromium 实例，默认无头运行，无需用户交互。
 
 **Patchright（默认）** -- 标准 Chromium，中等反检测补丁，默认无头运行。适用于大多数网站。
 
 ```bash
-bctl open "https://example.com"
+cloak open "https://example.com"
 ```
 
-**CloakBrowser（`--stealth`）** -- 修补版 Chromium 二进制文件，带行为模拟（真实鼠标移动、打字节奏）。以有头模式运行以对抗检测。在没有显示器的服务器上，browserctl 自动启动 Xvfb（虚拟帧缓冲）。
+**CloakBrowser（`--stealth`）** -- 修补版 Chromium 二进制文件，带行为模拟（真实鼠标移动、打字节奏）。以有头模式运行以对抗检测。在没有显示器的服务器上，agentcloak 自动启动 Xvfb（虚拟帧缓冲）。
 
 ```bash
-bctl open "https://protected-site.com" --stealth
+cloak open "https://protected-site.com" --stealth
 ```
 
 ### 用户浏览器桥接
@@ -623,7 +623,7 @@ bctl open "https://protected-site.com" --stealth
 **RemoteBridge（`--backend bridge`）** -- 通过 Chrome 扩展和 WebSocket 连接到另一台机器上的真实 Chrome 浏览器（例如从 Linux 服务器操作你的 Windows 桌面 Chrome）。浏览器保持真实指纹和登录状态。
 
 ```bash
-bctl open "https://example.com" --backend bridge
+cloak open "https://example.com" --backend bridge
 ```
 
 设置方法请参见下方[远程桥接](#远程桥接)章节。
@@ -632,11 +632,11 @@ bctl open "https://example.com" --backend bridge
 
 | 模式 | 命令 | 需要显示器？ | 系统依赖 |
 |------|------|------------|---------|
-| 无头（默认） | `bctl open URL` | 否 | 无 |
-| 有头 | `bctl daemon start --headed` | 是（桌面或 VNC） | 无 |
-| 隐蔽（CloakBrowser） | `bctl open URL --stealth` | 自动（使用 Xvfb） | Linux 无头服务器需要 `xvfb` |
+| 无头（默认） | `cloak open URL` | 否 | 无 |
+| 有头 | `cloak daemon start --headed` | 是（桌面或 VNC） | 无 |
+| 隐蔽（CloakBrowser） | `cloak open URL --stealth` | 自动（使用 Xvfb） | Linux 无头服务器需要 `xvfb` |
 
-CloakBrowser 以有头模式运行，因为反爬虫系统能检测无头浏览器。在没有显示器的 Linux 服务器上，browserctl 自动启动 Xvfb（模拟屏幕的虚拟帧缓冲）。安装方法：
+CloakBrowser 以有头模式运行，因为反爬虫系统能检测无头浏览器。在没有显示器的 Linux 服务器上，agentcloak 自动启动 Xvfb（模拟屏幕的虚拟帧缓冲）。安装方法：
 
 ```bash
 sudo apt-get install -y xvfb
@@ -650,13 +650,13 @@ sudo apt-get install -y xvfb
 
 ### 工作原理
 
-1. Chrome 扩展运行在用户的机器上，通过 WebSocket 连接到 browserctl 守护进程
+1. Chrome 扩展运行在用户的机器上，通过 WebSocket 连接到 agentcloak 守护进程
 2. 守护进程将命令路由到扩展，扩展在真实浏览器中执行
 3. 结果通过同一 WebSocket 连接返回
 
 ### 设置步骤
 
-1. **获取扩展文件。** 源码中包含在 `src/browserctl/bridge/extension/` 目录。
+1. **获取扩展文件。** 源码中包含在 `src/agentcloak/bridge/extension/` 目录。
 
 2. **在 Chrome 中安装：**
    - 打开 Chrome，访问 `chrome://extensions`
@@ -667,7 +667,7 @@ sudo apt-get install -y xvfb
 
 4. **使用：**
    ```bash
-   bctl open "https://example.com" --backend bridge
+   cloak open "https://example.com" --backend bridge
    ```
 
 ## 命令参考
@@ -676,59 +676,59 @@ sudo apt-get install -y xvfb
 
 | 命令 | 用途 |
 |------|------|
-| `bctl open URL` | 导航到 URL |
-| `bctl snapshot` | 获取无障碍树，带 `[N]` 索引 |
-| `bctl snapshot --mode compact` | 仅交互元素 |
-| `bctl snapshot --mode content` | 文本提取 |
-| `bctl screenshot` | 截图 |
-| `bctl resume` | 当前状态：URL、标签页、最近操作 |
+| `cloak open URL` | 导航到 URL |
+| `cloak snapshot` | 获取无障碍树，带 `[N]` 索引 |
+| `cloak snapshot --mode compact` | 仅交互元素 |
+| `cloak snapshot --mode content` | 文本提取 |
+| `cloak screenshot` | 截图 |
+| `cloak resume` | 当前状态：URL、标签页、最近操作 |
 
 ### 交互
 
 | 命令 | 用途 |
 |------|------|
-| `bctl click --target N` | 点击元素 |
-| `bctl fill --target N --text "值"` | 清空并设置输入值 |
-| `bctl type --target N --text "值"` | 逐字符输入 |
-| `bctl press --key Enter` | 按键 |
-| `bctl scroll --direction down` | 滚动页面 |
-| `bctl hover --target N` | 悬停 |
-| `bctl select --target N --value "选项"` | 选择下拉选项 |
+| `cloak click --target N` | 点击元素 |
+| `cloak fill --target N --text "值"` | 清空并设置输入值 |
+| `cloak type --target N --text "值"` | 逐字符输入 |
+| `cloak press --key Enter` | 按键 |
+| `cloak scroll --direction down` | 滚动页面 |
+| `cloak hover --target N` | 悬停 |
+| `cloak select --target N --value "选项"` | 选择下拉选项 |
 
 ### 内容与网络
 
 | 命令 | 用途 |
 |------|------|
-| `bctl js eval "expression"` | 执行 JavaScript |
-| `bctl fetch URL` | 使用浏览器 cookie 发起 HTTP 请求 |
-| `bctl network requests` | 最近的网络请求 |
-| `bctl network console` | 控制台消息 |
+| `cloak js eval "expression"` | 执行 JavaScript |
+| `cloak fetch URL` | 使用浏览器 cookie 发起 HTTP 请求 |
+| `cloak network requests` | 最近的网络请求 |
+| `cloak network console` | 控制台消息 |
 
 ### 捕获与适配器
 
 | 命令 | 用途 |
 |------|------|
-| `bctl capture start/stop` | 录制网络流量 |
-| `bctl capture export --format har` | 导出为 HAR |
-| `bctl capture analyze` | 检测 API 模式 |
-| `bctl adapter list` | 列出站点适配器 |
-| `bctl adapter run NAME` | 运行指定适配器 |
+| `cloak capture start/stop` | 录制网络流量 |
+| `cloak capture export --format har` | 导出为 HAR |
+| `cloak capture analyze` | 检测 API 模式 |
+| `cloak adapter list` | 列出站点适配器 |
+| `cloak adapter run NAME` | 运行指定适配器 |
 
 ### 管理
 
 | 命令 | 用途 |
 |------|------|
-| `bctl profile create/list/launch/delete` | 浏览器配置管理 |
-| `bctl tab list/new/close/switch` | 标签页管理 |
-| `bctl doctor` | 诊断自检 |
-| `bctl daemon start/stop/health` | 守护进程生命周期 |
+| `cloak profile create/list/launch/delete` | 浏览器配置管理 |
+| `cloak tab list/new/close/switch` | 标签页管理 |
+| `cloak doctor` | 诊断自检 |
+| `cloak daemon start/stop/health` | 守护进程生命周期 |
 
 ## 架构
 
 ```
 +--------------+     +--------------+     +----------------------+
 |  CLI (typer) |---->| Daemon (HTTP)|---->| Browser Backend      |
-|  bctl / MCP  |     |  aiohttp     |     |  +- PatchrightContext |
+|  cloak / MCP  |     |  aiohttp     |     |  +- PatchrightContext |
 +--------------+     |  seq counter |     |  +- CloakContext      |
                      |  ring buffer |     |  +- RemoteBridgeCtx   |
                      +--------------+     +----------------------+
@@ -743,8 +743,8 @@ sudo apt-get install -y xvfb
 ## 开发
 
 ```bash
-git clone https://github.com/shayu01/browserctl.git
-cd browserctl
+git clone https://github.com/shayu01/agentcloak.git
+cd agentcloak
 pip install -e ".[dev,mcp,stealth]"
 python -m patchright install chromium
 ```

@@ -2,8 +2,8 @@
 
 import pytest
 
-from browserctl.core.errors import SecurityError
-from browserctl.core.security import (
+from agentcloak.core.errors import SecurityError
+from agentcloak.core.security import (
     ContentMatch,
     check_domain_allowed,
     scan_content,
