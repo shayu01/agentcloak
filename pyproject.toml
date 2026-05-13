@@ -53,10 +53,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/shayu01/agentcloak"
-Repository = "https://github.com/shayu01/agentcloak"
-Issues = "https://github.com/shayu01/agentcloak/issues"
-Changelog = "https://github.com/shayu01/agentcloak/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/shayuc137/agentcloak"
+Repository = "https://github.com/shayuc137/agentcloak"
+Issues = "https://github.com/shayuc137/agentcloak/issues"
+Changelog = "https://github.com/shayuc137/agentcloak/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

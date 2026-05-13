@@ -144,7 +144,7 @@ The Skill file teaches Claude Code how to use `cloak` commands. It auto-loads wh
 ```bash
 mkdir -p .claude/skills/agentcloak
 curl -o .claude/skills/agentcloak/SKILL.md \
-  https://raw.githubusercontent.com/shayu01/agentcloak/main/.claude/skills/agentcloak/SKILL.md
+  https://raw.githubusercontent.com/shayuc137/agentcloak/main/.claude/skills/agentcloak/SKILL.md
 ```
 
 After this, Claude Code will automatically pick up the Skill when a task involves web pages. No further configuration needed.
@@ -351,7 +351,7 @@ Layer isolation is strictly enforced: CLI cannot import browser internals, daemo
 ## Development
 
 ```bash
-git clone https://github.com/shayu01/agentcloak.git
+git clone https://github.com/shayuc137/agentcloak.git
 cd agentcloak
 pip install -e ".[dev,mcp,stealth]"
 python -m patchright install chromium
@@ -536,7 +536,7 @@ Skill 文件教会 Claude Code 如何使用 `cloak` 命令。当 agent 需要浏
 ```bash
 mkdir -p .claude/skills/agentcloak
 curl -o .claude/skills/agentcloak/SKILL.md \
-  https://raw.githubusercontent.com/shayu01/agentcloak/main/.claude/skills/agentcloak/SKILL.md
+  https://raw.githubusercontent.com/shayuc137/agentcloak/main/.claude/skills/agentcloak/SKILL.md
 ```
 
 安装后，Claude Code 在遇到涉及网页的任务时会自动识别并加载 Skill，无需其他配置。
@@ -743,7 +743,7 @@ sudo apt-get install -y xvfb
 ## 开发
 
 ```bash
-git clone https://github.com/shayu01/agentcloak.git
+git clone https://github.com/shayuc137/agentcloak.git
 cd agentcloak
 pip install -e ".[dev,mcp,stealth]"
 python -m patchright install chromium
