@@ -41,6 +41,12 @@ AGENTS.md
 !.claude/skills/agentcloak/
 !.claude/skills/agentcloak/SKILL.md
 .mcp.json
+CLAUDE.md
+
+# Codex / other platform configs
+.codex/
+.agents/
+.pi
 
 # jshook plugin (not ready for release)
 jshook-plugin/
