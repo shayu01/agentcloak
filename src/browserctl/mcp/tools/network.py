@@ -29,4 +29,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         result = await bridge.request(
             "GET", "/network", params={"since": since}
         )
-        return bridge._format_result(result)
+        return bridge.format_result(result)

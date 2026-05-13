@@ -67,6 +67,7 @@ def _write_session(
     }
     paths.ensure_dirs()
     paths.active_session_file.write_bytes(orjson.dumps(data))
+    os.chmod(str(paths.active_session_file), 0o600)
 
 
 def _clear_session(paths: Paths) -> None:
@@ -197,7 +198,7 @@ async def start(
     app["local_proxy"] = local_proxy
     app["bridge_token"] = bridge_token
 
-    logger.info("bridge_token_generated", token=bridge_token)
+    logger.info("bridge_token_generated", token_suffix=bridge_token[-4:])
 
     from browserctl.core.discovery import register_daemon
 
@@ -238,7 +239,7 @@ async def start(
 
     logger.info("daemon_starting", host=actual_host, port=actual_port)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(
             sig, lambda: asyncio.ensure_future(_graceful_shutdown(app))

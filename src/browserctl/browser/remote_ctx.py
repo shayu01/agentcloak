@@ -8,7 +8,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from browserctl.browser.state import ElementRef, PageSnapshot
+from browserctl.browser.state import INTERACTIVE_ROLES, ElementRef, PageSnapshot
 from browserctl.core.errors import BackendError, BrowserTimeoutError
 from browserctl.core.seq import RingBuffer, SeqCounter, SeqEvent
 from browserctl.core.types import StealthTier
@@ -78,7 +78,7 @@ class RemoteBridgeContext:
         return response.get("data", {})
 
     async def _wait_response(self, msg_id: str) -> dict[str, Any]:
-        fut: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = fut
         try:
             return await fut
@@ -139,22 +139,7 @@ class RemoteBridgeContext:
         selector_map: dict[int, ElementRef] = {}
         lines: list[str] = []
         counter = 1
-        interactive_roles = {
-            "button",
-            "checkbox",
-            "combobox",
-            "link",
-            "menuitem",
-            "option",
-            "radio",
-            "searchbox",
-            "slider",
-            "spinbutton",
-            "switch",
-            "tab",
-            "textbox",
-            "treeitem",
-        }
+        interactive_roles = INTERACTIVE_ROLES
         skip_roles = {"none", "InlineTextBox", "LineBreak"}
 
         for node in nodes:
@@ -234,7 +219,8 @@ class RemoteBridgeContext:
                     },
                 )
             else:
-                idx = target
+                # Validate idx is strictly an integer to prevent JS injection
+                idx = int(target)
                 js = (
                     "document.querySelector("
                     f"'[data-browserctl-idx=\"{idx}\"]'"

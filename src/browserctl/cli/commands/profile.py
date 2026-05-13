@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +15,7 @@ import typer
 from browserctl.cli.output import output_error, output_json
 from browserctl.core.config import load_config
 from browserctl.core.errors import ProfileError
+from browserctl.core.types import PROFILE_NAME_RE as _NAME_RE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,8 +23,6 @@ if TYPE_CHECKING:
 __all__ = ["app"]
 
 app = typer.Typer()
-
-_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def _validate_name(name: str) -> str:
@@ -213,6 +211,8 @@ def profile_launch(
         )
         return
 
+    # Acceptable exception to layer isolation: CLI starts daemon in-process
+    # for foreground mode (no HTTP API to call when daemon isn't running yet).
     from browserctl.daemon.server import start
 
     asyncio.run(start(host=host, port=port, headless=headless, profile=name))

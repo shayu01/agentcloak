@@ -1,7 +1,6 @@
 """Tests for adapters/analyzer.py — API pattern recognition."""
 
 from browserctl.adapters.analyzer import (
-    EndpointPattern,
     PatternAnalyzer,
     _extract_schema,
     _normalize_path,

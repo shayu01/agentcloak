@@ -29,10 +29,7 @@ def cookies_export(
 ) -> None:
     """Export cookies from remote Chrome via bridge."""
     client = DaemonClient()
-    body: dict[str, Any] = {}
-    if url:
-        body["url"] = url
-    result = _run(client._request("POST", "/cookies/export", json_body=body))
+    result = _run(client.cookies_export(url=url))
     data = result.get("data", result)
     seq = result.get("seq", 0)
 

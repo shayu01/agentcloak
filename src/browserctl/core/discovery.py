@@ -39,8 +39,7 @@ def register_daemon(port: int, token: str | None = None) -> bool:
         local_ip = _get_local_ip()
 
         properties: dict[str, str] = {"hostname": hostname}
-        if token:
-            properties["token"] = token
+        # Token is NOT broadcast over mDNS — must be obtained via session file
 
         info = ServiceInfo(
             SERVICE_TYPE,

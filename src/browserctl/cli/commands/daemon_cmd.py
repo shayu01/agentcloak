@@ -76,6 +76,8 @@ def daemon_start(
         )
         return
 
+    # Acceptable exception to layer isolation: CLI starts daemon in-process
+    # for foreground mode (no HTTP API to call when daemon isn't running yet).
     from browserctl.daemon.server import start
 
     asyncio.run(
@@ -96,9 +98,10 @@ def daemon_stop(
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
     """Stop the running daemon."""
-    from browserctl.daemon.server import stop
+    from browserctl.cli.client import DaemonClient
 
-    asyncio.run(stop(host=host, port=port))
+    client = DaemonClient(host=host, port=port, auto_start=False)
+    asyncio.run(client.shutdown())
     output_json({"stopped": True}, seq=0)
 
 
@@ -111,7 +114,7 @@ def daemon_cdp_endpoint(
     from browserctl.cli.client import DaemonClient
 
     client = DaemonClient(host=host, port=port)
-    result = asyncio.run(client._request("GET", "/cdp/endpoint"))
+    result = asyncio.run(client.cdp_endpoint())
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
@@ -121,17 +124,22 @@ def daemon_health(
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
     """Check daemon connectivity."""
-    from browserctl.daemon.server import health
+    from browserctl.cli.client import DaemonClient
 
-    ok = asyncio.run(health(host=host, port=port))
-    if ok:
-        output_json({"daemon": "running"}, seq=0)
-    else:
-        output_error(
-            DaemonConnectionError(
-                error="daemon_unreachable",
-                hint="Cannot connect to daemon",
-                action="run 'browserctl daemon start' first",
+    client = DaemonClient(host=host, port=port, auto_start=False)
+    try:
+        result = asyncio.run(client.health())
+        if result.get("ok"):
+            output_json({"daemon": "running"}, seq=0)
+        else:
+            output_error(
+                DaemonConnectionError(
+                    error="daemon_unreachable",
+                    hint="Cannot connect to daemon",
+                    action="run 'browserctl daemon start' first",
+                )
             )
-        )
-        raise typer.Exit(1)
+            raise typer.Exit(1)
+    except DaemonConnectionError as e:
+        output_error(e)
+        raise typer.Exit(1) from e

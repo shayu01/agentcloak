@@ -11,6 +11,7 @@ from aiohttp import WSMsgType, web
 from aiohttp.web import Request, Response
 
 from browserctl.browser.patchright_ctx import screenshot_to_base64
+from browserctl.core.types import PROFILE_NAME_RE as _PROFILE_NAME_RE
 
 logger = structlog.get_logger()
 
@@ -268,6 +269,7 @@ async def handle_fetch(request: Request) -> Response:
 
 
 async def handle_shutdown(request: Request) -> Response:
+    # Localhost check is now handled by error_middleware for all endpoints.
     request.app["shutdown_event"].set()
     return _ok({}, seq=0)
 
@@ -320,7 +322,8 @@ async def handle_cookies_export(request: Request) -> Response:
     if remote_ctx is not None:
         from browserctl.browser.remote_ctx import RemoteBridgeContext
 
-        assert isinstance(remote_ctx, RemoteBridgeContext)
+        if not isinstance(remote_ctx, RemoteBridgeContext):
+            raise RuntimeError("remote_ctx is not a RemoteBridgeContext instance")
         params: dict[str, Any] = {}
         if url:
             params["url"] = url
@@ -714,7 +717,18 @@ async def handle_profile_create_from_current(request: Request) -> Response:
 
     if not name:
         return _json(
-            {"ok": False, "error": "missing_name", "hint": "name is required"},
+            {"ok": False, "error": "missing_name", "hint": "name is required",
+             "action": "provide 'name' parameter"},
+            status=400,
+        )
+    if not _PROFILE_NAME_RE.match(name):
+        return _json(
+            {
+                "ok": False,
+                "error": "invalid_profile_name",
+                "hint": f"Profile name '{name}' is not valid",
+                "action": "use lowercase alphanumeric and hyphens",
+            },
             status=400,
         )
 
@@ -740,7 +754,8 @@ async def handle_profile_create_from_current(request: Request) -> Response:
     remote_ctx = request.app.get("remote_ctx")
     if remote_ctx is not None:
         from browserctl.browser.remote_ctx import RemoteBridgeContext
-        assert isinstance(remote_ctx, RemoteBridgeContext)
+        if not isinstance(remote_ctx, RemoteBridgeContext):
+            raise RuntimeError("remote_ctx is not a RemoteBridgeContext instance")
         cookies: list[dict[str, Any]] = await remote_ctx.send_command("cookies", {})
     else:
         browser_context = ctx._get_browser_context()
@@ -748,7 +763,9 @@ async def handle_profile_create_from_current(request: Request) -> Response:
 
     # Write cookies into a new persistent profile via subprocess (keeps daemon stable)
     import json as _json_mod
+    import os as _os
     import sys
+    import tempfile as _tempfile
 
     profile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -761,20 +778,32 @@ async def handle_profile_create_from_current(request: Request) -> Response:
     except ImportError:
         pass
 
-    cmd = [
-        sys.executable, "-m", "browserctl.browser._profile_writer",
-        "--profile-dir", str(profile_dir),
-        "--cookies-json", _json_mod.dumps(cookies),
-    ]
-    if exec_path:
-        cmd.extend(["--executable-path", exec_path])
+    # Write cookies to a temp file (mode 0o600) to avoid leaking via /proc cmdline
+    fd, cookies_file = _tempfile.mkstemp(suffix=".json", prefix="bctl-cookies-")
+    try:
+        with _os.fdopen(fd, "w") as f:
+            _json_mod.dump(cookies, f)
+        _os.chmod(cookies_file, 0o600)
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr_bytes = await proc.communicate()
+        cmd = [
+            sys.executable, "-m", "browserctl.browser._profile_writer",
+            "--profile-dir", str(profile_dir),
+            "--cookies-file", cookies_file,
+        ]
+        if exec_path:
+            cmd.extend(["--executable-path", exec_path])
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr_bytes = await proc.communicate()
+    finally:
+        # Always clean up the temp file
+        import contextlib
+        with contextlib.suppress(OSError):
+            _os.unlink(cookies_file)
     if proc.returncode != 0:
         err_msg = stderr_bytes.decode(errors="replace")[:300]
         return _json(
@@ -805,14 +834,34 @@ async def handle_profile_create(request: Request) -> Response:
     name: str = body.get("name", "")
     if not name:
         return _json(
-            {"ok": False, "error": "missing_name", "hint": "Profile name is required", "action": "provide 'name' parameter"},
+            {
+                "ok": False,
+                "error": "missing_name",
+                "hint": "Profile name is required",
+                "action": "provide 'name' parameter",
+            },
+            status=400,
+        )
+    if not _PROFILE_NAME_RE.match(name):
+        return _json(
+            {
+                "ok": False,
+                "error": "invalid_profile_name",
+                "hint": f"Profile name '{name}' is not valid",
+                "action": "use lowercase alphanumeric and hyphens",
+            },
             status=400,
         )
     paths, _ = load_config()
     profile_path = paths.profiles_dir / name
     if profile_path.exists():
         return _json(
-            {"ok": False, "error": "profile_exists", "hint": f"Profile '{name}' already exists", "action": "use a different name or delete first"},
+            {
+                "ok": False,
+                "error": "profile_exists",
+                "hint": f"Profile '{name}' already exists",
+                "action": "use a different name or delete first",
+            },
             status=409,
         )
     profile_path.mkdir(parents=True)
@@ -828,14 +877,34 @@ async def handle_profile_delete(request: Request) -> Response:
     name: str = body.get("name", "")
     if not name:
         return _json(
-            {"ok": False, "error": "missing_name", "hint": "Profile name is required", "action": "provide 'name' parameter"},
+            {
+                "ok": False,
+                "error": "missing_name",
+                "hint": "Profile name is required",
+                "action": "provide 'name' parameter",
+            },
+            status=400,
+        )
+    if not _PROFILE_NAME_RE.match(name):
+        return _json(
+            {
+                "ok": False,
+                "error": "invalid_profile_name",
+                "hint": f"Profile name '{name}' is not valid",
+                "action": "use lowercase alphanumeric and hyphens",
+            },
             status=400,
         )
     paths, _ = load_config()
     profile_path = paths.profiles_dir / name
     if not profile_path.exists():
         return _json(
-            {"ok": False, "error": "profile_not_found", "hint": f"Profile '{name}' does not exist", "action": "use profile list to see available profiles"},
+            {
+                "ok": False,
+                "error": "profile_not_found",
+                "hint": f"Profile '{name}' does not exist",
+                "action": "use profile list to see available",
+            },
             status=404,
         )
     shutil.rmtree(profile_path)

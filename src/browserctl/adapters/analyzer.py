@@ -13,7 +13,7 @@ from browserctl.core.types import Strategy
 if TYPE_CHECKING:
     from browserctl.core.capture import CaptureEntry
 
-__all__ = ["EndpointPattern", "PatternAnalyzer", "classify_param"]
+__all__ = ["EndpointPattern", "PatternAnalyzer"]
 
 _UUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I
@@ -125,17 +125,6 @@ def _infer_strategy(auth_headers: list[str]) -> Strategy:
     if "authorization" in lower:
         return Strategy.HEADER
     return Strategy.COOKIE
-
-
-def classify_param(name: str) -> str:
-    n = name.lower()
-    if n in _PAGINATION_PARAMS:
-        return "pagination"
-    if n in _FILTER_PARAMS:
-        return "filter"
-    if n in _SORT_PARAMS:
-        return "sort"
-    return "other"
 
 
 class PatternAnalyzer:

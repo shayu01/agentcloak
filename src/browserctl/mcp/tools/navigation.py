@@ -28,7 +28,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         result = await bridge.request(
             "POST", "/navigate", json_body={"url": url, "timeout": timeout}
         )
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_snapshot(
@@ -58,7 +58,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         if max_chars:
             params["max_chars"] = str(max_chars)
         result = await bridge.request("GET", "/snapshot", params=params)
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_screenshot(
@@ -86,4 +86,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         if full_page:
             params["full_page"] = "true"
         result = await bridge.request("GET", "/screenshot", params=params)
-        return bridge._format_result(result)
+        return bridge.format_result(result)

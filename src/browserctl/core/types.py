@@ -1,8 +1,13 @@
 """Shared type definitions."""
 
+import re
 from enum import StrEnum
 
-__all__ = ["StealthTier", "Strategy"]
+__all__ = ["PROFILE_NAME_RE", "StealthTier", "Strategy"]
+
+# Canonical profile name pattern: lowercase alphanumeric segments separated by
+# single hyphens.  No leading/trailing hyphen, no consecutive hyphens.
+PROFILE_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class StealthTier(StrEnum):

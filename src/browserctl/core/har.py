@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from browserctl.core.capture import CaptureEntry
 
-__all__ = ["from_har", "to_har"]
+__all__ = ["to_har"]
 
 
 def to_har(entries: list[CaptureEntry]) -> dict[str, Any]:
@@ -87,42 +87,3 @@ def _entry_to_har(entry: CaptureEntry) -> dict[str, Any]:
     }
 
 
-def from_har(har_data: dict[str, Any]) -> list[CaptureEntry]:
-    """Parse HAR 1.2 JSON into CaptureEntry list."""
-    log = har_data.get("log", har_data)
-    raw_entries: list[dict[str, Any]] = log.get("entries", [])
-    result: list[CaptureEntry] = []
-    for i, raw in enumerate(raw_entries):
-        req = raw.get("request", {})
-        resp = raw.get("response", {})
-        content = resp.get("content", {})
-
-        req_headers = {
-            h["name"]: h["value"]
-            for h in req.get("headers", [])
-        }
-        resp_headers = {
-            h["name"]: h["value"]
-            for h in resp.get("headers", [])
-        }
-
-        post_data = req.get("postData", {})
-        request_body = post_data.get("text") if post_data else None
-
-        result.append(
-            CaptureEntry(
-                seq=i,
-                timestamp=raw.get("startedDateTime", ""),
-                method=req.get("method", "GET"),
-                url=req.get("url", ""),
-                status=resp.get("status", 0),
-                resource_type="xhr",
-                request_headers=req_headers,
-                response_headers=resp_headers,
-                request_body=request_body,
-                response_body=content.get("text"),
-                content_type=content.get("mimeType", ""),
-                duration_ms=raw.get("time", 0.0),
-            )
-        )
-    return result

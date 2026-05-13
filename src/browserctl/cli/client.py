@@ -317,3 +317,9 @@ class DaemonClient:
 
     async def resume(self) -> dict[str, Any]:
         return await self._request("GET", "/resume")
+
+    async def cookies_export(self, *, url: str | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if url:
+            body["url"] = url
+        return await self._request("POST", "/cookies/export", json_body=body)

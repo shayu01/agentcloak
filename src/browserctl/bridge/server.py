@@ -149,11 +149,12 @@ class BridgeHub:
             message["params"] = params
         message.update(kw)
 
-        fut: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[msg_id] = fut
 
         try:
-            assert self._ext_ws is not None
+            if self._ext_ws is None:
+                raise RuntimeError("extension WebSocket is not connected")
             await self._ext_ws.send_str(json.dumps(message))
             result = await asyncio.wait_for(fut, timeout=60.0)
             return result
@@ -281,6 +282,7 @@ def _write_bridge_info(host: str, port: int, token: str | None) -> None:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
+        os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, str(info_path))
     except Exception:
         # Clean up on failure

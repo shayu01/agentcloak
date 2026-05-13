@@ -9,7 +9,6 @@ from typer.testing import CliRunner
 from browserctl.adapters.registry import get_registry
 from browserctl.cli.app import app
 
-
 runner = CliRunner()
 
 

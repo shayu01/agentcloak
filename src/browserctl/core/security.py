@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import html
 import re
 from fnmatch import fnmatch
 from urllib.parse import urlparse
 
+import structlog
+
 from browserctl.core.errors import SecurityError
+
+logger = structlog.get_logger()
 
 __all__ = [
     "ContentMatch",
@@ -31,7 +36,7 @@ def check_domain_allowed(
       - Both lists empty → allow all
       - Whitelist only → only whitelisted domains pass
       - Blacklist only → blacklisted domains blocked, rest pass
-      - Both → must be in whitelist AND not in blacklist
+      - Both → whitelist takes priority (whitelisted domains bypass blacklist)
     """
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").lower()
@@ -54,14 +59,15 @@ def check_domain_allowed(
     if not whitelist and not blacklist:
         return
 
+    # Whitelist takes priority: whitelisted domains bypass blacklist.
     if whitelist:
-        if not _matches_any(hostname, whitelist):
-            raise SecurityError(
-                error="domain_blocked",
-                hint=f"Domain '{hostname}' is not in the whitelist",
-                action=f"add '{hostname}' to [security] domain_whitelist in config",
-            )
-        return
+        if _matches_any(hostname, whitelist):
+            return
+        raise SecurityError(
+            error="domain_blocked",
+            hint=f"Domain '{hostname}' is not in the whitelist",
+            action=f"add '{hostname}' to [security] domain_whitelist in config",
+        )
 
     if blacklist and _matches_any(hostname, blacklist):
         raise SecurityError(
@@ -117,8 +123,8 @@ def scan_content(text: str, patterns: list[str]) -> list[ContentMatch]:
                         position=m.start(),
                     )
                 )
-        except re.error:
-            pass
+        except re.error as e:
+            logger.warning("invalid_scan_pattern", pattern=pattern, error=str(e))
     return matches
 
 
@@ -138,8 +144,9 @@ def wrap_untrusted(content: str, source_url: str, *, whitelist: list[str]) -> st
     if hostname and _matches_any(hostname, whitelist):
         return content
 
+    escaped_url = html.escape(source_url, quote=True)
     return (
-        f'<untrusted_web_content source="{source_url}">\n'
+        f'<untrusted_web_content source="{escaped_url}">\n'
         f"{content}\n"
         f"</untrusted_web_content>"
     )

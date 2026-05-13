@@ -1,6 +1,5 @@
 """Three-field error envelope and exception hierarchy."""
 
-from dataclasses import dataclass
 from typing import Any
 
 __all__ = [
@@ -9,28 +8,10 @@ __all__ = [
     "BrowserTimeoutError",
     "DaemonConnectionError",
     "ElementNotFoundError",
-    "ErrorEnvelope",
     "NavigationError",
     "ProfileError",
     "SecurityError",
 ]
-
-
-@dataclass(frozen=True)
-class ErrorEnvelope:
-    """Machine-readable error structure: classify, explain, suggest recovery."""
-
-    error: str
-    hint: str
-    action: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "ok": False,
-            "error": self.error,
-            "hint": self.hint,
-            "action": self.action,
-        }
 
 
 class AgentBrowserError(Exception):
@@ -49,9 +30,6 @@ class AgentBrowserError(Exception):
             "hint": self.hint,
             "action": self.action,
         }
-
-    def to_envelope(self) -> ErrorEnvelope:
-        return ErrorEnvelope(error=self.error, hint=self.hint, action=self.action)
 
 
 class NavigationError(AgentBrowserError):

@@ -62,6 +62,13 @@ class DaemonBridge:
             return await self._do_request(
                 method, path, json_body=json_body, params=params
             )
+        except httpx.HTTPError as exc:
+            return {
+                "ok": False,
+                "error": "daemon_request_failed",
+                "hint": f"HTTP request to daemon failed: {exc}",
+                "action": "check daemon status with browserctl_status or restart",
+            }
 
     async def _do_request(
         self,
@@ -177,7 +184,7 @@ class DaemonBridge:
         except Exception:
             pass
 
-    def _format_result(self, data: dict[str, Any]) -> str:
+    def format_result(self, data: dict[str, Any]) -> str:
         if not data.get("ok"):
             error = data.get("error", "unknown_error")
             hint = data.get("hint", "")

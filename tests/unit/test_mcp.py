@@ -12,7 +12,7 @@ class TestDaemonBridge:
         bridge = DaemonBridge.__new__(DaemonBridge)
         bridge._base = "http://127.0.0.1:9222"
         data = {"ok": True, "seq": 1, "data": {"title": "Test"}}
-        result = bridge._format_result(data)
+        result = bridge.format_result(data)
         parsed = json.loads(result)
         assert parsed == {"title": "Test"}
 
@@ -25,7 +25,7 @@ class TestDaemonBridge:
             "hint": "Page not found",
             "action": "check URL",
         }
-        result = bridge._format_result(data)
+        result = bridge.format_result(data)
         parsed = json.loads(result)
         assert parsed["error"] == "navigation_failed"
 

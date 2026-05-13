@@ -35,7 +35,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             result = await bridge.request("GET", "/cdp/endpoint")
         else:
             result = await bridge.request("GET", "/health")
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": False})
     async def browserctl_cookies(
@@ -67,7 +67,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             result = await bridge.request(
                 "POST", "/cookies/export", json_body=json_body
             )
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         if action == "import":
             if not cookies_json:
@@ -82,7 +82,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             result = await bridge.request(
                 "POST", "/cookies/import", json_body={"cookies": cookies}
             )
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         return json.dumps(
             {"error": "unknown_action", "hint": f"Unknown: {action}"}
@@ -115,7 +115,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         result = await bridge.launch_daemon(
             headless=True, stealth=stealth, profile=profile
         )
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": False})
     async def browserctl_adapter_run(
@@ -140,7 +140,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         result = await bridge.request(
             "POST", "/site/run", json_body={"name": name, "args": parsed_args}
         )
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_adapter_list() -> str:
@@ -150,7 +150,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with adapters array (site, name, strategy, description).
         """
         result = await bridge.request("GET", "/site/list")
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": False})
     async def browserctl_profile(
@@ -196,11 +196,23 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
                 }
             )
 
+        from browserctl.core.types import PROFILE_NAME_RE
+
+        if not PROFILE_NAME_RE.match(name):
+            return json.dumps(
+                {
+                    "error": "invalid_profile_name",
+                    "hint": f"Profile name '{name}' is not valid",
+                    "action": "use lowercase alphanumeric and hyphens"
+                    ", e.g. 'work' or 'dev-testing'",
+                }
+            )
+
         if action == "create" and from_current:
             result = await bridge.request(
                 "POST", "/profile/create-from-current", json_body={"name": name}
             )
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         profile_path = profiles_dir / name
         if action == "create":
@@ -258,14 +270,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         """
         if action == "list":
             result = await bridge.request("GET", "/tabs")
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         if action == "new":
             json_body: dict[str, Any] = {}
             if url:
                 json_body["url"] = url
             result = await bridge.request("POST", "/tab/new", json_body=json_body)
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         if action == "close":
             if tab_id < 0:
@@ -279,7 +291,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             result = await bridge.request(
                 "POST", "/tab/close", json_body={"tab_id": tab_id}
             )
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         if action == "switch":
             if tab_id < 0:
@@ -293,7 +305,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             result = await bridge.request(
                 "POST", "/tab/switch", json_body={"tab_id": tab_id}
             )
-            return bridge._format_result(result)
+            return bridge.format_result(result)
 
         return json.dumps(
             {
@@ -399,4 +411,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             stealth_tier, and timestamp.
         """
         result = await bridge.request("GET", "/resume")
-        return bridge._format_result(result)
+        return bridge.format_result(result)

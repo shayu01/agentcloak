@@ -91,4 +91,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             else:
                 json_body["headers"] = headers_json
         result = await bridge.request("POST", "/fetch", json_body=json_body)
-        return bridge._format_result(result)
+        return bridge.format_result(result)

@@ -45,7 +45,11 @@ async def execute_adapter(
         await browser.navigate(meta.navigate_before)
 
     if entry.is_pipeline:
-        assert meta.pipeline is not None
+        if meta.pipeline is None:
+            raise RuntimeError(
+                f"Adapter '{meta.full_name}' marked as pipeline"
+                " but has no pipeline definition"
+            )
         raw = await execute_pipeline(meta.pipeline, args=args, browser=browser)
         if isinstance(raw, list):
             return raw  # type: ignore[return-value]

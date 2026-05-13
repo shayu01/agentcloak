@@ -1,7 +1,7 @@
 """Tests for core/har.py — HAR serialization."""
 
 from browserctl.core.capture import CaptureEntry
-from browserctl.core.har import from_har, to_har
+from browserctl.core.har import to_har
 
 
 def _make_entry(**kw: object) -> CaptureEntry:
@@ -69,37 +69,3 @@ class TestToHar:
     def test_empty_entries(self) -> None:
         har = to_har([])
         assert har["log"]["entries"] == []
-
-
-class TestFromHar:
-    def test_roundtrip(self) -> None:
-        original = [_make_entry()]
-        har = to_har(original)
-        parsed = from_har(har)
-        assert len(parsed) == 1
-        assert parsed[0].method == "GET"
-        assert parsed[0].url == "https://api.example.com/v1/users?page=1"
-        assert parsed[0].status == 200
-
-    def test_preserves_headers(self) -> None:
-        original = [_make_entry()]
-        har = to_har(original)
-        parsed = from_har(har)
-        assert "Authorization" in parsed[0].request_headers
-
-    def test_preserves_body(self) -> None:
-        original = [_make_entry(response_body='{"ok": true}')]
-        har = to_har(original)
-        parsed = from_har(har)
-        assert parsed[0].response_body == '{"ok": true}'
-
-    def test_multiple_entries(self) -> None:
-        entries = [_make_entry(seq=i) for i in range(5)]
-        har = to_har(entries)
-        parsed = from_har(har)
-        assert len(parsed) == 5
-
-    def test_accepts_nested_log(self) -> None:
-        har = {"log": {"version": "1.2", "entries": []}}
-        parsed = from_har(har)
-        assert parsed == []

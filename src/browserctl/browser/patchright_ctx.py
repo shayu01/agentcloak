@@ -15,7 +15,12 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
-from browserctl.browser.state import ElementRef, PageSnapshot, TabInfo
+from browserctl.browser.state import (
+    INTERACTIVE_ROLES,
+    ElementRef,
+    PageSnapshot,
+    TabInfo,
+)
 from browserctl.core.capture import CaptureEntry, CaptureStore
 from browserctl.core.errors import (
     BackendError,
@@ -30,26 +35,7 @@ __all__ = ["PatchrightContext"]
 
 logger = structlog.get_logger()
 
-_INTERACTIVE_ROLES = frozenset(
-    {
-        "button",
-        "checkbox",
-        "combobox",
-        "link",
-        "menuitem",
-        "menuitemcheckbox",
-        "menuitemradio",
-        "option",
-        "radio",
-        "searchbox",
-        "slider",
-        "spinbutton",
-        "switch",
-        "tab",
-        "textbox",
-        "treeitem",
-    }
-)
+_INTERACTIVE_ROLES = INTERACTIVE_ROLES
 
 
 _SKIP_ROLES = frozenset({"none", "InlineTextBox", "LineBreak"})
@@ -149,7 +135,7 @@ class PatchrightContext:
                 self._pending_captures.add(task)
                 task.add_done_callback(self._pending_captures.discard)
         except Exception:
-            pass
+            logger.debug("on_response_error", exc_info=True)
 
     async def _record_capture_async(self, request: Any, response: Any) -> None:
         try:

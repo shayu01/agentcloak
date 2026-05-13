@@ -79,16 +79,20 @@ def _check_data_dir(paths: Paths) -> dict[str, Any]:
 
 
 def _check_daemon(cfg: BrowserctlConfig) -> dict[str, Any]:
-    from browserctl.daemon.server import health
+    from browserctl.cli.client import DaemonClient
 
-    ok = asyncio.run(health(host=cfg.daemon_host, port=cfg.daemon_port))
-    if ok:
-        return {
-            "name": "daemon",
-            "ok": True,
-            "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
-            "hint": "",
-        }
+    client = DaemonClient(host=cfg.daemon_host, port=cfg.daemon_port, auto_start=False)
+    try:
+        result = asyncio.run(client.health())
+        if result.get("ok"):
+            return {
+                "name": "daemon",
+                "ok": True,
+                "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
+                "hint": "",
+            }
+    except Exception:
+        pass
     return {
         "name": "daemon",
         "ok": False,

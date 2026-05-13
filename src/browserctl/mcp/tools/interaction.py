@@ -59,4 +59,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         if kind == "scroll":
             body["direction"] = direction
         result = await bridge.request("POST", "/action", json_body=body)
-        return bridge._format_result(result)
+        return bridge.format_result(result)

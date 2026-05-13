@@ -118,23 +118,3 @@ class ResumeWriter:
     @property
     def current_snapshot(self) -> ResumeSnapshot:
         return self._snapshot
-
-
-def load_resume(paths: Paths) -> ResumeSnapshot | None:
-    """Read resume.json from disk, return None if not exists."""
-    if not paths.resume_file.exists():
-        return None
-    try:
-        raw: dict[str, Any] = orjson.loads(paths.resume_file.read_bytes())
-        return ResumeSnapshot(
-            url=raw.get("url", ""),
-            title=raw.get("title", ""),
-            tabs=raw.get("tabs", []),
-            recent_actions=raw.get("recent_actions", []),
-            capture_active=raw.get("capture_active", False),
-            stealth_tier=raw.get("stealth_tier", ""),
-            timestamp=raw.get("timestamp", ""),
-        )
-    except Exception:
-        logger.warning("resume_load_failed", path=str(paths.resume_file))
-        return None

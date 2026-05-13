@@ -8,7 +8,35 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from browserctl.core.types import StealthTier
 
-__all__ = ["BrowserState", "ElementRef", "PageInfo", "PageSnapshot", "TabInfo"]
+__all__ = [
+    "INTERACTIVE_ROLES",
+    "BrowserState",
+    "ElementRef",
+    "PageInfo",
+    "PageSnapshot",
+    "TabInfo",
+]
+
+INTERACTIVE_ROLES = frozenset(
+    {
+        "button",
+        "checkbox",
+        "combobox",
+        "link",
+        "menuitem",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "option",
+        "radio",
+        "searchbox",
+        "slider",
+        "spinbutton",
+        "switch",
+        "tab",
+        "textbox",
+        "treeitem",
+    }
+)
 
 
 @dataclass(frozen=True)

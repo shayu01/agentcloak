@@ -131,9 +131,11 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, BrowserctlConfig]:
     else:
         cfg.domain_whitelist = security.get("domain_whitelist", cfg.domain_whitelist)
 
-    cfg.content_scan = bool(
-        _env("CONTENT_SCAN") or security.get("content_scan", cfg.content_scan)
-    )
+    content_scan_env = _env("CONTENT_SCAN")
+    if content_scan_env is not None:
+        cfg.content_scan = content_scan_env.lower() in ("true", "1", "yes")
+    else:
+        cfg.content_scan = bool(security.get("content_scan", cfg.content_scan))
 
     blacklist_env = _env("DOMAIN_BLACKLIST")
     if blacklist_env is not None:

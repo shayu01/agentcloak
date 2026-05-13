@@ -253,8 +253,9 @@ class TestRoutes:
 
     @pytest.mark.asyncio
     async def test_capture_replay_ok(self, client: TestClient) -> None:
+        from datetime import UTC, datetime
+
         from browserctl.core.capture import CaptureEntry
-        from datetime import datetime, UTC
 
         ctx = client.app["browser_ctx"]
         ctx._capture_store.start()

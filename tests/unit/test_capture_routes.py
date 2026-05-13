@@ -6,9 +6,8 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 from aiohttp import web
-from aiohttp.test_utils import AioHTTPTestCase
 
-from browserctl.core.capture import CaptureEntry, CaptureStore
+from browserctl.core.capture import CaptureStore
 from browserctl.daemon.routes import setup_routes
 
 

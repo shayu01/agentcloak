@@ -45,7 +45,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             )
         else:
             result = await bridge.request("POST", "/capture/start")
-        return bridge._format_result(result)
+        return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def browserctl_capture_query(
@@ -83,4 +83,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             )
         else:
             result = await bridge.request("GET", "/capture/status")
-        return bridge._format_result(result)
+        return bridge.format_result(result)
