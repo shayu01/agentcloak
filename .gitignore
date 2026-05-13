@@ -31,6 +31,20 @@ Thumbs.db
 .env
 .env.local
 
-# Trellis workspace artifacts (journals tracked, but large artifacts excluded)
-.trellis/workspace/*/screenshots/
-.trellis/workspace/*/artifacts/
+# Trellis (local project management, not for public repo)
+.trellis/
+AGENTS.md
+
+# Claude Code local config
+.claude/
+!.claude/skills/
+!.claude/skills/agentcloak/
+!.claude/skills/agentcloak/SKILL.md
+.mcp.json
+
+# jshook plugin (not ready for release)
+jshook-plugin/
+
+# Trellis workspace artifacts (legacy)
+# .trellis/workspace/*/screenshots/
+# .trellis/workspace/*/artifacts/
