@@ -30,14 +30,33 @@ def daemon_start(
         None, "--profile", "-p", help="Browser profile name."
     ),
     stealth: bool = typer.Option(
-        False, "--stealth", "-s", help="Enable CloakBrowser stealth mode."
+        False, "--stealth", "-s", help="[Deprecated] CloakBrowser is now the default.",
+        hidden=True,
+    ),
+    humanize: bool = typer.Option(
+        False, "--humanize", help="Enable humanize behavioral layer."
     ),
     no_humanize: bool = typer.Option(
-        False, "--no-humanize", help="Disable humanize layer in stealth mode."
+        False, "--no-humanize", help="Explicitly disable humanize layer.",
+        hidden=True,
     ),
 ) -> None:
     """Start the agentcloak daemon."""
-    humanize: bool | None = False if no_humanize else None
+    import warnings
+
+    if stealth:
+        warnings.warn(
+            "--stealth is deprecated: CloakBrowser is now the default backend. "
+            "This flag will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
+
+    resolved_humanize: bool | None = None
+    if humanize:
+        resolved_humanize = True
+    elif no_humanize:
+        resolved_humanize = False
 
     if background:
         cmd = [sys.executable, "-m", "agentcloak.daemon"]
@@ -49,9 +68,9 @@ def daemon_start(
             cmd.append("--headed")
         if profile:
             cmd.extend(["--profile", profile])
-        if stealth:
-            cmd.append("--stealth")
-        if no_humanize:
+        if resolved_humanize is True:
+            cmd.append("--humanize")
+        elif resolved_humanize is False:
             cmd.append("--no-humanize")
         proc = subprocess.Popen(
             cmd,
@@ -62,22 +81,18 @@ def daemon_start(
         from agentcloak.core.config import load_config, resolve_tier
 
         _, cfg = load_config()
-        raw_tier = "cloak" if stealth else cfg.default_tier
-        resolved_tier = resolve_tier(raw_tier)
+        resolved_tier = resolve_tier(cfg.default_tier)
         output_json(
             {
                 "pid": proc.pid,
                 "background": True,
                 "profile": profile,
-                "stealth": stealth,
                 "tier": resolved_tier,
             },
             seq=0,
         )
         return
 
-    # Acceptable exception to layer isolation: CLI starts daemon in-process
-    # for foreground mode (no HTTP API to call when daemon isn't running yet).
     from agentcloak.daemon.server import start
 
     asyncio.run(
@@ -87,7 +102,7 @@ def daemon_start(
             headless=headless,
             profile=profile,
             stealth=stealth,
-            humanize=humanize,
+            humanize=resolved_humanize,
         )
     )
 

@@ -19,9 +19,9 @@ __all__ = ["app"]
 
 app = typer.Typer()
 
-_REQUIRED_PACKAGES = ["typer", "orjson", "structlog", "aiohttp", "patchright"]
+_REQUIRED_PACKAGES = ["typer", "orjson", "structlog", "aiohttp", "cloakbrowser"]
 
-_STEALTH_PACKAGES = ["cloakbrowser", "httpcloak"]
+_STEALTH_PACKAGES = ["httpcloak"]
 
 _CHROMIUM_BINARIES = [
     "chromium-browser",
@@ -64,7 +64,7 @@ def _check_chromium() -> dict[str, Any]:
         "name": "chromium",
         "ok": False,
         "detail": "not found",
-        "hint": "install chromium or run 'patchright install chromium'",
+        "hint": "install chromium or run 'playwright install chromium'",
     }
 
 
@@ -110,7 +110,7 @@ def _check_xvfb() -> dict[str, Any]:
         "ok": False,
         "detail": "not found",
         "hint": "sudo apt-get install -y xvfb "
-        "(required for --stealth on headless Linux)",
+        "(required for headed mode on headless Linux)",
     }
 
 
@@ -137,7 +137,7 @@ def _check_cloakbrowser_binary() -> dict[str, Any]:
             "name": "cloakbrowser_binary",
             "ok": False,
             "detail": "cloakbrowser not installed",
-            "hint": "pip install agentcloak[stealth]",
+            "hint": "pip install agentcloak",
         }
     except Exception:
         return {
@@ -158,21 +158,21 @@ def run_doctor() -> None:
     for pkg in _REQUIRED_PACKAGES:
         checks.append(_check_package(pkg))
     checks.append(_check_chromium())
+    checks.append(_check_cloakbrowser_binary())
     checks.append(_check_data_dir(paths))
     checks.append(_check_daemon(cfg))
 
-    # Stealth checks (informational — not required for basic operation)
+    # Optional extras (informational — not required for basic operation)
     stealth_checks: list[dict[str, Any]] = []
     for pkg in _STEALTH_PACKAGES:
         stealth_checks.append(_check_package(pkg))
     stealth_checks.append(_check_xvfb())
-    stealth_checks.append(_check_cloakbrowser_binary())
 
     all_ok = all(c["ok"] for c in checks)
     data: dict[str, Any] = {
         "healthy": all_ok,
         "checks": checks,
-        "stealth": {
+        "extras": {
             "available": all(c["ok"] for c in stealth_checks),
             "checks": stealth_checks,
         },

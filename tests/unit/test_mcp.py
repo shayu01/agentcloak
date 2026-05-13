@@ -107,18 +107,22 @@ class TestMCPServerCreation:
 
 
 class TestResolveTier:
-    def test_patchright_passthrough(self) -> None:
+    def test_patchright_maps_to_playwright(self) -> None:
         from agentcloak.core.config import resolve_tier
 
-        assert resolve_tier("patchright") == "patchright"
+        assert resolve_tier("patchright") == "playwright"
+
+    def test_playwright_passthrough(self) -> None:
+        from agentcloak.core.config import resolve_tier
+
+        assert resolve_tier("playwright") == "playwright"
 
     def test_cloak_passthrough(self) -> None:
         from agentcloak.core.config import resolve_tier
 
         assert resolve_tier("cloak") == "cloak"
 
-    def test_auto_resolves(self) -> None:
+    def test_auto_resolves_to_cloak(self) -> None:
         from agentcloak.core.config import resolve_tier
 
-        result = resolve_tier("auto")
-        assert result in ("patchright", "cloak")
+        assert resolve_tier("auto") == "cloak"

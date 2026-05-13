@@ -39,6 +39,10 @@ class BrowserContext(Protocol):
         quality: int = 80,
     ) -> bytes: ...
 
+    async def raw_cdp(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> Any: ...
+
     async def close(self) -> None: ...
 
     @property

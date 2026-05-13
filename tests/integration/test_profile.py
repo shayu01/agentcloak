@@ -9,10 +9,10 @@ from urllib.parse import urlparse
 import pytest
 
 
-@pytest.mark.parametrize("backend", ["patchright"])
+@pytest.mark.parametrize("backend", ["playwright"])
 async def test_profile_cookie_persistence(backend: str, local_server: str) -> None:
     """Set cookie via Playwright API, close context, reopen, verify cookie."""
-    from agentcloak.browser.patchright_ctx import launch_patchright
+    from agentcloak.browser.playwright_ctx import launch_playwright
 
     parsed = urlparse(local_server)
 
@@ -21,7 +21,7 @@ async def test_profile_cookie_persistence(backend: str, local_server: str) -> No
         profile_dir.mkdir()
 
         # First session: add a persistent cookie via Playwright API
-        ctx1 = await launch_patchright(
+        ctx1 = await launch_playwright(
             headless=True,
             viewport_width=1280,
             viewport_height=720,
@@ -49,7 +49,7 @@ async def test_profile_cookie_persistence(backend: str, local_server: str) -> No
         await ctx1.close()
 
         # Second session: verify cookie persists
-        ctx2 = await launch_patchright(
+        ctx2 = await launch_playwright(
             headless=True,
             viewport_width=1280,
             viewport_height=720,

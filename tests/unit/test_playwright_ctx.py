@@ -1,4 +1,4 @@
-"""Tests for browser/patchright_ctx.py — PatchrightContext with mocked Playwright."""
+"""Tests for browser/playwright_ctx.py — PlaywrightContext with mocked Playwright."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.errors import BackendError, BrowserTimeoutError, NavigationError
 from agentcloak.core.seq import RingBuffer, SeqCounter
 
@@ -83,9 +83,9 @@ def _default_page() -> MagicMock:
 def _make_ctx(
     *,
     page: Any | None = None,
-) -> PatchrightContext:
+) -> PlaywrightContext:
     mock_page = page if page is not None else _default_page()
-    return PatchrightContext(
+    return PlaywrightContext(
         page=mock_page,
         browser=MagicMock(),
         playwright=MagicMock(),
@@ -432,4 +432,4 @@ class TestSeqBehavior:
 class TestProperties:
     def test_stealth_tier(self) -> None:
         ctx = _make_ctx()
-        assert ctx.stealth_tier.value == "patchright"
+        assert ctx.stealth_tier.value == "playwright"

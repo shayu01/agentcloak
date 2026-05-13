@@ -20,10 +20,7 @@ async def _run(
 ) -> None:
     cookies: list[dict] = json.loads(cookies_json)
 
-    try:
-        from patchright.async_api import async_playwright
-    except ImportError:
-        from playwright.async_api import async_playwright  # type: ignore[no-redef]
+    from playwright.async_api import async_playwright
 
     pw = await async_playwright().start()
     try:

@@ -24,7 +24,7 @@ __all__ = [
 
 async def create_context(
     *,
-    tier: StealthTier = StealthTier.PATCHRIGHT,
+    tier: StealthTier = StealthTier.CLOAK,
     headless: bool = True,
     viewport_width: int = 1280,
     viewport_height: int = 800,
@@ -34,10 +34,10 @@ async def create_context(
     proxy_url: str | None = None,
 ) -> BrowserContext:
     """Factory: create a browser context for the given stealth tier."""
-    if tier == StealthTier.PATCHRIGHT:
-        from agentcloak.browser.patchright_ctx import launch_patchright
+    if tier == StealthTier.PLAYWRIGHT:
+        from agentcloak.browser.playwright_ctx import launch_playwright
 
-        return await launch_patchright(
+        return await launch_playwright(
             headless=headless,
             viewport_width=viewport_width,
             viewport_height=viewport_height,

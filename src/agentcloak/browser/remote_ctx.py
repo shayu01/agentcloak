@@ -305,6 +305,13 @@ class RemoteBridgeContext:
         b64 = result.get("base64", "")
         return base64.b64decode(b64)
 
+    async def raw_cdp(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> Any:
+        return await self.send_command(
+            "cdp", {"method": method, "params": params or {}}
+        )
+
     async def close(self) -> None:
         if not self._ws.closed:
             await self._ws.close()

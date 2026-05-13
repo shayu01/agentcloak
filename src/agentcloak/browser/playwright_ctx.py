@@ -1,4 +1,4 @@
-"""PatchrightContext — default browser backend using patchright (Playwright fork)."""
+"""PlaywrightContext — browser backend using standard Playwright."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from agentcloak.core.errors import (
 from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 from agentcloak.core.types import StealthTier
 
-__all__ = ["PatchrightContext"]
+__all__ = ["PlaywrightContext"]
 
 logger = structlog.get_logger()
 
@@ -67,8 +67,8 @@ def _find_chromium() -> str | None:
     return None
 
 
-class PatchrightContext:
-    """BrowserContext implementation backed by patchright/playwright."""
+class PlaywrightContext:
+    """BrowserContext implementation backed by Playwright."""
 
     def __init__(
         self,
@@ -200,7 +200,7 @@ class PatchrightContext:
 
     @property
     def stealth_tier(self) -> StealthTier:
-        return StealthTier.PATCHRIGHT
+        return StealthTier.PLAYWRIGHT
 
     async def navigate(self, url: str, *, timeout: float = 30.0) -> dict[str, Any]:
         try:
@@ -1081,6 +1081,21 @@ class PatchrightContext:
             title = ""
         return {"tab_id": tab_id, "url": url, "title": title}
 
+    async def raw_cdp(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> Any:
+        cdp = await self._page.context.new_cdp_session(self._page)
+        try:
+            return await cdp.send(method, params or {})
+        except Exception as exc:
+            raise BackendError(
+                error="cdp_call_failed",
+                hint=f"{method}: {exc}",
+                action="check CDP method name and parameters",
+            ) from exc
+        finally:
+            await cdp.detach()
+
     async def close(self) -> None:
         if self._browser is not None:
             await self._browser.close()
@@ -1094,19 +1109,16 @@ def screenshot_to_base64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-async def launch_patchright(
+async def launch_playwright(
     *,
     headless: bool = True,
     viewport_width: int = 1280,
     viewport_height: int = 800,
     profile_dir: Path | None = None,
     proxy_url: str | None = None,
-) -> PatchrightContext:
-    """Launch a patchright browser and return a context."""
-    try:
-        from patchright.async_api import async_playwright
-    except ImportError:
-        from playwright.async_api import async_playwright
+) -> PlaywrightContext:
+    """Launch a Playwright browser and return a context."""
+    from playwright.async_api import async_playwright
 
     pw = await async_playwright().start()
     executable = _find_chromium()
@@ -1135,7 +1147,7 @@ async def launch_patchright(
             raise BackendError(
                 error="browser_launch_failed",
                 hint=str(exc),
-                action="run 'patchright install chromium' or install system chromium",
+                action="run 'playwright install chromium' or install system chromium",
             ) from exc
 
         pages = browser_context.pages
@@ -1144,7 +1156,7 @@ async def launch_patchright(
         seq_counter = SeqCounter()
         ring_buffer = RingBuffer()
 
-        return PatchrightContext(
+        return PlaywrightContext(
             page=page,
             browser=None,
             playwright=pw,
@@ -1167,7 +1179,7 @@ async def launch_patchright(
         raise BackendError(
             error="browser_launch_failed",
             hint=str(exc),
-            action="run 'patchright install chromium' or install system chromium",
+            action="run 'playwright install chromium' or install system chromium",
         ) from exc
 
     ctx = await browser.new_context(
@@ -1178,7 +1190,7 @@ async def launch_patchright(
     seq_counter = SeqCounter()
     ring_buffer = RingBuffer()
 
-    return PatchrightContext(
+    return PlaywrightContext(
         page=page,
         browser=browser,
         playwright=pw,

@@ -11,7 +11,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 from agentcloak.daemon.middleware import error_middleware
 from agentcloak.daemon.routes import setup_routes
@@ -56,7 +56,7 @@ def _mock_cdp() -> MagicMock:
     return cdp
 
 
-def _mock_ctx() -> PatchrightContext:
+def _mock_ctx() -> PlaywrightContext:
     page = MagicMock()
     page.on = MagicMock()
     page.url = "https://example.com"
@@ -83,7 +83,7 @@ def _mock_ctx() -> PatchrightContext:
         )
     )
 
-    ctx = PatchrightContext(
+    ctx = PlaywrightContext(
         page=page,
         browser=MagicMock(),
         playwright=MagicMock(),

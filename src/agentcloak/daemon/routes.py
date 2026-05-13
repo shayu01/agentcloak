@@ -10,7 +10,7 @@ import structlog
 from aiohttp import WSMsgType, web
 from aiohttp.web import Request, Response
 
-from agentcloak.browser.patchright_ctx import screenshot_to_base64
+from agentcloak.browser.playwright_ctx import screenshot_to_base64
 from agentcloak.core.types import PROFILE_NAME_RE as _PROFILE_NAME_RE
 
 logger = structlog.get_logger()

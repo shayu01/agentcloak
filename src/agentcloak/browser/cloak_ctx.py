@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agentcloak.browser.patchright_ctx import PatchrightContext, _find_free_port
+from agentcloak.browser.playwright_ctx import PlaywrightContext, _find_free_port
 from agentcloak.core.errors import BackendError
 from agentcloak.core.seq import RingBuffer, SeqCounter
 from agentcloak.core.types import StealthTier
@@ -39,8 +39,8 @@ def _build_extension_args(extensions: list[str] | None) -> list[str]:
     ]
 
 
-class CloakContext(PatchrightContext):
-    """PatchrightContext subclass that reports CLOAK stealth tier."""
+class CloakContext(PlaywrightContext):
+    """PlaywrightContext subclass that reports CLOAK stealth tier."""
 
     @property
     def stealth_tier(self) -> StealthTier:
@@ -76,7 +76,6 @@ async def launch_cloak(
             headless=headless,
             args=all_args,
             humanize=humanize,
-            backend="patchright",
             viewport={"width": viewport_width, "height": viewport_height},
         )
 
@@ -98,7 +97,6 @@ async def launch_cloak(
         headless=headless,
         args=all_args,
         humanize=humanize,
-        backend="patchright",
     )
 
     ctx = await browser.new_context(

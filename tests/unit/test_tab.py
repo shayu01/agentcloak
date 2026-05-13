@@ -1,4 +1,4 @@
-"""Tests for multi-tab management in PatchrightContext."""
+"""Tests for multi-tab management in PlaywrightContext."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.errors import ElementNotFoundError
 from agentcloak.core.seq import RingBuffer, SeqCounter
 
@@ -73,13 +73,13 @@ def _make_ctx(
     *,
     page: Any | None = None,
     browser_context: Any | None = None,
-) -> PatchrightContext:
+) -> PlaywrightContext:
     mock_page = page if page is not None else _default_page()
     mock_browser_ctx = browser_context if browser_context is not None else MagicMock()
     if browser_context is None:
         new_page_mock = _default_page("about:blank", "")
         mock_browser_ctx.new_page = AsyncMock(return_value=new_page_mock)
-    return PatchrightContext(
+    return PlaywrightContext(
         page=mock_page,
         browser=MagicMock(),
         playwright=MagicMock(),
@@ -333,7 +333,7 @@ class TestEphemeralMode:
         new_page = _default_page("about:blank", "")
         page.context.new_page = AsyncMock(return_value=new_page)
 
-        ctx = PatchrightContext(
+        ctx = PlaywrightContext(
             page=page,
             browser=MagicMock(),
             playwright=MagicMock(),

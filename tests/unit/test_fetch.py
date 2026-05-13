@@ -1,4 +1,4 @@
-"""Tests for fetch — PatchrightContext.fetch() + daemon route."""
+"""Tests for fetch — PlaywrightContext.fetch() + daemon route."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from agentcloak.browser.patchright_ctx import PatchrightContext
+from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.errors import BackendError, BrowserTimeoutError
 from agentcloak.core.seq import RingBuffer, SeqCounter
 from agentcloak.daemon.middleware import error_middleware
 from agentcloak.daemon.routes import setup_routes
 
 _HTTPX_CLIENT = (
-    "agentcloak.browser.patchright_ctx.httpx.AsyncClient"
+    "agentcloak.browser.playwright_ctx.httpx.AsyncClient"
 )
 
 
@@ -63,9 +63,9 @@ def _make_page(
 
 def _make_ctx(
     *, page: MagicMock | None = None
-) -> PatchrightContext:
+) -> PlaywrightContext:
     mock_page = page or _make_page()
-    return PatchrightContext(
+    return PlaywrightContext(
         page=mock_page,
         browser=MagicMock(),
         playwright=MagicMock(),
@@ -116,7 +116,7 @@ def _cookie(
 
 
 class TestPatchrightFetch:
-    """Tests for PatchrightContext.fetch() method."""
+    """Tests for PlaywrightContext.fetch() method."""
 
     @pytest.mark.asyncio
     async def test_fetch_basic_get(self) -> None:

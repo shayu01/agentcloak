@@ -61,6 +61,7 @@ class AgentcloakConfig:
     idle_timeout_min: int = 0
     stop_on_exit: bool = False
     log_level: str = "warning"
+    humanize: bool = False
     domain_whitelist: list[str] = field(default_factory=list[str])
     domain_blacklist: list[str] = field(default_factory=list[str])
     content_scan: bool = False
@@ -123,6 +124,12 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
     ) or browser.get("stop_on_exit", cfg.stop_on_exit)
     cfg.log_level = _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
 
+    humanize_env = _env("HUMANIZE")
+    if humanize_env is not None:
+        cfg.humanize = humanize_env.lower() in ("true", "1", "yes")
+    else:
+        cfg.humanize = bool(browser.get("humanize", cfg.humanize))
+
     whitelist_env = _env("DOMAIN_WHITELIST")
     if whitelist_env is not None:
         cfg.domain_whitelist = [
@@ -159,12 +166,13 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
 
 
 def resolve_tier(tier_value: str) -> str:
-    """Resolve 'auto' tier to the best available backend."""
+    """Resolve 'auto' tier to the best available backend.
+
+    CloakBrowser is the default backend; 'auto' always resolves to 'cloak'.
+    Legacy value 'patchright' is mapped to 'playwright' for backward compat.
+    """
+    if tier_value == "patchright":
+        return "playwright"
     if tier_value != "auto":
         return tier_value
-    try:
-        import cloakbrowser as _  # noqa: F401
-
-        return "cloak"
-    except ImportError:
-        return "patchright"
+    return "cloak"

@@ -120,6 +120,13 @@ async def start(
     """Start the daemon server (blocking)."""
     paths, cfg = load_config()
 
+    if stealth:
+        logger.warning(
+            "stealth_flag_deprecated",
+            hint="--stealth is deprecated and will be removed in a future version; "
+            "CloakBrowser is now the default backend",
+        )
+
     actual_host = host or cfg.daemon_host
     actual_port = port or cfg.daemon_port
 
@@ -129,11 +136,10 @@ async def start(
 
     from agentcloak.core.config import resolve_tier
 
-    raw_tier = "cloak" if stealth else cfg.default_tier
-    resolved = resolve_tier(raw_tier)
+    resolved = resolve_tier(cfg.default_tier)
     tier = StealthTier(resolved)
     actual_headless = headless
-    actual_humanize = humanize if humanize is not None else (tier == StealthTier.CLOAK)
+    actual_humanize = humanize if humanize is not None else cfg.humanize
     extensions: list[str] | None = None
     xvfb_mgr: XvfbManager | None = None
 

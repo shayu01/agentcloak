@@ -99,7 +99,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         If you don't call this, the daemon auto-starts with env defaults.
 
         Args:
-            tier: Browser tier — 'auto' (detect best), 'patchright', 'cloak',
+            tier: Browser tier — 'auto' (default: cloak), 'playwright', 'cloak',
                   or 'remote_bridge'. Empty = use AGENTCLOAK_DEFAULT_TIER env.
             profile: Named browser profile for persistent cookies/state
 
@@ -327,7 +327,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     async def agentcloak_doctor() -> str:
         """Run diagnostic checks on agentcloak installation.
 
-        Checks Python version, patchright availability, CloakBrowser status,
+        Checks Python version, CloakBrowser status,
         daemon connectivity, and configuration.
 
         Returns:
@@ -348,20 +348,13 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         )
 
         try:
-            import patchright as _
-
-            checks.append({"name": "patchright", "ok": True})
-        except ImportError:
-            checks.append({"name": "patchright", "ok": False})
-
-        try:
             import cloakbrowser as _
 
             checks.append(
                 {
                     "name": "cloakbrowser",
                     "ok": True,
-                    "hint": "CloakBrowser available — auto tier will use cloak",
+                    "hint": "CloakBrowser available — default backend",
                 }
             )
         except ImportError:

@@ -147,29 +147,29 @@ class TestXvfbManager:
                 await mgr.ensure_display()
 
 
-class TestDoctorStealth:
-    def test_doctor_includes_stealth_section(self) -> None:
+class TestDoctorExtras:
+    def test_doctor_includes_extras_section(self) -> None:
         result = runner.invoke(app, ["doctor"])
         data = json.loads(result.stdout)
-        assert "stealth" in data["data"]
-        stealth = data["data"]["stealth"]
-        assert "available" in stealth
-        assert "checks" in stealth
+        assert "extras" in data["data"]
+        extras = data["data"]["extras"]
+        assert "available" in extras
+        assert "checks" in extras
 
-    def test_stealth_checks_have_required_fields(self) -> None:
+    def test_extras_checks_have_required_fields(self) -> None:
         result = runner.invoke(app, ["doctor"])
         data = json.loads(result.stdout)
-        for check in data["data"]["stealth"]["checks"]:
+        for check in data["data"]["extras"]["checks"]:
             assert "name" in check
             assert "ok" in check
             assert "detail" in check
             assert "hint" in check
 
 
-class TestDaemonStealthFlag:
-    def test_daemon_start_help_shows_stealth(self) -> None:
+class TestDaemonHumanizeFlag:
+    def test_daemon_start_help_shows_humanize(self) -> None:
         result = runner.invoke(app, ["daemon", "start", "--help"])
-        assert "--stealth" in result.stdout
+        assert "--humanize" in result.stdout
 
 
 class TestCreateContextFactory:
@@ -183,13 +183,13 @@ class TestCreateContextFactory:
 
 
 class TestProxyUrlIntegration:
-    def test_patchright_context_stores_proxy_url(self) -> None:
-        from agentcloak.browser.patchright_ctx import PatchrightContext
+    def test_playwright_context_stores_proxy_url(self) -> None:
+        from agentcloak.browser.playwright_ctx import PlaywrightContext
         from agentcloak.core.seq import RingBuffer, SeqCounter
 
         page = MagicMock()
         page.on = MagicMock()
-        ctx = PatchrightContext(
+        ctx = PlaywrightContext(
             page=page,
             browser=None,
             playwright=None,
@@ -212,8 +212,8 @@ class TestProxyUrlIntegration:
         )
         assert ctx._proxy_url == "http://127.0.0.1:9999"
 
-    def test_doctor_stealth_checks_include_httpcloak(self) -> None:
+    def test_doctor_extras_checks_include_httpcloak(self) -> None:
         result = runner.invoke(app, ["doctor"])
         data = json.loads(result.stdout)
-        stealth_names = [c["name"] for c in data["data"]["stealth"]["checks"]]
-        assert "httpcloak" in stealth_names
+        extras_names = [c["name"] for c in data["data"]["extras"]["checks"]]
+        assert "httpcloak" in extras_names

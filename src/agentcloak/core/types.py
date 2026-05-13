@@ -12,7 +12,7 @@ PROFILE_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 class StealthTier(StrEnum):
     AUTO = "auto"
-    PATCHRIGHT = "patchright"
+    PLAYWRIGHT = "playwright"
     CLOAK = "cloak"
     REMOTE_BRIDGE = "remote_bridge"
 

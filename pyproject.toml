@@ -25,7 +25,7 @@ dependencies = [
     "orjson>=3.10",
     "structlog>=24.0",
     "aiohttp>=3.9",
-    "patchright>=1.0",
+    "cloakbrowser>=0.3",
     "httpx>=0.27",
 ]
 
@@ -36,7 +36,6 @@ agentcloak-mcp = "agentcloak.mcp.server:main"
 
 [project.optional-dependencies]
 stealth = [
-    "cloakbrowser>=0.3",
     "httpcloak>=1.6",
 ]
 discovery = [

@@ -68,18 +68,17 @@ async def local_server() -> AsyncGenerator[str, None]:
 
 
 @pytest_asyncio.fixture(
-    params=["patchright", "cloak"],
+    params=["playwright", "cloak"],
     scope="session",
     loop_scope="session",
 )
 async def browser_context(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[Any, None]:
-    """Launch a real headless browser context (patchright or cloak)."""
+    """Launch a real headless browser context (playwright or cloak)."""
     backend = request.param
 
     if backend == "cloak":
-        pytest.importorskip("cloakbrowser")
         from agentcloak.browser.cloak_ctx import launch_cloak
 
         ctx = await launch_cloak(
@@ -88,9 +87,9 @@ async def browser_context(
             viewport_height=720,
         )
     else:
-        from agentcloak.browser.patchright_ctx import launch_patchright
+        from agentcloak.browser.playwright_ctx import launch_playwright
 
-        ctx = await launch_patchright(
+        ctx = await launch_playwright(
             headless=_HEADLESS,
             viewport_width=1280,
             viewport_height=720,
@@ -102,10 +101,10 @@ async def browser_context(
 
 @pytest_asyncio.fixture
 async def fresh_context() -> AsyncGenerator[Any, None]:
-    """Function-scoped patchright context for tests that need isolation."""
-    from agentcloak.browser.patchright_ctx import launch_patchright
+    """Function-scoped playwright context for tests that need isolation."""
+    from agentcloak.browser.playwright_ctx import launch_playwright
 
-    ctx = await launch_patchright(
+    ctx = await launch_playwright(
         headless=_HEADLESS,
         viewport_width=1280,
         viewport_height=720,

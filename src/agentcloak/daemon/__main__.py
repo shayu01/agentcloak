@@ -13,15 +13,23 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--profile", default=None, help="Browser profile name.")
     parser.add_argument(
-        "--stealth", action="store_true", help="Enable CloakBrowser stealth mode."
+        "--stealth", action="store_true",
+        help="[Deprecated] CloakBrowser is now the default.",
     )
     parser.add_argument(
-        "--no-humanize",
-        action="store_true",
-        help="Disable humanize layer in stealth mode.",
+        "--humanize", action="store_true",
+        help="Enable humanize behavioral layer.",
+    )
+    parser.add_argument(
+        "--no-humanize", action="store_true",
+        help="Explicitly disable humanize layer.",
     )
     args = parser.parse_args()
-    humanize: bool | None = False if args.no_humanize else None
+    humanize: bool | None = None
+    if args.humanize:
+        humanize = True
+    elif args.no_humanize:
+        humanize = False
     asyncio.run(
         start(
             host=args.host,
