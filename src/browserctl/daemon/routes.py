@@ -896,7 +896,18 @@ async def handle_profile_delete(request: Request) -> Response:
             status=400,
         )
     paths, _ = load_config()
-    profile_path = paths.profiles_dir / name
+    profiles_dir = paths.profiles_dir
+    profile_path = profiles_dir / name
+    if not profile_path.resolve().is_relative_to(profiles_dir.resolve()):
+        return _json(
+            {
+                "ok": False,
+                "error": "invalid_profile_path",
+                "hint": "Profile path escapes profiles directory",
+                "action": "use a simple profile name without path separators",
+            },
+            status=400,
+        )
     if not profile_path.exists():
         return _json(
             {

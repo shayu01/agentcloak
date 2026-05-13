@@ -228,6 +228,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             return json.dumps({"created": name})
 
         if action == "delete":
+            if not profile_path.resolve().is_relative_to(profiles_dir.resolve()):
+                return json.dumps(
+                    {
+                        "error": "invalid_profile_path",
+                        "hint": "Profile path escapes profiles directory",
+                        "action": "use a simple profile name without path separators",
+                    }
+                )
             if not profile_path.exists():
                 return json.dumps(
                     {

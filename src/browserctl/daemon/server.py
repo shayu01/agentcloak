@@ -82,11 +82,30 @@ def _check_stale_pid(paths: Paths) -> bool:
     try:
         pid = int(pf.read_text().strip())
         os.kill(pid, 0)
-        return True
     except (ValueError, ProcessLookupError, PermissionError):
         _clear_pid(paths)
         _clear_session(paths)
         return False
+
+    # Process exists — verify it's actually a browserctl daemon via health endpoint
+    import json
+    import urllib.request
+
+    try:
+        session_data = json.loads(paths.active_session_file.read_text())
+        host = session_data.get("host", "127.0.0.1")
+        port = session_data.get("port", 9222)
+        url = f"http://{host}:{port}/health"
+        with urllib.request.urlopen(url, timeout=1) as resp:
+            data = json.loads(resp.read())
+            if data.get("ok"):
+                return True  # genuinely running
+    except Exception:
+        pass
+    # Process exists but not responding as browserctl — stale
+    _clear_pid(paths)
+    _clear_session(paths)
+    return False
 
 
 async def start(

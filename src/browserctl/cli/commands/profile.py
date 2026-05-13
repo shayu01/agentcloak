@@ -150,7 +150,18 @@ def profile_delete(
     """Delete a browser profile and its data."""
     _validate_name(name)
     paths, _ = load_config()
-    pdir = paths.profiles_dir / name
+    profiles_dir = paths.profiles_dir
+    pdir = profiles_dir / name
+
+    if not pdir.resolve().is_relative_to(profiles_dir.resolve()):
+        output_error(
+            ProfileError(
+                error="invalid_profile_path",
+                hint="Profile path escapes profiles directory",
+                action="use a simple profile name without path separators",
+            )
+        )
+        raise typer.Exit(1)
 
     if not pdir.exists():
         output_error(

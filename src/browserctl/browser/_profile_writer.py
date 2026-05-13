@@ -5,12 +5,6 @@ Run as:
         --profile-dir /path/to/profile \
         --cookies-file /path/to/cookies.json \
         [--executable-path /path/to/chrome]
-
-Legacy (still supported for backward compat):
-    python -m browserctl.browser._profile_writer \
-        --profile-dir /path/to/profile \
-        --cookies-json '[{"name": "sid", ...}]' \
-        [--executable-path /path/to/chrome]
 """
 
 from __future__ import annotations
@@ -48,20 +42,13 @@ async def _run(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile-dir", required=True, help="Profile directory.")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--cookies-file", default=None, help="Path to JSON cookie file.",
-    )
-    group.add_argument(
-        "--cookies-json", default=None, help="JSON cookie list (legacy).",
+    parser.add_argument(
+        "--cookies-file", required=True, help="Path to JSON cookie file.",
     )
     parser.add_argument("--executable-path", default=None, help="Chrome binary.")
     args = parser.parse_args()
 
-    if args.cookies_file:
-        cookies_json = Path(args.cookies_file).read_text(encoding="utf-8")
-    else:
-        cookies_json = args.cookies_json
+    cookies_json = Path(args.cookies_file).read_text(encoding="utf-8")
 
     asyncio.run(_run(args.profile_dir, cookies_json, args.executable_path))
 

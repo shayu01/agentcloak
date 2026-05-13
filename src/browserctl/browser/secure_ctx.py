@@ -125,12 +125,21 @@ class SecureBrowserContext:
 
         return {"results": results, "completed": total, "total": total}
 
+    async def tab_list(self) -> list[dict[str, Any]]:
+        return await self._inner.tab_list()
+
     async def tab_new(self, url: str | None = None) -> dict[str, Any]:
         if url:
             check_domain_allowed(
                 url, whitelist=self._whitelist, blacklist=self._blacklist
             )
         return await self._inner.tab_new(url)
+
+    async def tab_close(self, tab_id: int) -> dict[str, Any]:
+        return await self._inner.tab_close(tab_id)
+
+    async def tab_switch(self, tab_id: int) -> dict[str, Any]:
+        return await self._inner.tab_switch(tab_id)
 
     async def fetch(
         self,
