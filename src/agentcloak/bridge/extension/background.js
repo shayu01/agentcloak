@@ -1,5 +1,5 @@
 // agentcloak Bridge — Chrome MV3 service worker
-// Connects to bridge process via WebSocket with auto-discovery.
+// Connects to bridge/daemon via WebSocket with auto-discovery.
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 18765;
@@ -14,6 +14,7 @@ let reconnectDelay = RECONNECT_BASE;
 let attachedTabs = new Map();
 let currentHost = null;
 let currentPort = null;
+let currentService = null; // "agentcloak-daemon" or "agentcloak-bridge"
 let isReconnecting = false;
 
 // --- Badge ---
@@ -30,6 +31,45 @@ function setBadge(state) {
 }
 
 setBadge("off");
+
+// --- MV3 Service Worker Keepalive (chrome.alarms) ---
+
+chrome.alarms.create("agentcloak-probe", { periodInMinutes: 0.1 });
+chrome.alarms.create("agentcloak-keepalive", { periodInMinutes: 0.4 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "agentcloak-probe") {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connect();
+    }
+  }
+  if (alarm.name === "agentcloak-keepalive") {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }
+});
+
+// --- State Persistence ---
+
+async function saveAttachedTabs() {
+  const entries = Array.from(attachedTabs.entries());
+  await chrome.storage.local.set({ _attached_tabs: entries });
+}
+
+async function restoreAttachedTabs() {
+  const data = await chrome.storage.local.get(["_attached_tabs"]);
+  if (data._attached_tabs) {
+    for (const [tabId, val] of data._attached_tabs) {
+      try {
+        await chrome.tabs.get(tabId);
+        attachedTabs.set(tabId, val);
+      } catch {
+        // tab no longer exists
+      }
+    }
+  }
+}
 
 // --- Config ---
 
@@ -48,16 +88,20 @@ async function loadConfig() {
   });
 }
 
-async function saveLastConnected(host, port) {
+async function saveLastConnected(host, port, service) {
   return new Promise((resolve) => {
     chrome.storage.local.set(
-      { last_connected_host: host, last_connected_port: port },
+      {
+        last_connected_host: host,
+        last_connected_port: port,
+        last_connected_service: service,
+      },
       resolve
     );
   });
 }
 
-// --- Auto-Discovery ---
+// --- Auto-Discovery (daemon preferred over bridge) ---
 
 async function probeHealth(host, port) {
   const controller = new AbortController();
@@ -68,8 +112,12 @@ async function probeHealth(host, port) {
     });
     const data = await resp.json();
     clearTimeout(timer);
-    if (data.ok && data.service === "agentcloak-bridge") {
-      return { host, port };
+    if (
+      data.ok &&
+      (data.service === "agentcloak-daemon" ||
+        data.service === "agentcloak-bridge")
+    ) {
+      return { host, port, service: data.service };
     }
     return null;
   } catch {
@@ -78,8 +126,7 @@ async function probeHealth(host, port) {
   }
 }
 
-async function discoverBridge(config) {
-  // Build candidate host list (ordered by priority)
+async function discoverTarget(config) {
   const hosts = [];
   if (config.last_connected_host) hosts.push(config.last_connected_host);
   if (config.bridge_host && !hosts.includes(config.bridge_host)) {
@@ -87,27 +134,24 @@ async function discoverBridge(config) {
   }
   if (!hosts.includes(DEFAULT_HOST)) hosts.push(DEFAULT_HOST);
 
-  // If user set a specific port, try that first on each host
   const userPort = config.bridge_port || null;
+  let allResults = [];
 
   for (const host of hosts) {
-    // Try specific port first if configured
     if (userPort) {
       const result = await probeHealth(host, userPort);
-      if (result) return result;
+      if (result) allResults.push(result);
     }
 
-    // Try last-connected port if different from user port
     if (
       config.last_connected_port &&
       config.last_connected_port !== userPort &&
       host === config.last_connected_host
     ) {
       const result = await probeHealth(host, config.last_connected_port);
-      if (result) return result;
+      if (result) allResults.push(result);
     }
 
-    // Probe port range in parallel
     const probes = [];
     for (let p = PORT_RANGE_START; p <= PORT_RANGE_END; p++) {
       if (p === userPort || p === config.last_connected_port) continue;
@@ -115,14 +159,20 @@ async function discoverBridge(config) {
     }
     const results = await Promise.allSettled(probes);
     for (const r of results) {
-      if (r.status === "fulfilled" && r.value) return r.value;
+      if (r.status === "fulfilled" && r.value) allResults.push(r.value);
     }
   }
 
-  // Fallback: user-configured or default (will attempt WS even without health)
+  // Prefer daemon direct connection over bridge
+  const daemon = allResults.find((r) => r.service === "agentcloak-daemon");
+  if (daemon) return daemon;
+  const bridge = allResults.find((r) => r.service === "agentcloak-bridge");
+  if (bridge) return bridge;
+
   return {
     host: config.bridge_host || DEFAULT_HOST,
     port: config.bridge_port || DEFAULT_PORT,
+    service: null,
   };
 }
 
@@ -135,10 +185,12 @@ async function connect() {
   setBadge("wait");
 
   const config = await loadConfig();
-  const target = await discoverBridge(config);
+  const target = await discoverTarget(config);
   const wsUrl = `ws://${target.host}:${target.port}/ext`;
 
-  console.log(`[agentcloak] connecting to ${wsUrl}`);
+  console.log(
+    `[agentcloak] connecting to ${wsUrl} (${target.service || "unknown"})`
+  );
 
   try {
     ws = new WebSocket(wsUrl);
@@ -149,17 +201,18 @@ async function connect() {
   }
 
   ws.onopen = () => {
-    console.log(`[agentcloak] connected to bridge at ${target.host}:${target.port}`);
+    console.log(
+      `[agentcloak] connected to ${target.service} at ${target.host}:${target.port}`
+    );
     reconnectDelay = RECONNECT_BASE;
     isReconnecting = false;
     currentHost = target.host;
     currentPort = target.port;
+    currentService = target.service;
     setBadge("on");
 
-    // Save successful connection for next time
-    saveLastConnected(target.host, target.port);
+    saveLastConnected(target.host, target.port, target.service);
 
-    // Send hello with token if configured
     const hello = { type: "hello", agent: "agentcloak-extension" };
     if (config.bridge_token) {
       hello.token = config.bridge_token;
@@ -181,10 +234,11 @@ async function connect() {
 
   ws.onclose = (event) => {
     console.log(
-      `[agentcloak] bridge disconnected (code=${event.code}, reason=${event.reason})`
+      `[agentcloak] disconnected (code=${event.code}, reason=${event.reason})`
     );
     currentHost = null;
     currentPort = null;
+    currentService = null;
     setBadge("off");
     scheduleReconnect();
   };
@@ -226,6 +280,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       reconnecting: isReconnecting,
       host: currentHost,
       port: currentPort,
+      service: currentService,
     });
     return true;
   }
@@ -264,6 +319,7 @@ async function ensureAttached(tabId) {
   if (attachedTabs.has(tabId)) return;
   await chrome.debugger.attach({ tabId }, "1.3");
   attachedTabs.set(tabId, true);
+  await saveAttachedTabs();
 }
 
 async function detachTab(tabId) {
@@ -272,6 +328,7 @@ async function detachTab(tabId) {
     await chrome.debugger.detach({ tabId });
   } catch {}
   attachedTabs.delete(tabId);
+  await saveAttachedTabs();
 }
 
 function resolveTabId(msg) {
@@ -283,6 +340,26 @@ async function getActiveTabId() {
   return tab?.id;
 }
 
+// --- Navigate with CDP event wait (replaces setTimeout) ---
+
+function waitForDebuggerEvent(tabId, eventName, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.debugger.onEvent.removeListener(listener);
+      resolve(); // timeout is not fatal, page may still be usable
+    }, timeoutMs);
+
+    function listener(source, method) {
+      if (source.tabId === tabId && method === eventName) {
+        clearTimeout(timer);
+        chrome.debugger.onEvent.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.debugger.onEvent.addListener(listener);
+  });
+}
+
 async function cmdNavigate(msg) {
   const tabId = resolveTabId(msg) || (await getActiveTabId());
   if (!tabId) return { ok: false, error: "no active tab" };
@@ -290,15 +367,24 @@ async function cmdNavigate(msg) {
   const url = msg.params?.url;
   if (!url) return { ok: false, error: "url required" };
 
+  const waitUntil = msg.params?.waitUntil || "load";
+
   await ensureAttached(tabId);
-  const result = await chrome.debugger.sendCommand(
+  await chrome.debugger.sendCommand({ tabId }, "Page.enable", {});
+
+  const eventName =
+    waitUntil === "domcontentloaded"
+      ? "Page.domContentEventFired"
+      : "Page.loadEventFired";
+
+  const loadPromise = waitForDebuggerEvent(tabId, eventName, 30000);
+  const navResult = await chrome.debugger.sendCommand(
     { tabId },
     "Page.navigate",
     { url }
   );
+  await loadPromise;
 
-  // Wait for load
-  await new Promise((resolve) => setTimeout(resolve, 500));
   const tab = await chrome.tabs.get(tabId);
 
   return {
@@ -306,7 +392,7 @@ async function cmdNavigate(msg) {
     data: {
       url: tab.url,
       title: tab.title,
-      frameId: result.frameId,
+      frameId: navResult.frameId,
     },
   };
 }
@@ -325,6 +411,8 @@ async function cmdScreenshot(msg) {
   return { ok: true, data: { base64: result.data } };
 }
 
+// --- Dual execution path: scripting API first, CDP fallback ---
+
 async function cmdEvaluate(msg) {
   const tabId = resolveTabId(msg) || (await getActiveTabId());
   if (!tabId) return { ok: false, error: "no active tab" };
@@ -332,25 +420,40 @@ async function cmdEvaluate(msg) {
   const js = msg.params?.js || msg.params?.expression;
   if (!js) return { ok: false, error: "js expression required" };
 
-  await ensureAttached(tabId);
-  const result = await chrome.debugger.sendCommand(
-    { tabId },
-    "Runtime.evaluate",
-    {
-      expression: js,
-      returnByValue: true,
-      awaitPromise: true,
+  // Path A: chrome.scripting.executeScript (fast, no debugger bar)
+  try {
+    const wrapped = `(async () => { ${js} })()`;
+    const [frame] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: (code) => {
+        return new Function("return " + code)();
+      },
+      args: [wrapped],
+    });
+    return { ok: true, data: { result: frame.result } };
+  } catch {
+    // Path B: CDP fallback (CSP-restricted pages)
+    await ensureAttached(tabId);
+    const result = await chrome.debugger.sendCommand(
+      { tabId },
+      "Runtime.evaluate",
+      {
+        expression: js,
+        returnByValue: true,
+        awaitPromise: true,
+      }
+    );
+
+    if (result.exceptionDetails) {
+      return {
+        ok: false,
+        error: result.exceptionDetails.text || "evaluation error",
+      };
     }
-  );
 
-  if (result.exceptionDetails) {
-    return {
-      ok: false,
-      error: result.exceptionDetails.text || "evaluation error",
-    };
+    return { ok: true, data: { result: result.result?.value } };
   }
-
-  return { ok: true, data: { result: result.result?.value } };
 }
 
 async function cmdCookies(msg) {
@@ -414,6 +517,7 @@ async function cmdBatch(msg) {
 // Clean up debugger attachments when tabs close
 chrome.tabs.onRemoved.addListener((tabId) => {
   attachedTabs.delete(tabId);
+  saveAttachedTabs();
 });
 
 // Strip CSP headers for CDP JS injection
@@ -443,5 +547,5 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-// Start connection
-connect();
+// Restore state and start connection
+restoreAttachedTabs().then(() => connect());
