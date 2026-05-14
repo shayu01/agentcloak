@@ -135,7 +135,7 @@ daemon + CLI + local browser basics
 
 > **CLI / MCP 能力同步**：每个新增或修改的能力，必须同时暴露到 CLI 命令和 MCP tool。不允许出现"CLI 有但 MCP 没有"或反过来的情况。两者共享 daemon route，保持接口一致。
 >
-> **Skill 文件跟进**：每个 Phase 完成后，更新 Skill 文件（`.claude/skills/agentcloak/SKILL.md`）反映新能力、变更的参数、废弃的 flag。Skill 是 agent 的主要使用指南，必须和实际能力同步。
+> **Skill 文件跟进**：每个 Phase 完成后，更新 Skill 文件（`skills/agentcloak/SKILL.md` + `.claude/skills/agentcloak/SKILL.md`）反映新能力、变更的参数、废弃的 flag。Skill 是 agent 的主要使用指南，必须和实际能力同步。
 
 #### Phase 5e: 后端重构（隐身层简化）(done)
 
