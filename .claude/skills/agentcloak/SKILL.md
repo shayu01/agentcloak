@@ -90,6 +90,8 @@ Use the number as `--target` in action commands. Numbers are **page-specific and
 | `cloak snapshot --focus N` | Expand subtree around element [N] |
 | `cloak snapshot --offset 50` | Start from 50th element (pagination) |
 | `cloak snapshot --max-chars 5000` | Limit by character count |
+| `cloak snapshot --frames` | Include iframe content in tree |
+| `cloak snapshot --diff` | Mark `[+]` added, `[~]` changed vs previous |
 | `cloak screenshot` | Take page screenshot |
 | `cloak resume` | Current state: URL, tabs, last 5 actions |
 
@@ -308,6 +310,30 @@ cloak capture stop
 cloak capture export --format har -o traffic.har
 ```
 
+## Smart Behaviors
+
+These work automatically — you don't need to do anything special:
+
+- **Stale ref auto-retry**: if `element_not_found`, the daemon re-snapshots and retries once
+- **`--include-snapshot`**: add to any action command to get a compact snapshot back with the result, saving a round trip
+- **`$N.path` batch references**: in `--calls-file` batch mode, reference prior action results (e.g., `"$0.url"` uses the URL from the first action)
+- **Tab group**: when using RemoteBridge, agent-managed tabs auto-group under a blue "agentcloak" Chrome tab group
+
+## RemoteBridge (Real Browser)
+
+Connect to your real Chrome via the agentcloak extension:
+
+```bash
+cloak bridge start -b           # start bridge in background
+# Install extension from bridge output path, then:
+cloak bridge claim --url-pattern "github.com"   # take over a tab
+cloak snapshot                                   # works on claimed tab
+cloak click --target 5
+cloak bridge finalize --mode handoff             # release tabs to user
+```
+
+Finalize modes: `close` (close agent tabs), `handoff` (keep tabs for user), `deliverable` (mark as results).
+
 ## Key Principles
 
 - **Snapshot before acting**: `[N]` refs are only valid for current page state
@@ -317,4 +343,6 @@ cloak capture export --format har -o traffic.har
 - **Use compact mode**: `--mode compact` for focused interaction, less output
 - **Use content mode**: `--mode content` for reading text, no refs needed
 - **Progressive loading**: use `--focus=N` or `--offset=N` for large pages
+- **Diff mode**: use `--diff` to only see what changed since last snapshot
+- **Include iframes**: use `--frames` when interacting with pages that have iframes
 - **Action on any ref**: even truncated refs work -- daemon keeps full mapping
