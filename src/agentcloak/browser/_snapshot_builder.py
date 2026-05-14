@@ -20,7 +20,7 @@ from agentcloak.browser.state import (
     PageSnapshot,
 )
 
-__all__ = ["SnapshotResult", "build_snapshot"]
+__all__ = ["FrameData", "SnapshotResult", "build_snapshot"]
 
 _SKIP_ROLES = frozenset({"none", "InlineTextBox", "LineBreak"})
 
@@ -53,6 +53,16 @@ _VALUE_PROPS = frozenset(
 )
 
 _FALSE_MEANINGFUL = frozenset({"expanded"})
+
+
+@dataclass
+class FrameData:
+    """AX tree nodes from a child frame, with metadata for merging."""
+
+    frame_id: str
+    name: str
+    url: str
+    nodes: list[dict[str, Any]]
 
 
 @dataclass
@@ -202,6 +212,7 @@ def build_snapshot(
     seq: int = 0,
     url: str = "",
     title: str = "",
+    frame_trees: list[FrameData] | None = None,
 ) -> SnapshotResult:
     # Phase 1: index nodes by nodeId, build child lookup
     node_by_id: dict[str, dict[str, Any]] = {}
@@ -320,6 +331,46 @@ def build_snapshot(
 
     for rid in root_ids:
         _visit(rid, 0)
+
+    # Phase 2b: merge child frame AX trees (one level of iframes)
+    if frame_trees:
+        for frame_data in frame_trees:
+            # Build a secondary node index for this frame's AX tree.
+            # Prefix nodeIds with frameId to avoid collisions with main frame.
+            frame_prefix = frame_data.frame_id + ":"
+            f_node_by_id: dict[str, dict[str, Any]] = {}
+            f_all_child_ids: set[str] = set()
+            for raw in frame_data.nodes:
+                orig_id = raw.get("nodeId", "")
+                if not orig_id:
+                    continue
+                prefixed_id = frame_prefix + orig_id
+                # Rewrite nodeId and childIds with prefix
+                patched = dict(raw)
+                patched["nodeId"] = prefixed_id
+                patched["childIds"] = [
+                    frame_prefix + c for c in raw.get("childIds", [])
+                ]
+                f_node_by_id[prefixed_id] = patched
+                for c in patched["childIds"]:
+                    f_all_child_ids.add(c)
+
+            f_root_ids: list[str] = []
+            for nid in f_node_by_id:
+                if nid not in f_all_child_ids:
+                    f_root_ids.append(nid)
+            if not f_root_ids and f_node_by_id:
+                f_root_ids = [next(iter(f_node_by_id))]
+
+            # Temporarily extend node_by_id so _visit can resolve frame nodes
+            node_by_id.update(f_node_by_id)
+
+            # Insert a context header line for the frame
+            frame_label = frame_data.name or frame_data.url or frame_data.frame_id
+            all_lines.append((0, f'[frame "{frame_label}"]', None))
+
+            for frid in f_root_ids:
+                _visit(frid, 1)
 
     # Phase 3: compact mode tree pruning
     total_nodes = len(all_lines)

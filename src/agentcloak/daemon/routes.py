@@ -149,6 +149,7 @@ async def handle_snapshot(request: Request) -> Response:
     offset = int(offset_raw) if offset_raw.isdigit() else 0
 
     include_sm = request.query.get("include_selector_map", "true").lower() != "false"
+    frames = request.query.get("frames", "false").lower() in ("true", "1", "yes")
 
     snap = await ctx.snapshot(
         mode=mode,
@@ -156,6 +157,7 @@ async def handle_snapshot(request: Request) -> Response:
         max_chars=max_chars,
         focus=focus,
         offset=offset,
+        frames=frames,
     )
 
     data: dict[str, Any] = {

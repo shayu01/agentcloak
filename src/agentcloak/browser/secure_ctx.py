@@ -49,6 +49,7 @@ class SecureBrowserContext:
         max_chars: int = 0,
         focus: int = 0,
         offset: int = 0,
+        frames: bool = False,
     ) -> PageSnapshot:
         snap: PageSnapshot = await self._inner.snapshot(
             mode=mode,
@@ -56,6 +57,7 @@ class SecureBrowserContext:
             max_chars=max_chars,
             focus=focus,
             offset=offset,
+            frames=frames,
         )
 
         warnings: list[dict[str, str | int]] = []

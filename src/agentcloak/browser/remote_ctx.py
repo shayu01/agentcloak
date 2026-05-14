@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from agentcloak.browser._snapshot_builder import build_snapshot
+from agentcloak.browser._snapshot_builder import FrameData, build_snapshot
 from agentcloak.browser.state import (
     ElementRef,
     FrameInfo,
@@ -233,6 +233,7 @@ class RemoteBridgeContext:
         max_chars: int = 0,
         focus: int = 0,
         offset: int = 0,
+        frames: bool = False,
     ) -> PageSnapshot:
         if mode in ("accessible", "compact"):
             cdp_result = await self._send(
@@ -241,6 +242,12 @@ class RemoteBridgeContext:
             )
             raw_nodes: list[dict[str, Any]] = cdp_result.get("nodes", [])
             url, title = await self._get_tab_info()
+
+            # Gather child frame AX trees when requested
+            frame_trees: list[FrameData] | None = None
+            if frames:
+                frame_trees = await self._get_child_frame_trees()
+
             result = build_snapshot(
                 raw_nodes,
                 mode=mode,
@@ -251,6 +258,7 @@ class RemoteBridgeContext:
                 seq=self._seq_counter.value,
                 url=url,
                 title=title,
+                frame_trees=frame_trees,
             )
             self._selector_map = result.selector_map
             self._backend_node_map = result.backend_node_map
@@ -995,6 +1003,52 @@ class RemoteBridgeContext:
             if found:
                 return found
         return None
+
+    async def _get_child_frame_trees(self) -> list[FrameData]:
+        """Fetch AX trees from child frames via CDP Page.getFrameTree."""
+        child_frames: list[FrameData] = []
+        try:
+            result = await self._send(
+                "cdp",
+                {"method": "Page.getFrameTree", "params": {}},
+            )
+        except BackendError:
+            return child_frames
+
+        frame_tree = result.get("frameTree", {})
+        for child in frame_tree.get("childFrames", []):
+            frame_info = child.get("frame", {})
+            frame_id = frame_info.get("id", "")
+            frame_name = frame_info.get("name", "")
+            frame_url = frame_info.get("url", "")
+            if not frame_id:
+                continue
+            try:
+                ax_result = await self._send(
+                    "cdp",
+                    {
+                        "method": "Accessibility.getFullAXTree",
+                        "params": {"frameId": frame_id},
+                    },
+                )
+                nodes = ax_result.get("nodes", [])
+                if nodes:
+                    child_frames.append(
+                        FrameData(
+                            frame_id=frame_id,
+                            name=frame_name,
+                            url=frame_url,
+                            nodes=nodes,
+                        )
+                    )
+            except Exception:
+                logger.debug(
+                    "frame_ax_tree_failed",
+                    frame_id=frame_id,
+                    frame_name=frame_name,
+                    exc_info=True,
+                )
+        return child_frames
 
     async def close(self) -> None:
         if not self._ws.closed:

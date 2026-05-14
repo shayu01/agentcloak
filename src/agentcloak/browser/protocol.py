@@ -29,6 +29,7 @@ class BrowserContext(Protocol):
         max_chars: int = 0,
         focus: int = 0,
         offset: int = 0,
+        frames: bool = False,
     ) -> PageSnapshot: ...
 
     async def action(self, kind: str, target: str, **kw: Any) -> ActionResult: ...

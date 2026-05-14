@@ -95,6 +95,11 @@ def browser_snapshot(
         "--offset",
         help="Start output from Nth element (pagination).",
     ),
+    frames: bool = typer.Option(
+        False,
+        "--frames",
+        help="Include iframe content in the snapshot (merges child frame AX trees).",
+    ),
 ) -> None:
     """Get page snapshot (accessible tree, DOM, or text content)."""
     client = DaemonClient()
@@ -105,6 +110,7 @@ def browser_snapshot(
             max_nodes=max_nodes,
             focus=focus,
             offset=offset,
+            frames=frames,
         )
     )
     data = result.get("data", result)

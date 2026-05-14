@@ -209,6 +209,7 @@ class DaemonClient:
         max_nodes: int = 0,
         focus: int = 0,
         offset: int = 0,
+        frames: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, str] = {"mode": mode}
         if max_chars:
@@ -219,6 +220,8 @@ class DaemonClient:
             params["focus"] = str(focus)
         if offset:
             params["offset"] = str(offset)
+        if frames:
+            params["frames"] = "true"
         return await self._request("GET", "/snapshot", params=params)
 
     async def state(self) -> dict[str, Any]:

@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
-from agentcloak.browser._snapshot_builder import build_snapshot
+from agentcloak.browser._snapshot_builder import FrameData, build_snapshot
 from agentcloak.browser.state import (
     ElementRef,
     FrameInfo,
@@ -330,6 +330,7 @@ class PlaywrightContext:
         max_chars: int = 0,
         focus: int = 0,
         offset: int = 0,
+        frames: bool = False,
     ) -> PageSnapshot:
         if mode in ("accessible", "compact"):
             return await self._build_snapshot(
@@ -338,6 +339,7 @@ class PlaywrightContext:
                 max_chars=max_chars,
                 focus=focus,
                 offset=offset,
+                frames=frames,
             )
         if mode == "dom":
             return await self._snapshot_dom()
@@ -368,9 +370,16 @@ class PlaywrightContext:
         max_chars: int = 0,
         focus: int = 0,
         offset: int = 0,
+        frames: bool = False,
     ) -> PageSnapshot:
         """Build accessible or compact snapshot via shared builder."""
         raw_nodes = await self._get_ax_tree()
+
+        # Gather child frame AX trees when requested
+        frame_trees: list[FrameData] | None = None
+        if frames:
+            frame_trees = await self._get_child_frame_trees()
+
         result = build_snapshot(
             raw_nodes,
             mode=mode,
@@ -381,12 +390,51 @@ class PlaywrightContext:
             seq=self._seq_counter.value,
             url=self._page.url,
             title=await self._page.title(),
+            frame_trees=frame_trees,
         )
         self._backend_node_map = result.backend_node_map
         self._selector_map = result.selector_map
         self._cached_lines = result.cached_lines
         self._cached_mode = mode
         return result.snapshot
+
+    async def _get_child_frame_trees(self) -> list[FrameData]:
+        """Fetch AX trees from child frames (one level of iframes)."""
+        child_frames: list[FrameData] = []
+        for frame in self._page.frames:
+            if frame == self._page.main_frame:
+                continue
+            try:
+                cdp = await self._page.context.new_cdp_session(frame)
+                try:
+                    tree = await cdp.send(
+                        "Accessibility.getFullAXTree", {"pierce": True}
+                    )
+                finally:
+                    await cdp.detach()
+                nodes = tree.get("nodes", [])
+                if nodes:
+                    # Use frame name, falling back to URL fragment or frame object name
+                    frame_name = frame.name or ""
+                    frame_url = frame.url or ""
+                    # Generate a stable frame ID from the name and URL
+                    frame_id = frame_name or frame_url or str(id(frame))
+                    child_frames.append(
+                        FrameData(
+                            frame_id=frame_id,
+                            name=frame_name,
+                            url=frame_url,
+                            nodes=nodes,
+                        )
+                    )
+            except Exception:
+                logger.debug(
+                    "frame_ax_tree_failed",
+                    frame_name=getattr(frame, "name", ""),
+                    frame_url=getattr(frame, "url", ""),
+                    exc_info=True,
+                )
+        return child_frames
 
     async def _snapshot_dom(self) -> PageSnapshot:
         html = await self._page.content()
