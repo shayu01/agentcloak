@@ -35,11 +35,8 @@ Thumbs.db
 .trellis/
 AGENTS.md
 
-# Claude Code local config
+# Claude Code local config (Skill published at skills/agentcloak/)
 .claude/
-!.claude/skills/
-!.claude/skills/agentcloak/
-!.claude/skills/agentcloak/SKILL.md
 .mcp.json
 CLAUDE.md
 
