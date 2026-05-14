@@ -401,3 +401,23 @@ class DaemonClient:
         if url is not None:
             body["url"] = url
         return await self._request("POST", "/frame/focus", json_body=body)
+
+    # Phase 5h: bridge UX — tab claiming + session lifecycle
+
+    async def bridge_claim(
+        self,
+        *,
+        tab_id: int | None = None,
+        url_pattern: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if tab_id is not None:
+            body["tab_id"] = tab_id
+        if url_pattern is not None:
+            body["url_pattern"] = url_pattern
+        return await self._request("POST", "/bridge/claim", json_body=body)
+
+    async def bridge_finalize(self, *, mode: str = "close") -> dict[str, Any]:
+        return await self._request(
+            "POST", "/bridge/finalize", json_body={"mode": mode}
+        )

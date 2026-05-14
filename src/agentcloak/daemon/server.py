@@ -30,6 +30,8 @@ __all__ = ["health", "start", "stop"]
 
 logger = structlog.get_logger()
 
+_PORT_RANGE_SIZE = 10
+
 
 def _pid_file(paths: Paths) -> Path:
     return paths.root / "daemon.pid"
@@ -94,7 +96,7 @@ def _check_stale_pid(paths: Paths) -> bool:
     try:
         session_data = json.loads(paths.active_session_file.read_text())
         host = session_data.get("host", "127.0.0.1")
-        port = session_data.get("port", 9222)
+        port = session_data.get("port", 18765)
         url = f"http://{host}:{port}/health"
         with urllib.request.urlopen(url, timeout=1) as resp:
             data = json.loads(resp.read())
@@ -171,13 +173,6 @@ async def start(
     bridge_token = _generate_token()
 
     _write_pid(paths)
-    _write_session(
-        paths,
-        port=actual_port,
-        tier=tier,
-        profile=profile,
-        bridge_token=bridge_token,
-    )
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -273,8 +268,46 @@ async def start(
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, actual_host, actual_port)
-    await site.start()
+
+    # Auto-port: try base_port, then base_port+1, ..., up to base_port+9
+    base_port = actual_port
+    last_error: OSError | None = None
+    for offset in range(_PORT_RANGE_SIZE):
+        try_port = base_port + offset
+        try:
+            site = web.TCPSite(runner, actual_host, try_port)
+            await site.start()
+            actual_port = try_port
+            last_error = None
+            break
+        except OSError as exc:
+            last_error = exc
+            if offset < _PORT_RANGE_SIZE - 1:
+                logger.info(
+                    "port_in_use",
+                    port=try_port,
+                    next_port=try_port + 1,
+                )
+            continue
+
+    if last_error is not None:
+        logger.error(
+            "all_ports_exhausted",
+            range_start=base_port,
+            range_end=base_port + _PORT_RANGE_SIZE - 1,
+        )
+        await runner.cleanup()
+        raise last_error
+
+    # Record actual bound port (may differ from configured after auto-increment)
+    _write_session(
+        paths,
+        port=actual_port,
+        tier=tier,
+        profile=profile,
+        bridge_token=bridge_token,
+    )
+
     logger.info("daemon_ready", host=actual_host, port=actual_port, tier=tier.value)
 
     resume_writer.start_background()

@@ -28,7 +28,7 @@ class TestDefaults:
     def test_default_config_values(self) -> None:
         cfg = AgentcloakConfig()
         assert cfg.daemon_host == "127.0.0.1"
-        assert cfg.daemon_port == 9222
+        assert cfg.daemon_port == 18765
         assert cfg.default_tier == "auto"
         assert cfg.default_profile == ""
         assert cfg.viewport_width == 1280
@@ -42,7 +42,7 @@ class TestLoadConfig:
     def test_loads_defaults_when_no_file(self, tmp_path: Path) -> None:
         paths, cfg = load_config(root=tmp_path)
         assert paths.root == tmp_path
-        assert cfg.daemon_port == 9222
+        assert cfg.daemon_port == 18765
 
     def test_reads_toml_file(self, tmp_path: Path) -> None:
         config_file = tmp_path / "config.toml"

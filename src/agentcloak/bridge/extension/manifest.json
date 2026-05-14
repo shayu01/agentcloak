@@ -7,6 +7,7 @@
     "alarms",
     "cookies",
     "tabs",
+    "tabGroups",
     "activeTab",
     "debugger",
     "scripting",

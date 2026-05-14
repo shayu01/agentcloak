@@ -11,7 +11,7 @@ async def test_connection_error_structured() -> None:
     """DaemonConnectionError should carry proper three-field envelope."""
     err = DaemonConnectionError(
         error="daemon_unreachable",
-        hint="Cannot connect to daemon at 127.0.0.1:9222",
+        hint="Cannot connect to daemon at 127.0.0.1:18765",
         action="run 'agentcloak daemon start' first",
     )
     d = err.to_dict()

@@ -52,7 +52,7 @@ class AgentcloakConfig:
     """Merged configuration from all sources."""
 
     daemon_host: str = "127.0.0.1"
-    daemon_port: int = 9222
+    daemon_port: int = 18765
     default_tier: str = "auto"
     default_profile: str = ""
     viewport_width: int = 1280

@@ -10,7 +10,7 @@ from agentcloak.mcp.client import DaemonBridge
 class TestDaemonBridge:
     def test_format_result_success(self) -> None:
         bridge = DaemonBridge.__new__(DaemonBridge)
-        bridge._base = "http://127.0.0.1:9222"
+        bridge._base = "http://127.0.0.1:18765"
         data = {"ok": True, "seq": 1, "data": {"title": "Test"}}
         result = bridge.format_result(data)
         parsed = json.loads(result)
@@ -18,7 +18,7 @@ class TestDaemonBridge:
 
     def test_format_result_error(self) -> None:
         bridge = DaemonBridge.__new__(DaemonBridge)
-        bridge._base = "http://127.0.0.1:9222"
+        bridge._base = "http://127.0.0.1:18765"
         data = {
             "ok": False,
             "error": "navigation_failed",
@@ -44,14 +44,14 @@ class TestMCPServerCreation:
 
             pytest.skip("mcp package not installed")
 
-    def test_tool_count_is_22(self) -> None:
+    def test_tool_count_is_23(self) -> None:
         try:
             from agentcloak.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
-            assert len(tools) == 22, (
-                f"Expected 22 tools, got {len(tools)}: {sorted(tools.keys())}"
+            assert len(tools) == 23, (
+                f"Expected 23 tools, got {len(tools)}: {sorted(tools.keys())}"
             )
         except ImportError:
             import pytest
@@ -102,6 +102,7 @@ class TestMCPServerCreation:
                 "agentcloak_wait",
                 "agentcloak_upload",
                 "agentcloak_frame",
+                "agentcloak_bridge",
             }
             assert set(tools.keys()) == expected
         except ImportError:

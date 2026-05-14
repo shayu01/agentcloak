@@ -1,4 +1,4 @@
-"""Bridge lifecycle commands — start, doctor."""
+"""Bridge lifecycle commands — start, doctor, claim, finalize."""
 
 from __future__ import annotations
 
@@ -13,6 +13,10 @@ from agentcloak.cli.output import output_json
 __all__ = ["app"]
 
 app = typer.Typer()
+
+
+def _run(coro: Any) -> Any:
+    return asyncio.run(coro)
 
 
 @app.command("start")
@@ -91,3 +95,56 @@ def bridge_extension_path() -> None:
     """Print the path to the Chrome extension directory."""
     ext_dir = Path(__file__).parent.parent.parent / "bridge" / "extension"
     output_json({"path": str(ext_dir.resolve())}, seq=0)
+
+
+@app.command("claim")
+def bridge_claim(
+    tab_id: int | None = typer.Option(
+        None, "--tab-id", help="Claim a specific tab by its Chrome tab ID."
+    ),
+    url_pattern: str | None = typer.Option(
+        None,
+        "--url-pattern",
+        help="Claim first tab whose URL contains this substring.",
+    ),
+) -> None:
+    """Claim a user-opened tab for agent control.
+
+    Attaches the Chrome debugger to an existing tab and adds it to the
+    agentcloak tab group.  Provide either --tab-id or --url-pattern.
+    """
+    if tab_id is None and url_pattern is None:
+        typer.echo("Error: provide --tab-id or --url-pattern", err=True)
+        raise typer.Exit(1)
+
+    from agentcloak.cli.client import DaemonClient
+
+    client = DaemonClient()
+    result = _run(client.bridge_claim(tab_id=tab_id, url_pattern=url_pattern))
+    data = result.get("data", result)
+    seq = result.get("seq", 0)
+    output_json(data, seq=seq)
+
+
+@app.command("finalize")
+def bridge_finalize(
+    mode: str = typer.Option(
+        "close",
+        "--mode",
+        help="Session end mode: close (default), handoff, deliverable.",
+    ),
+) -> None:
+    """Finalize the agent session — clean up managed tabs.
+
+    Modes:
+      close       — close all agent-managed tabs (default)
+      handoff     — ungroup tabs and leave them open for the user
+      deliverable — rename the tab group to 'agentcloak results' (green)
+    """
+    from agentcloak.cli.client import DaemonClient
+
+    client = DaemonClient()
+    result = _run(client.bridge_finalize(mode=mode))
+    data = result.get("data", result)
+    seq = result.get("seq", 0)
+    output_json(data, seq=seq)

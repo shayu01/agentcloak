@@ -10,7 +10,7 @@ __all__ = ["BridgeConfig", "load_bridge_config"]
 
 _DEFAULT_BRIDGE_PORT = 18765
 _DEFAULT_CANDIDATES = [
-    "ws://localhost:9222/bridge/ws",
+    "ws://localhost:18765/bridge/ws",
 ]
 
 

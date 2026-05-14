@@ -33,6 +33,7 @@ def _ok(data: dict[str, Any], *, seq: int) -> Response:
 
 def setup_routes(app: web.Application) -> None:
     app.router.add_get("/health", handle_health)
+    app.router.add_get("/ext", handle_ext_ws)
     app.router.add_post("/navigate", handle_navigate)
     app.router.add_get("/screenshot", handle_screenshot)
     app.router.add_get("/snapshot", handle_snapshot)
@@ -74,6 +75,9 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/upload", handle_upload)
     app.router.add_get("/frame/list", handle_frame_list)
     app.router.add_post("/frame/focus", handle_frame_focus)
+    # Phase 5h: bridge UX — tab claiming + session lifecycle
+    app.router.add_post("/bridge/claim", handle_bridge_claim)
+    app.router.add_post("/bridge/finalize", handle_bridge_finalize)
 
 
 def _ctx(request: Request) -> Any:
@@ -81,7 +85,7 @@ def _ctx(request: Request) -> Any:
 
 
 async def handle_health(request: Request) -> Response:
-    data: dict[str, Any] = {"ok": True}
+    data: dict[str, Any] = {"ok": True, "service": "agentcloak-daemon"}
     ctx = _ctx(request)
     data["stealth_tier"] = ctx.stealth_tier.value
     data["seq"] = ctx.seq
@@ -566,6 +570,80 @@ async def handle_bridge_ws(request: Request) -> web.WebSocketResponse:
     request.app.pop("bridge_ws", None)
     request.app.pop("remote_ctx", None)
     return ws
+
+
+async def handle_ext_ws(request: Request) -> web.WebSocketResponse:
+    """Direct WebSocket endpoint for Chrome Extension (local mode).
+
+    When the Extension connects directly to the daemon (no bridge process),
+    it uses this endpoint.  The daemon wraps the WS in a RemoteBridgeContext
+    and stores it alongside the local browser context so that bridge-style
+    commands work transparently.
+    """
+    if not _check_bridge_token(request):
+        raise web.HTTPUnauthorized(text="invalid bridge token")
+
+    from agentcloak.browser.remote_ctx import RemoteBridgeContext
+
+    ws = web.WebSocketResponse(heartbeat=30.0)
+    await ws.prepare(request)
+
+    remote_ctx = RemoteBridgeContext(bridge_ws=ws)
+    request.app["ext_ws"] = ws
+    request.app["remote_ctx"] = remote_ctx
+
+    logger.info("ext_ws_connected", remote=request.remote)
+
+    async for msg in ws:
+        if msg.type == WSMsgType.TEXT:
+            remote_ctx.feed_message(msg.data)
+        elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
+            break
+
+    request.app.pop("ext_ws", None)
+    request.app.pop("remote_ctx", None)
+    logger.info("ext_ws_disconnected")
+    return ws
+
+
+async def _require_remote_ctx(request: Request) -> Any:
+    """Get the remote bridge context or raise 400 if not connected."""
+    remote_ctx = request.app.get("remote_ctx")
+    if remote_ctx is None:
+        raise web.HTTPBadRequest(
+            text='{"ok":false,"error":"no_bridge_connected",'
+            '"hint":"No Chrome Extension connected via bridge or /ext",'
+            '"action":"ensure the Chrome Extension is connected"}',
+            content_type="application/json",
+        )
+    return remote_ctx
+
+
+async def handle_bridge_claim(request: Request) -> Response:
+    """Claim a user tab by ID or URL pattern via the Chrome Extension."""
+    body = await request.json()
+    remote_ctx = await _require_remote_ctx(request)
+
+    params: dict[str, Any] = {}
+    tab_id = body.get("tab_id")
+    url_pattern = body.get("url_pattern")
+    if tab_id is not None:
+        params["tabId"] = tab_id
+    if url_pattern is not None:
+        params["urlPattern"] = url_pattern
+
+    result = await remote_ctx.send_command("claim", params)
+    return _ok(result, seq=0)
+
+
+async def handle_bridge_finalize(request: Request) -> Response:
+    """Finalize agent session — close, handoff, or mark tabs as deliverable."""
+    body = await request.json()
+    remote_ctx = await _require_remote_ctx(request)
+
+    mode = body.get("mode", "close")
+    result = await remote_ctx.send_command("finalize", {"mode": mode})
+    return _ok(result, seq=0)
 
 
 async def handle_cookies_export(request: Request) -> Response:

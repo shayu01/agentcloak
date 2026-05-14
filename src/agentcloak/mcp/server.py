@@ -27,6 +27,7 @@ def create_server() -> object:
 
     from agentcloak.mcp.client import DaemonBridge
     from agentcloak.mcp.tools import (
+        bridge,
         capture,
         content,
         dialog,
@@ -55,18 +56,19 @@ def create_server() -> object:
         ),
     )
 
-    bridge = DaemonBridge()
+    daemon_bridge = DaemonBridge()
 
-    navigation.register(mcp, bridge)
-    interaction.register(mcp, bridge)
-    content.register(mcp, bridge)
-    network.register(mcp, bridge)
-    capture.register(mcp, bridge)
-    management.register(mcp, bridge)
-    dialog.register(mcp, bridge)
-    wait.register(mcp, bridge)
-    upload.register(mcp, bridge)
-    frame.register(mcp, bridge)
+    navigation.register(mcp, daemon_bridge)
+    interaction.register(mcp, daemon_bridge)
+    content.register(mcp, daemon_bridge)
+    network.register(mcp, daemon_bridge)
+    capture.register(mcp, daemon_bridge)
+    management.register(mcp, daemon_bridge)
+    dialog.register(mcp, daemon_bridge)
+    wait.register(mcp, daemon_bridge)
+    upload.register(mcp, daemon_bridge)
+    frame.register(mcp, daemon_bridge)
+    bridge.register(mcp, daemon_bridge)
 
     return mcp
 

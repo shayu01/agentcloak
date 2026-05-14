@@ -16,6 +16,8 @@ let currentHost = null;
 let currentPort = null;
 let currentService = null; // "agentcloak-daemon" or "agentcloak-bridge"
 let isReconnecting = false;
+let agentTabGroupId = null; // Chrome tab group for agent-managed tabs
+let managedTabIds = new Set(); // tabs created or claimed by agent
 
 // --- Badge ---
 
@@ -58,7 +60,11 @@ async function saveAttachedTabs() {
 }
 
 async function restoreAttachedTabs() {
-  const data = await chrome.storage.local.get(["_attached_tabs"]);
+  const data = await chrome.storage.local.get([
+    "_attached_tabs",
+    "_agent_tab_group_id",
+    "_managed_tab_ids",
+  ]);
   if (data._attached_tabs) {
     for (const [tabId, val] of data._attached_tabs) {
       try {
@@ -68,6 +74,76 @@ async function restoreAttachedTabs() {
         // tab no longer exists
       }
     }
+  }
+  // Restore tab group — verify it still exists
+  if (data._agent_tab_group_id != null) {
+    try {
+      const groups = await chrome.tabGroups.query({});
+      if (groups.some((g) => g.id === data._agent_tab_group_id)) {
+        agentTabGroupId = data._agent_tab_group_id;
+      }
+    } catch {
+      // tabGroups API unavailable or group gone
+    }
+  }
+  // Restore managed tab set — prune closed tabs
+  if (data._managed_tab_ids) {
+    for (const tabId of data._managed_tab_ids) {
+      try {
+        await chrome.tabs.get(tabId);
+        managedTabIds.add(tabId);
+      } catch {
+        // tab no longer exists
+      }
+    }
+  }
+}
+
+// --- Tab Group Management ---
+
+async function saveTabGroupState() {
+  await chrome.storage.local.set({
+    _agent_tab_group_id: agentTabGroupId,
+    _managed_tab_ids: Array.from(managedTabIds),
+  });
+}
+
+async function ensureTabGroup(tabId) {
+  /**
+   * Add a tab to the "agentcloak" tab group, creating the group on first use.
+   */
+  try {
+    // Verify existing group still exists
+    if (agentTabGroupId != null) {
+      try {
+        const groups = await chrome.tabGroups.query({});
+        if (!groups.some((g) => g.id === agentTabGroupId)) {
+          agentTabGroupId = null;
+        }
+      } catch {
+        agentTabGroupId = null;
+      }
+    }
+
+    if (agentTabGroupId == null) {
+      // Create new tab group
+      const groupId = await chrome.tabs.group({ tabIds: [tabId] });
+      await chrome.tabGroups.update(groupId, {
+        title: "agentcloak",
+        color: "blue",
+        collapsed: false,
+      });
+      agentTabGroupId = groupId;
+    } else {
+      // Add tab to existing group
+      await chrome.tabs.group({ tabIds: [tabId], groupId: agentTabGroupId });
+    }
+
+    managedTabIds.add(tabId);
+    await saveTabGroupState();
+  } catch (e) {
+    // Tab grouping is non-fatal — log and continue
+    console.log(`[agentcloak] tab group error: ${e.message}`);
   }
 }
 
@@ -305,6 +381,10 @@ async function handleCommand(msg) {
         return await cmdCDP(msg);
       case "batch":
         return await cmdBatch(msg);
+      case "claim":
+        return await cmdClaim(msg);
+      case "finalize":
+        return await cmdFinalize(msg);
       case "ping":
         return { ok: true, data: { pong: true } };
       default:
@@ -320,6 +400,8 @@ async function ensureAttached(tabId) {
   await chrome.debugger.attach({ tabId }, "1.3");
   attachedTabs.set(tabId, true);
   await saveAttachedTabs();
+  // Add to agent tab group for visual isolation
+  await ensureTabGroup(tabId);
 }
 
 async function detachTab(tabId) {
@@ -514,10 +596,133 @@ async function cmdBatch(msg) {
   return { ok: true, data: { results, completed: results.length } };
 }
 
-// Clean up debugger attachments when tabs close
+// --- Tab Claiming (R6.1) ---
+
+async function cmdClaim(msg) {
+  const tabId = msg.params?.tabId;
+  const urlPattern = msg.params?.urlPattern;
+
+  if (!tabId && !urlPattern) {
+    return { ok: false, error: "tabId or urlPattern required" };
+  }
+
+  let targetTab = null;
+
+  if (tabId) {
+    try {
+      targetTab = await chrome.tabs.get(tabId);
+    } catch {
+      return { ok: false, error: `tab ${tabId} not found` };
+    }
+  } else {
+    // Find first tab matching URL substring
+    const allTabs = await chrome.tabs.query({});
+    targetTab = allTabs.find(
+      (t) => t.url && t.url.includes(urlPattern)
+    );
+    if (!targetTab) {
+      return {
+        ok: false,
+        error: `no tab matching URL pattern: ${urlPattern}`,
+      };
+    }
+  }
+
+  // Attach debugger to the claimed tab
+  await ensureAttached(targetTab.id);
+
+  return {
+    ok: true,
+    data: {
+      tabId: targetTab.id,
+      url: targetTab.url,
+      title: targetTab.title,
+      claimed: true,
+    },
+  };
+}
+
+// --- Session Finalize (R6.3) ---
+
+async function cmdFinalize(msg) {
+  const mode = msg.params?.mode || "close";
+  const validModes = ["close", "handoff", "deliverable"];
+
+  if (!validModes.includes(mode)) {
+    return {
+      ok: false,
+      error: `invalid mode: ${mode}. Use: ${validModes.join(", ")}`,
+    };
+  }
+
+  const tabIds = Array.from(managedTabIds);
+  let result = { mode, tabsAffected: 0 };
+
+  if (mode === "close") {
+    // Close all tabs in the agent group, reset group tracking
+    let closed = 0;
+    for (const tid of tabIds) {
+      try {
+        await detachTab(tid);
+        await chrome.tabs.remove(tid);
+        closed++;
+      } catch {
+        // tab may already be closed
+      }
+    }
+    managedTabIds.clear();
+    agentTabGroupId = null;
+    result.tabsAffected = closed;
+  } else if (mode === "handoff") {
+    // Ungroup tabs (remove from group but keep open for user)
+    for (const tid of tabIds) {
+      try {
+        await detachTab(tid);
+        await chrome.tabs.ungroup(tid);
+      } catch {
+        // ignore errors for already-ungrouped tabs
+      }
+    }
+    result.tabsAffected = tabIds.length;
+    managedTabIds.clear();
+    agentTabGroupId = null;
+  } else if (mode === "deliverable") {
+    // Rename group to "agentcloak results", change color to green
+    if (agentTabGroupId != null) {
+      try {
+        await chrome.tabGroups.update(agentTabGroupId, {
+          title: "agentcloak results",
+          color: "green",
+          collapsed: false,
+        });
+      } catch {
+        // group may have been removed
+      }
+    }
+    // Detach debugger but keep tabs in group
+    for (const tid of tabIds) {
+      try {
+        await detachTab(tid);
+      } catch {
+        // ignore
+      }
+    }
+    result.tabsAffected = tabIds.length;
+    managedTabIds.clear();
+    agentTabGroupId = null;
+  }
+
+  await saveTabGroupState();
+  await saveAttachedTabs();
+  return { ok: true, data: result };
+}
+
+// Clean up debugger attachments and managed tabs when tabs close
 chrome.tabs.onRemoved.addListener((tabId) => {
   attachedTabs.delete(tabId);
+  managedTabIds.delete(tabId);
   saveAttachedTabs();
+  saveTabGroupState();
 });
 
 // Strip CSP headers for CDP JS injection
