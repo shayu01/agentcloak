@@ -605,9 +605,7 @@ class TestStaleRefRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_stale_ref_no_retry_on_non_numeric(
-        self, client: TestClient
-    ) -> None:
+    async def test_stale_ref_no_retry_on_non_numeric(self, client: TestClient) -> None:
         """ElementNotFoundError with non-numeric target propagates (no retry)."""
         from agentcloak.core.errors import ElementNotFoundError
 

@@ -204,9 +204,7 @@ class TestBuildSnapshotFrameMerge:
             url="",
             nodes=self._iframe_nodes(),
         )
-        result = build_snapshot(
-            self._main_nodes(), mode="compact", frame_trees=[frame]
-        )
+        result = build_snapshot(self._main_nodes(), mode="compact", frame_trees=[frame])
         tree = result.snapshot.tree_text
         # Interactive elements from both main and frame should survive pruning
         assert "[1] button" in tree
@@ -377,13 +375,13 @@ class TestRenderDiffTree:
         diff_lines = [
             (0, 'navigation "Nav"', None, None),
             (1, '[1] link "Home"', 1, "+"),
-            (2, 'More text', None, "~"),
+            (2, "More text", None, "~"),
         ]
         rendered = render_diff_tree(diff_lines)
         lines = rendered.split("\n")
         assert lines[0] == 'navigation "Nav"'
         assert lines[1] == '  [+] [1] link "Home"'
-        assert lines[2] == '    [~] More text'
+        assert lines[2] == "    [~] More text"
 
     def test_empty_input(self) -> None:
         assert render_diff_tree([]) == ""

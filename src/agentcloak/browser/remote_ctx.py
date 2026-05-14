@@ -163,12 +163,10 @@ class RemoteBridgeContext:
                 raise BackendError(
                     error="element_not_resolved",
                     hint=(
-                        f"Could not resolve backendNodeId"
-                        f" {backend_id} for ref [{ref}]"
+                        f"Could not resolve backendNodeId {backend_id} for ref [{ref}]"
                     ),
                     action=(
-                        "re-snapshot and retry"
-                        " — the element may have been removed"
+                        "re-snapshot and retry — the element may have been removed"
                     ),
                 )
             box = await self._send(
@@ -823,9 +821,7 @@ class RemoteBridgeContext:
                     action="increase timeout or check the condition",
                 )
             try:
-                result = await self._send(
-                    "evaluate", {"js": expression}
-                )
+                result = await self._send("evaluate", {"js": expression})
                 if result.get("result"):
                     return
             except BackendError:
@@ -922,9 +918,8 @@ class RemoteBridgeContext:
         if is_main and not frame_name:
             frame_name = "(main)"
 
-        is_current = (
-            (self._active_frame_id is None and is_main)
-            or (self._active_frame_id == frame_id)
+        is_current = (self._active_frame_id is None and is_main) or (
+            self._active_frame_id == frame_id
         )
 
         out.append(

@@ -418,6 +418,4 @@ class DaemonClient:
         return await self._request("POST", "/bridge/claim", json_body=body)
 
     async def bridge_finalize(self, *, mode: str = "close") -> dict[str, Any]:
-        return await self._request(
-            "POST", "/bridge/finalize", json_body={"mode": mode}
-        )
+        return await self._request("POST", "/bridge/finalize", json_body={"mode": mode})
