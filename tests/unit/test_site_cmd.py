@@ -1,4 +1,4 @@
-"""Tests for CLI site commands and adapter discovery."""
+"""Tests for CLI spell commands and spell discovery."""
 
 from __future__ import annotations
 
@@ -6,42 +6,42 @@ import json
 
 from typer.testing import CliRunner
 
-from agentcloak.adapters.registry import get_registry
 from agentcloak.cli.app import app
+from agentcloak.spells.registry import get_registry
 
 runner = CliRunner()
 
 
-class TestSiteList:
+class TestSpellList:
     def setup_method(self) -> None:
         get_registry().clear()
 
     def test_list_empty(self) -> None:
-        result = runner.invoke(app, ["adapter", "list"])
+        result = runner.invoke(app, ["spell", "list"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["ok"] is True
         assert data["data"]["count"] >= 0
 
     def test_list_after_discovery(self) -> None:
-        from agentcloak.adapters.discovery import discover_adapters
+        from agentcloak.spells.discovery import discover_spells
 
-        discover_adapters()
-        result = runner.invoke(app, ["adapter", "list"])
+        discover_spells()
+        result = runner.invoke(app, ["spell", "list"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["data"]["count"] >= 2
 
 
-class TestSiteInfo:
+class TestSpellInfo:
     def setup_method(self) -> None:
         get_registry().clear()
-        from agentcloak.adapters.discovery import discover_adapters
+        from agentcloak.spells.discovery import discover_spells
 
-        discover_adapters()
+        discover_spells()
 
     def test_info_existing(self) -> None:
-        result = runner.invoke(app, ["adapter", "info", "httpbin/headers"])
+        result = runner.invoke(app, ["spell", "info", "httpbin/headers"])
         assert result.exit_code == 0
         data = json.loads(result.stdout)
         assert data["ok"] is True
@@ -50,23 +50,23 @@ class TestSiteInfo:
         assert data["data"]["strategy"] == "public"
 
     def test_info_missing(self) -> None:
-        result = runner.invoke(app, ["adapter", "info", "nonexist/cmd"])
+        result = runner.invoke(app, ["spell", "info", "nonexist/cmd"])
         assert result.exit_code == 1
 
     def test_info_bad_format(self) -> None:
-        result = runner.invoke(app, ["adapter", "info", "noSlash"])
+        result = runner.invoke(app, ["spell", "info", "noSlash"])
         assert result.exit_code == 1
 
 
-class TestSiteRun:
+class TestSpellRun:
     def setup_method(self) -> None:
         get_registry().clear()
-        from agentcloak.adapters.discovery import discover_adapters
+        from agentcloak.spells.discovery import discover_spells
 
-        discover_adapters()
+        discover_spells()
 
-    def test_run_browser_required_adapter_fails_without_daemon(self) -> None:
-        result = runner.invoke(app, ["adapter", "run", "example/title"])
+    def test_run_browser_required_spell_fails_without_daemon(self) -> None:
+        result = runner.invoke(app, ["spell", "run", "example/title"])
         assert result.exit_code == 1
 
 
@@ -75,16 +75,16 @@ class TestDiscovery:
         get_registry().clear()
 
     def test_discover_builtin(self) -> None:
-        from agentcloak.adapters.discovery import discover_adapters
+        from agentcloak.spells.discovery import discover_spells
 
-        counts = discover_adapters()
+        counts = discover_spells()
         assert counts["builtin"] >= 2
         assert counts["total"] >= 2
 
     def test_discover_idempotent(self) -> None:
-        from agentcloak.adapters.discovery import discover_adapters
+        from agentcloak.spells.discovery import discover_spells
 
-        discover_adapters()
+        discover_spells()
         count_first = len(get_registry())
-        discover_adapters()
+        discover_spells()
         assert len(get_registry()) == count_first

@@ -1,20 +1,20 @@
-"""Example adapters demonstrating pipeline and function modes."""
+"""Example spells demonstrating pipeline and function modes."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentcloak.adapters.registry import adapter
-from agentcloak.adapters.types import Arg
 from agentcloak.core.types import Strategy
+from agentcloak.spells.registry import spell
+from agentcloak.spells.types import Arg
 
 if TYPE_CHECKING:
-    from agentcloak.adapters.context import AdapterContext
+    from agentcloak.spells.context import SpellContext
 
 # -- Pipeline mode: public API, no browser needed --
 
 
-@adapter(
+@spell(
     site="httpbin",
     name="headers",
     strategy=Strategy.PUBLIC,
@@ -32,13 +32,13 @@ if TYPE_CHECKING:
     ],
 )
 def httpbin_headers() -> None:
-    """Pipeline adapter placeholder."""
+    """Pipeline spell placeholder."""
 
 
 # -- Function mode: browser required (UI interaction) --
 
 
-@adapter(
+@spell(
     site="example",
     name="title",
     strategy=Strategy.COOKIE,
@@ -46,7 +46,7 @@ def httpbin_headers() -> None:
     description="Get the page title of example.com",
     access="read",
 )
-async def example_title(ctx: AdapterContext) -> list[dict[str, object]]:
+async def example_title(ctx: SpellContext) -> list[dict[str, object]]:
     title = await ctx.evaluate("document.title")
     url = await ctx.evaluate("location.href")
     return [{"title": title, "url": url}]

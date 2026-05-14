@@ -9,7 +9,7 @@
 
 - **Primary**: 通用 agent 浏览器能力层——稳定的"眼睛和手"
 - **Secondary**: 日常网站自动化——登录态复用的常见任务
-- **Long-term**: 网站能力资产平台——站点操作沉淀为可复用 CLI 命令
+- **Long-term**: 网站能力资产平台——站点操作沉淀为可复用 spell 命令
 - **Complementary**: jshookmcp 作为 MCP 覆盖 JS Hook/CDP/逆向（不重复实现）
 
 ## Tech Stack (D4)
@@ -55,7 +55,7 @@ daemon + CLI + local browser basics
 - PatchrightContext as default backend
 - daemon (aiohttp), seq counter, tab manager, ring buffer
 - CLI (typer), JSON output, three-field error envelope
-- Commands: open, screenshot, execute-js, snapshot, network, console, tab, doctor
+- Commands: navigate, screenshot, evaluate, snapshot, network, console, tab, doctor
 - Deliverable: **agent can open pages, screenshot, execute JS, see network requests**
 - Ref: `research/ai-browser-agents.md`（selector_map、seq 模型）, `research/browser-cli-platforms.md`（bb-browser seq+since、三字段 envelope）
 
@@ -92,19 +92,21 @@ daemon + CLI + local browser basics
 - Deliverable: **agent operates shayu's real browser remotely**
 - Ref: `research/browser-cli-platforms.md`（GenericAgent TMWebDriver WS+HTTP 双传输）, `reference/doc/sop/TMWebdriver*`、`reference/doc/sop/TMWebDriver CDP*`
 
-### Phase 4: Adapter platform (done)
+### Phase 4: Spell platform (done)
 
-- [x] Strategy enum (PUBLIC/COOKIE/HEADER/INTERCEPT/UI) + `@adapter` decorator + AdapterRegistry
+> Renamed from "Adapter platform" to "Spell platform" in CLI/MCP audit (Phase 5i prep). Internal code: `@spell` decorator, `SpellRegistry`, `src/agentcloak/spells/`.
+
+- [x] Strategy enum (PUBLIC/COOKIE/HEADER/INTERCEPT/UI) + `@spell` decorator + SpellRegistry
 - [x] Pipeline DSL (declarative) + Function (async def) dual mode
 - [x] Template engine with `{path}` syntax, 7 built-in pipeline steps
 - [x] CaptureStore — full request/response recording with auto-filtering
 - [x] HAR 1.2 import/export (to_har/from_har)
 - [x] PatternAnalyzer — path parameterization, endpoint clustering, auth detection, schema inference
-- [x] AdapterGenerator — API pattern → pipeline adapter Python code
-- [x] `site list/info/run/scaffold` CLI commands
+- [x] SpellGenerator — API pattern → pipeline spell Python code
+- [x] `spell list/info/run/scaffold` CLI commands
 - [x] `capture start/stop/status/export/analyze/clear` CLI commands
 - [x] Daemon `/capture/*` endpoints
-- [x] Adapter auto-discovery (built-in + user directory)
+- [x] Spell auto-discovery (built-in + user directory)
 - Deliverable: **common site operations as one-liner commands**
 - Ref: `research/browser-cli-platforms.md`（OpenCLI Strategy enum + pipeline DSL、bb-browser @meta adapter）, `research/neo-analyzer-wireshark.md`（neo schema synthesis + workflow discover）
 
@@ -118,7 +120,7 @@ daemon + CLI + local browser basics
 #### Phase 5c: UX + daemon auto-start (done)
 
 - [x] daemon auto-start from MCP (DaemonBridge auto-start on first request)
-- [x] MCP site run tool (browserctl_adapter_run + browserctl_adapter_list)
+- [x] MCP spell run tool (agentcloak_spell_run + agentcloak_spell_list)
 - [x] CLI cdp endpoint 命令 (`browserctl cdp endpoint`)
 - [x] 多 tab 管理 (tab list/new/close/switch — browser + daemon + CLI + MCP)
 - Deliverable: **frictionless daemon startup, multi-tab agent workflows**
@@ -232,7 +234,7 @@ CI / 工程基础：
 - [ ] SECURITY.md（威胁模型、漏洞报告方式、cookie/profile/bridge 安全边界）
 
 CLI / MCP 接口审查：
-- [ ] CLI 命令名和参数一致性审查（`open` 加 `navigate` 别名，高频参数统一为选项风格）
+- [ ] CLI 命令名和参数一致性审查（`navigate` 为主命令名，高频参数统一为选项风格）
 - [ ] MCP 工具名和参数一致性审查（与 CLI 对齐，参数命名统一）
 - [ ] agent 易用性测试（不加载 Skill 的情况下，agent 能否凭直觉正确使用命令）
 

@@ -1,4 +1,4 @@
-"""Adapter code generation from API endpoint patterns."""
+"""Spell code generation from API endpoint patterns."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 from agentcloak.core.types import Strategy
 
 if TYPE_CHECKING:
-    from agentcloak.adapters.analyzer import EndpointPattern
+    from agentcloak.spells.analyzer import EndpointPattern
 
-__all__ = ["generate_adapter", "generate_adapters"]
+__all__ = ["generate_spell", "generate_spells"]
 
 _PARAM_RE = re.compile(r":(\w+)")
 
@@ -91,24 +91,24 @@ def _build_pipeline_code(pattern: EndpointPattern) -> str:
     return "\n".join(steps)
 
 
-def generate_adapter(
+def generate_spell(
     site: str,
     pattern: EndpointPattern,
     *,
     name: str | None = None,
 ) -> str:
-    """Generate Python adapter source code from an EndpointPattern."""
-    adapter_name = name or _derive_name(pattern)
-    func_name = f"{_slugify(site)}_{_slugify(adapter_name)}"
+    """Generate Python spell source code from an EndpointPattern."""
+    spell_name = name or _derive_name(pattern)
+    func_name = f"{_slugify(site)}_{_slugify(spell_name)}"
     access = "read" if pattern.method in ("GET", "HEAD", "OPTIONS") else "write"
 
     args_code = _build_args_code(pattern)
     pipeline_code = _build_pipeline_code(pattern)
 
     lines: list[str] = []
-    lines.append("@adapter(")
+    lines.append("@spell(")
     lines.append(f'    site="{site}",')
-    lines.append(f'    name="{adapter_name}",')
+    lines.append(f'    name="{spell_name}",')
     lines.append(f"    strategy=Strategy.{pattern.strategy.name},")
     if pattern.domain:
         lines.append(f'    domain="{pattern.domain}",')
@@ -121,24 +121,24 @@ def generate_adapter(
     lines.append("    ],")
     lines.append(")")
     lines.append(f"def {func_name}() -> None:")
-    lines.append('    """Generated adapter — review before use."""')
+    lines.append('    """Generated spell — review before use."""')
     lines.append("")
 
     return "\n".join(lines)
 
 
-def generate_adapters(
+def generate_spells(
     site: str,
     patterns: list[EndpointPattern],
 ) -> str:
-    """Generate a complete adapter module from multiple patterns."""
+    """Generate a complete spell module from multiple patterns."""
     header_lines = [
-        f'"""Auto-generated adapters for {site} — review before use."""',
+        f'"""Auto-generated spells for {site} — review before use."""',
         "",
         "from __future__ import annotations",
         "",
-        "from agentcloak.adapters.registry import adapter",
-        "from agentcloak.adapters.types import Arg",
+        "from agentcloak.spells.registry import spell",
+        "from agentcloak.spells.types import Arg",
         "from agentcloak.core.types import Strategy",
         "",
     ]
@@ -148,6 +148,6 @@ def generate_adapters(
     for pattern in patterns:
         if pattern.category == "telemetry":
             continue
-        body_parts.append(generate_adapter(site, pattern))
+        body_parts.append(generate_spell(site, pattern))
 
     return header + "\n\n".join(body_parts)

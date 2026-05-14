@@ -7,8 +7,8 @@ from typing import Any, cast
 
 import httpx
 
-from agentcloak.adapters.pipeline.template import render, render_deep
 from agentcloak.core.errors import AgentBrowserError
+from agentcloak.spells.pipeline.template import render, render_deep
 
 __all__ = ["STEP_REGISTRY", "StepContext"]
 

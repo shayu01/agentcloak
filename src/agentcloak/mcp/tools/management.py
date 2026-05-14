@@ -1,4 +1,4 @@
-"""Management tools — launch, status, profile, adapter, doctor, resume."""
+"""Management tools — launch, status, profile, spell, doctor, resume."""
 
 from __future__ import annotations
 
@@ -120,38 +120,38 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": False})
-    async def agentcloak_adapter_run(
+    async def agentcloak_spell_run(
         name: str,
         args_json: str = "{}",
     ) -> str:
-        """Run a registered adapter by name.
+        """Run a registered spell by name.
 
-        Adapters are reusable automation commands for specific websites.
-        Execution happens inside the daemon so the adapter has full browser
+        Spells are reusable automation commands for specific websites.
+        Execution happens inside the daemon so the spell has full browser
         context (cookies, session, etc.).
-        Use agentcloak_adapter_list to see available adapters.
+        Use agentcloak_spell_list to see available spells.
 
         Args:
-            name: Adapter name as 'site/command' (e.g. 'httpbin/headers')
+            name: Spell name as 'site/command' (e.g. 'httpbin/headers')
             args_json: Arguments as JSON object (e.g. '{"limit": 10}')
 
         Returns:
-            JSON with the adapter execution result.
+            JSON with the spell execution result.
         """
         parsed_args: dict[str, Any] = json.loads(args_json)
         result = await bridge.request(
-            "POST", "/site/run", json_body={"name": name, "args": parsed_args}
+            "POST", "/spell/run", json_body={"name": name, "args": parsed_args}
         )
         return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})
-    async def agentcloak_adapter_list() -> str:
-        """List all registered adapters.
+    async def agentcloak_spell_list() -> str:
+        """List all registered spells.
 
         Returns:
-            JSON with adapters array (site, name, strategy, description).
+            JSON with spells array (site, name, strategy, description).
         """
-        result = await bridge.request("GET", "/site/list")
+        result = await bridge.request("GET", "/spell/list")
         return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": False})

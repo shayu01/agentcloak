@@ -1,4 +1,4 @@
-"""Adapter type definitions — metadata, arguments, and entry records."""
+"""Spell type definitions — metadata, arguments, and entry records."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from typing import TYPE_CHECKING, Any, Literal
 from agentcloak.core.types import Strategy
 
 if TYPE_CHECKING:
-    from agentcloak.adapters.context import AdapterContext
+    from agentcloak.spells.context import SpellContext
 
-__all__ = ["AdapterEntry", "AdapterMeta", "Arg"]
+__all__ = ["Arg", "SpellEntry", "SpellMeta"]
 
 
 @dataclass(frozen=True)
 class Arg:
-    """Single argument accepted by an adapter command."""
+    """Single argument accepted by a spell command."""
 
     name: str
     type: type = str
@@ -28,8 +28,8 @@ class Arg:
 
 
 @dataclass(frozen=True)
-class AdapterMeta:
-    """Declarative metadata for a registered adapter."""
+class SpellMeta:
+    """Declarative metadata for a registered spell."""
 
     site: str
     name: str
@@ -56,15 +56,15 @@ class AdapterMeta:
         return None
 
 
-AdapterHandler = Callable[["AdapterContext"], Awaitable[list[dict[str, Any]]]]
+SpellHandler = Callable[["SpellContext"], Awaitable[list[dict[str, Any]]]]
 
 
 @dataclass(frozen=True)
-class AdapterEntry:
-    """A registered adapter: metadata + handler (function or pipeline)."""
+class SpellEntry:
+    """A registered spell: metadata + handler (function or pipeline)."""
 
-    meta: AdapterMeta
-    handler: AdapterHandler | None = field(default=None)
+    meta: SpellMeta
+    handler: SpellHandler | None = field(default=None)
 
     @property
     def is_pipeline(self) -> bool:

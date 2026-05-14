@@ -1,12 +1,12 @@
-"""Tests for adapters/analyzer.py — API pattern recognition."""
+"""Tests for spells/analyzer.py — API pattern recognition."""
 
-from agentcloak.adapters.analyzer import (
+from agentcloak.core.capture import CaptureEntry
+from agentcloak.core.types import Strategy
+from agentcloak.spells.analyzer import (
     PatternAnalyzer,
     _extract_schema,
     _normalize_path,
 )
-from agentcloak.core.capture import CaptureEntry
-from agentcloak.core.types import Strategy
 
 
 def _api_entry(

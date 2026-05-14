@@ -1,28 +1,28 @@
-"""AdapterContext — unified runtime interface for adapter handlers."""
+"""SpellContext — unified runtime interface for spell handlers."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agentcloak.adapters.types import AdapterMeta
     from agentcloak.browser.protocol import (
         ActionResult,
         BrowserContext,
         NetworkRequest,
     )
     from agentcloak.browser.state import PageSnapshot
+    from agentcloak.spells.types import SpellMeta
 
-__all__ = ["AdapterContext"]
+__all__ = ["SpellContext"]
 
 
-class AdapterContext:
-    """Wraps BrowserContext + parsed args for adapter execution."""
+class SpellContext:
+    """Wraps BrowserContext + parsed args for spell execution."""
 
     def __init__(
         self,
         *,
-        meta: AdapterMeta,
+        meta: SpellMeta,
         args: dict[str, Any],
         browser: BrowserContext | None = None,
     ) -> None:
@@ -31,7 +31,7 @@ class AdapterContext:
         self._browser = browser
 
     @property
-    def meta(self) -> AdapterMeta:
+    def meta(self) -> SpellMeta:
         return self._meta
 
     @property
@@ -41,7 +41,7 @@ class AdapterContext:
     @property
     def browser(self) -> BrowserContext:
         if self._browser is None:
-            msg = "browser context not available for this adapter"
+            msg = "browser context not available for this spell"
             raise RuntimeError(msg)
         return self._browser
 

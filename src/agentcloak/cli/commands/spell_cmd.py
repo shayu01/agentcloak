@@ -1,4 +1,4 @@
-"""Site commands — list, info, run, and scaffold adapters."""
+"""Spell commands — list, info, run, and scaffold spells."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import Any
 
 import typer
 
-from agentcloak.adapters.discovery import discover_adapters
-from agentcloak.adapters.registry import get_registry
 from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
 from agentcloak.core.errors import AgentBrowserError
+from agentcloak.spells.discovery import discover_spells
+from agentcloak.spells.registry import get_registry
 
 __all__ = ["app"]
 
@@ -24,18 +24,18 @@ def _run(coro: Any) -> Any:
 
 def _ensure_discovered() -> None:
     if len(get_registry()) == 0:
-        discover_adapters()
+        discover_spells()
 
 
 @app.command("list")
-def site_list() -> None:
-    """List all registered adapters."""
+def spell_list() -> None:
+    """List all registered spells."""
     _ensure_discovered()
     registry = get_registry()
-    adapters: list[dict[str, Any]] = []
+    spells: list[dict[str, Any]] = []
     for entry in registry.list_all():
         m = entry.meta
-        adapters.append(
+        spells.append(
             {
                 "site": m.site,
                 "name": m.name,
@@ -48,19 +48,19 @@ def site_list() -> None:
                 "mode": "pipeline" if entry.is_pipeline else "function",
             }
         )
-    output_json({"adapters": adapters, "count": len(adapters)}, seq=0)
+    output_json({"spells": spells, "count": len(spells)}, seq=0)
 
 
 @app.command("info")
-def site_info(
-    name: str = typer.Argument(help="Adapter name as site/command."),
+def spell_info(
+    name: str = typer.Argument(help="Spell name as site/command."),
 ) -> None:
-    """Show detailed info for an adapter."""
+    """Show detailed info for a spell."""
     _ensure_discovered()
     parts = name.split("/", 1)
     if len(parts) != 2:
         raise AgentBrowserError(
-            error="invalid_adapter_name",
+            error="invalid_spell_name",
             hint=f"Expected 'site/name' format, got '{name}'",
             action="use format like 'httpbin/headers'",
         )
@@ -68,9 +68,9 @@ def site_info(
     entry = registry.get(parts[0], parts[1])
     if entry is None:
         raise AgentBrowserError(
-            error="adapter_not_found",
-            hint=f"No adapter registered as '{name}'",
-            action="run 'agentcloak site list' to see available adapters",
+            error="spell_not_found",
+            hint=f"No spell registered as '{name}'",
+            action="run 'agentcloak spell list' to see available spells",
         )
     m = entry.meta
     info: dict[str, Any] = {
@@ -100,18 +100,18 @@ def site_info(
 
 
 @app.command("run")
-def site_run(
-    name: str = typer.Argument(help="Adapter name as site/command."),
+def spell_run(
+    name: str = typer.Argument(help="Spell name as site/command."),
     args: list[str] = typer.Argument(
-        default=None, help="Adapter arguments as key=value pairs."
+        default=None, help="Spell arguments as key=value pairs."
     ),
 ) -> None:
-    """Execute an adapter."""
+    """Execute a spell."""
     _ensure_discovered()
     parts = name.split("/", 1)
     if len(parts) != 2:
         raise AgentBrowserError(
-            error="invalid_adapter_name",
+            error="invalid_spell_name",
             hint=f"Expected 'site/name' format, got '{name}'",
             action="use format like 'httpbin/headers'",
         )
@@ -119,9 +119,9 @@ def site_run(
     entry = registry.get(parts[0], parts[1])
     if entry is None:
         raise AgentBrowserError(
-            error="adapter_not_found",
-            hint=f"No adapter registered as '{name}'",
-            action="run 'agentcloak site list' to see available adapters",
+            error="spell_not_found",
+            hint=f"No spell registered as '{name}'",
+            action="run 'agentcloak spell list' to see available spells",
         )
 
     parsed_args = _parse_args(args or [])
@@ -130,17 +130,17 @@ def site_run(
 
 
 async def _execute(entry: Any, args: dict[str, Any]) -> list[dict[str, Any]]:
-    from agentcloak.adapters.executor import execute_adapter
+    from agentcloak.spells.executor import execute_spell
 
     if entry.meta.needs_browser:
         raise AgentBrowserError(
             error="browser_required",
-            hint=f"Adapter '{entry.meta.full_name}' requires a browser "
+            hint=f"Spell '{entry.meta.full_name}' requires a browser "
             f"(strategy={entry.meta.strategy})",
-            action="start daemon first, then use site run",
+            action="start daemon first, then use spell run",
         )
 
-    return await execute_adapter(entry, args=args)
+    return await execute_spell(entry, args=args)
 
 
 def _parse_args(raw: list[str]) -> dict[str, Any]:
@@ -155,11 +155,11 @@ def _parse_args(raw: list[str]) -> dict[str, Any]:
 
 
 @app.command("scaffold")
-def site_scaffold(
-    site: str = typer.Argument(help="Site name for generated adapters."),
+def spell_scaffold(
+    site: str = typer.Argument(help="Site name for generated spells."),
     domain: str = typer.Option("", help="Filter patterns by domain."),
 ) -> None:
-    """Generate adapter code from captured traffic analysis."""
+    """Generate spell code from captured traffic analysis."""
     client = DaemonClient()
     params: dict[str, str] = {}
     if domain:
@@ -177,9 +177,9 @@ def site_scaffold(
         )
         return
 
-    from agentcloak.adapters.analyzer import EndpointPattern
-    from agentcloak.adapters.generator import generate_adapters
     from agentcloak.core.types import Strategy
+    from agentcloak.spells.analyzer import EndpointPattern
+    from agentcloak.spells.generator import generate_spells
 
     patterns: list[EndpointPattern] = []
     for p in patterns_data:
@@ -198,5 +198,5 @@ def site_scaffold(
             )
         )
 
-    code = generate_adapters(site, patterns)
+    code = generate_spells(site, patterns)
     output_json({"code": code, "pattern_count": len(patterns)}, seq=0)

@@ -147,15 +147,6 @@ class TestRoutes:
         assert "selector_map" in data["data"]
 
     @pytest.mark.asyncio
-    async def test_state(self, client: TestClient) -> None:
-        resp = await client.get("/state")
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
-        assert data["ok"] is True
-        assert "tree_text" in data["data"]
-        assert "screenshot_b64" in data["data"]
-
-    @pytest.mark.asyncio
     async def test_evaluate(self, client: TestClient) -> None:
         resp = await client.post(
             "/evaluate",

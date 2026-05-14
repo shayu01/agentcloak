@@ -7,13 +7,13 @@ description: "Browser automation via cloak CLI. Navigates pages with anti-bot st
 
 Stealth browser automation for AI agents. Daemon auto-starts on first command.
 
-Use `cloak` (short for `agentcloak`). High-frequency commands have top-level shortcuts -- `cloak open`, `cloak snapshot`, `cloak click` etc.
+Use `cloak` (short for `agentcloak`). High-frequency commands have top-level shortcuts -- `cloak navigate`, `cloak snapshot`, `cloak click` etc.
 
 ## Core Workflow
 
 Observe-then-act. Snapshot first because `[N]` refs are only valid for the current page state.
 
-1. **Navigate**: `cloak open "https://example.com"`
+1. **Navigate**: `cloak navigate "https://example.com"`
 2. **Observe**: `cloak snapshot` -- get a11y tree with `[N]` element refs
 3. **Act**: `cloak click --target 5` or `cloak fill --target 3 --text "query"`
 4. **Handle feedback**: check action return for `pending_requests`, `dialog`, `navigation`
@@ -82,7 +82,7 @@ Use the number as `--target` in action commands. Numbers are **page-specific and
 
 | Command | Purpose |
 |---------|---------|
-| `cloak open URL` | Navigate to URL |
+| `cloak navigate URL` | Navigate to URL |
 | `cloak snapshot` | Get a11y tree with `[N]` refs |
 | `cloak snapshot --mode compact` | Interactive elements + containers only |
 | `cloak snapshot --mode content` | Text extraction |
@@ -177,7 +177,7 @@ For pages with iframes. After switching, all actions/snapshots operate in that f
 
 | Command | Purpose |
 |---------|---------|
-| `cloak js eval "expression"` | Execute JS in page context |
+| `cloak js evaluate "expression"` | Execute JS in page context |
 | `cloak fetch URL` | HTTP GET with browser cookies |
 | `cloak fetch URL --method POST --body '{...}'` | HTTP POST |
 | `cloak network requests` | Recent network requests |
@@ -200,7 +200,7 @@ For pages with iframes. After switching, all actions/snapshots operate in that f
 | `cloak profile launch NAME` | Start browser with saved profile |
 | `cloak tab list` | List open tabs |
 | `cloak tab new` / `tab close --id N` / `tab switch --id N` | Tab management |
-| `cloak adapter list` / `adapter run NAME` | Run site adapters |
+| `cloak spell list` / `spell run NAME` | Run spells (site automation) |
 | `cloak doctor` | Self-check diagnostics |
 
 ## Output Format
@@ -234,7 +234,7 @@ When `"ok": false`, read the `action` field for a concrete recovery step.
 ### Search
 
 ```bash
-cloak open "https://www.google.com"
+cloak navigate "https://www.google.com"
 cloak snapshot --mode compact
 # find the search box [N] in output, then:
 cloak fill --target N --text "search query"
@@ -245,7 +245,7 @@ cloak snapshot  # re-snapshot after navigation
 ### Login and Save Session
 
 ```bash
-cloak open "https://example.com/login"
+cloak navigate "https://example.com/login"
 cloak snapshot --mode compact
 # identify fields from snapshot:
 cloak fill --target N --text "username"
@@ -292,7 +292,7 @@ cloak frame focus --main   # back to main page
 ### Explore Large Page
 
 ```bash
-cloak open "https://example.com/dashboard"
+cloak navigate "https://example.com/dashboard"
 cloak snapshot --mode compact --max-nodes 50
 # see summary of hidden elements, then zoom in:
 cloak snapshot --focus 12  # expand area around element [12]
@@ -304,7 +304,7 @@ cloak snapshot --offset 50 --max-nodes 50
 
 ```bash
 cloak capture start
-cloak open "https://api-heavy-site.com"
+cloak navigate "https://api-heavy-site.com"
 # interact...
 cloak capture stop
 cloak capture export --format har -o traffic.har

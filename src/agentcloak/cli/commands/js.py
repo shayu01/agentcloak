@@ -19,14 +19,14 @@ def _run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-@app.command("execute-js")
-def execute_js(
+@app.command("evaluate")
+def js_evaluate(
     code: str = typer.Argument(help="JavaScript code to evaluate."),
     world: str = typer.Option(
         "main", help="Execution context: 'main' (page globals) or 'utility' (isolated)."
     ),
 ) -> None:
-    """Execute JavaScript in the page context."""
+    """Evaluate JavaScript in the page context."""
     client = DaemonClient()
     result = _run(client.evaluate(code, world=world))
     data = result.get("data", result)

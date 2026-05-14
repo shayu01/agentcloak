@@ -44,7 +44,7 @@ Claude Code Skill（`skills/agentcloak/SKILL.md`）按需加载，agent 通过 B
 
 ### 独立 MCP 模式
 
-`agentcloak-mcp` 作为独立 MCP server 运行，覆盖 90% 的 web 自动化场景：navigate、snapshot、action、screenshot、evaluate、fetch、capture、adapter、profile、tab。
+`agentcloak-mcp` 作为独立 MCP server 运行，覆盖 90% 的 web 自动化场景：navigate、snapshot、action、screenshot、evaluate、fetch、capture、spell、profile、tab。
 适用于不支持 Bash 的纯 MCP 客户端。注意：MCP 工具定义常驻 context 约 ~6000 tokens，是 Skill+CLI 模式（~300 tokens）的 20 倍。Bash-capable agent 推荐使用 Skill+CLI 模式。
 
 ### jshookmcp 松耦合模式（逆向/hook 场景）
@@ -83,5 +83,5 @@ agentcloak 和 jshookmcp 作为两个独立 MCP server 并行运行，通过 CDP
 | `daemon/` | `browser/`, `core/` | `cli/` |
 | `browser/` | `core/` | `cli/`, `daemon/` |
 | `core/` | stdlib + third-party | any sibling layer |
-| `adapters/` | `core/`, `browser/protocol` | `daemon/`, `cli/` |
-| `mcp/` | `core/`, `adapters/`, daemon HTTP API | `browser/`, `daemon/` internals |
+| `spells/` | `core/`, `browser/protocol` | `daemon/`, `cli/` |
+| `mcp/` | `core/`, `spells/`, daemon HTTP API | `browser/`, `daemon/` internals |

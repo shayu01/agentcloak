@@ -227,9 +227,6 @@ class DaemonClient:
             params["diff"] = "true"
         return await self._request("GET", "/snapshot", params=params)
 
-    async def state(self) -> dict[str, Any]:
-        return await self._request("GET", "/state")
-
     async def evaluate(self, js: str, *, world: str = "main") -> dict[str, Any]:
         return await self._request(
             "POST", "/evaluate", json_body={"js": js, "world": world}

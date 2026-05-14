@@ -37,7 +37,6 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/navigate", handle_navigate)
     app.router.add_get("/screenshot", handle_screenshot)
     app.router.add_get("/snapshot", handle_snapshot)
-    app.router.add_get("/state", handle_state)
     app.router.add_post("/evaluate", handle_evaluate)
     app.router.add_get("/network", handle_network)
     app.router.add_post("/action", handle_action)
@@ -59,8 +58,8 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post("/tab/close", handle_tab_close)
     app.router.add_post("/tab/switch", handle_tab_switch)
     app.router.add_get("/resume", handle_resume)
-    app.router.add_post("/site/run", handle_site_run)
-    app.router.add_get("/site/list", handle_site_list)
+    app.router.add_post("/spell/run", handle_spell_run)
+    app.router.add_get("/spell/list", handle_spell_list)
     app.router.add_post("/capture/replay", handle_capture_replay)
     app.router.add_post(
         "/profile/create-from-current", handle_profile_create_from_current
@@ -224,29 +223,6 @@ async def handle_snapshot(request: Request) -> Response:
         }
     if snap.security_warnings:
         data["security_warnings"] = snap.security_warnings
-    return _ok(data, seq=ctx.seq)
-
-
-async def handle_state(request: Request) -> Response:
-    ctx = _ctx(request)
-    snap = await ctx.snapshot(mode="accessible")
-    raw_screenshot = await ctx.screenshot(format="jpeg", quality=80)
-    b64 = screenshot_to_base64(raw_screenshot)
-    network_reqs = await ctx.network(since=0)
-
-    data: dict[str, Any] = {
-        "seq": ctx.seq,
-        "url": snap.url,
-        "title": snap.title,
-        "tree_text": snap.tree_text,
-        "selector_map": {
-            str(k): {"index": v.index, "tag": v.tag, "role": v.role, "text": v.text}
-            for k, v in snap.selector_map.items()
-        },
-        "screenshot_b64": b64,
-        "stealth_tier": ctx.stealth_tier.value,
-        "pending_network_requests": network_reqs[-20:],
-    }
     return _ok(data, seq=ctx.seq)
 
 
@@ -741,7 +717,7 @@ async def handle_capture_export(request: Request) -> Response:
 
 
 async def handle_capture_analyze(request: Request) -> Response:
-    from agentcloak.adapters.analyzer import PatternAnalyzer
+    from agentcloak.spells.analyzer import PatternAnalyzer
 
     ctx = _ctx(request)
     domain = request.query.get("domain")
@@ -931,11 +907,11 @@ async def handle_resume(request: Request) -> Response:
     return _ok(snap.to_dict(), seq=_ctx(request).seq)
 
 
-async def handle_site_run(request: Request) -> Response:
-    """Run a registered adapter with the daemon's live browser context."""
-    from agentcloak.adapters.discovery import discover_adapters
-    from agentcloak.adapters.executor import execute_adapter
-    from agentcloak.adapters.registry import get_registry
+async def handle_spell_run(request: Request) -> Response:
+    """Run a registered spell with the daemon's live browser context."""
+    from agentcloak.spells.discovery import discover_spells
+    from agentcloak.spells.executor import execute_spell
+    from agentcloak.spells.registry import get_registry
 
     body = await request.json()
     name: str = body.get("name", "")
@@ -947,14 +923,14 @@ async def handle_site_run(request: Request) -> Response:
         return _json(
             {
                 "ok": False,
-                "error": "invalid_adapter_name",
+                "error": "invalid_spell_name",
                 "hint": f"Expected 'site/command', got '{name}'",
                 "action": "use format like 'httpbin/headers'",
             },
             status=400,
         )
 
-    discover_adapters()
+    discover_spells()
     registry = get_registry()
     entry = registry.get(parts[0], parts[1])
     if entry is None:
@@ -962,25 +938,25 @@ async def handle_site_run(request: Request) -> Response:
         return _json(
             {
                 "ok": False,
-                "error": "adapter_not_found",
-                "hint": f"No adapter '{name}'",
+                "error": "spell_not_found",
+                "hint": f"No spell '{name}'",
                 "action": f"available: {', '.join(available[:10])}",
             },
             status=404,
         )
 
-    result = await execute_adapter(entry, args=args, browser=ctx)
+    result = await execute_spell(entry, args=args, browser=ctx)
     return _ok({"result": result}, seq=ctx.seq)
 
 
-async def handle_site_list(request: Request) -> Response:
-    """List all registered adapters."""
-    from agentcloak.adapters.discovery import discover_adapters
-    from agentcloak.adapters.registry import get_registry
+async def handle_spell_list(request: Request) -> Response:
+    """List all registered spells."""
+    from agentcloak.spells.discovery import discover_spells
+    from agentcloak.spells.registry import get_registry
 
-    discover_adapters()
+    discover_spells()
     registry = get_registry()
-    adapters = [
+    spells = [
         {
             "full_name": e.meta.full_name,
             "strategy": e.meta.strategy.value,
@@ -989,7 +965,7 @@ async def handle_site_list(request: Request) -> Response:
         }
         for e in registry.list_all()
     ]
-    return _ok({"adapters": adapters, "count": len(adapters)}, seq=_ctx(request).seq)
+    return _ok({"spells": spells, "count": len(spells)}, seq=_ctx(request).seq)
 
 
 _HOP_BY_HOP = frozenset(

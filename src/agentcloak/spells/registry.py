@@ -1,4 +1,4 @@
-"""Adapter registry and @adapter decorator."""
+"""Spell registry and @spell decorator."""
 
 from __future__ import annotations
 
@@ -7,37 +7,37 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 import structlog
 
-from agentcloak.adapters.types import AdapterEntry, AdapterHandler, AdapterMeta, Arg
+from agentcloak.spells.types import Arg, SpellEntry, SpellHandler, SpellMeta
 
 if TYPE_CHECKING:
     from agentcloak.core.types import Strategy
 
-__all__ = ["AdapterRegistry", "adapter", "get_registry"]
+__all__ = ["SpellRegistry", "get_registry", "spell"]
 
 log = structlog.get_logger()
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-class AdapterRegistry:
-    """Global adapter registry — maps ``site/name`` to AdapterEntry."""
+class SpellRegistry:
+    """Global spell registry — maps ``site/name`` to SpellEntry."""
 
     def __init__(self) -> None:
-        self._entries: dict[str, AdapterEntry] = {}
+        self._entries: dict[str, SpellEntry] = {}
 
-    def register(self, entry: AdapterEntry) -> None:
+    def register(self, entry: SpellEntry) -> None:
         key = entry.meta.full_name
         if key in self._entries:
-            log.info("adapter.override", key=key)
+            log.info("spell.override", key=key)
         self._entries[key] = entry
-        log.debug("adapter.registered", key=key, strategy=entry.meta.strategy)
+        log.debug("spell.registered", key=key, strategy=entry.meta.strategy)
 
-    def get(self, site: str, name: str) -> AdapterEntry | None:
+    def get(self, site: str, name: str) -> SpellEntry | None:
         return self._entries.get(f"{site}/{name}")
 
-    def list_all(self) -> list[AdapterEntry]:
+    def list_all(self) -> list[SpellEntry]:
         return list(self._entries.values())
 
-    def list_by_site(self, site: str) -> list[AdapterEntry]:
+    def list_by_site(self, site: str) -> list[SpellEntry]:
         prefix = f"{site}/"
         return [
             e for e in self._entries.values() if e.meta.full_name.startswith(prefix)
@@ -53,16 +53,16 @@ class AdapterRegistry:
         self._entries.clear()
 
 
-_global_registry = AdapterRegistry()
+_global_registry = SpellRegistry()
 
 
-def get_registry() -> AdapterRegistry:
-    """Return the global adapter registry singleton."""
+def get_registry() -> SpellRegistry:
+    """Return the global spell registry singleton."""
     return _global_registry
 
 
 @overload
-def adapter(
+def spell(
     *,
     site: str,
     name: str,
@@ -77,7 +77,7 @@ def adapter(
 
 
 @overload
-def adapter(
+def spell(
     *,
     site: str,
     name: str,
@@ -90,7 +90,7 @@ def adapter(
 ) -> Callable[[F], F]: ...
 
 
-def adapter(
+def spell(
     *,
     site: str,
     name: str,
@@ -102,14 +102,14 @@ def adapter(
     columns: Sequence[str] | None = None,
     pipeline: Sequence[dict[str, Any]] | None = None,
 ) -> Callable[[F], F]:
-    """Decorator that registers an adapter with the global registry.
+    """Decorator that registers a spell with the global registry.
 
     Function mode: decorate an ``async def`` handler.
     Pipeline mode: pass ``pipeline=[...]`` and decorate a placeholder.
     """
 
     def decorator(func: F) -> F:
-        meta = AdapterMeta(
+        meta = SpellMeta(
             site=site,
             name=name,
             strategy=strategy,
@@ -120,11 +120,11 @@ def adapter(
             columns=tuple(columns) if columns else None,
             pipeline=tuple(pipeline) if pipeline else None,
         )
-        handler: AdapterHandler | None = None
+        handler: SpellHandler | None = None
         if pipeline is None:
             handler = func  # type: ignore[assignment]
 
-        entry = AdapterEntry(meta=meta, handler=handler)
+        entry = SpellEntry(meta=meta, handler=handler)
         _global_registry.register(entry)
         return func
 

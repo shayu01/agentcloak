@@ -6,8 +6,8 @@ from typing import Any
 
 import structlog
 
-from agentcloak.adapters.pipeline.steps import STEP_REGISTRY, StepContext
 from agentcloak.core.errors import AgentBrowserError
+from agentcloak.spells.pipeline.steps import STEP_REGISTRY, StepContext
 
 __all__ = ["execute_pipeline"]
 

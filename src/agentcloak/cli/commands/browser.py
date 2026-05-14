@@ -21,8 +21,8 @@ def _run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-@app.command("open")
-def browser_open(
+@app.command("navigate")
+def browser_navigate(
     url: str = typer.Argument(help="URL to navigate to."),
     timeout: float = typer.Option(
         30.0, "--timeout", help="Navigation timeout in seconds."
@@ -119,16 +119,6 @@ def browser_snapshot(
             diff=diff,
         )
     )
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
-
-
-@app.command("state")
-def browser_state() -> None:
-    """Get full browser state."""
-    client = DaemonClient()
-    result = _run(client.state())
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

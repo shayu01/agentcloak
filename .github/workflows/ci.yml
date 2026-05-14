@@ -27,6 +27,8 @@ jobs:
         run: ruff format --check src/ tests/
       - name: Pyright
         run: pyright
+      - name: CLI/MCP consistency check
+        run: python scripts/check_consistency.py
 
   unit-tests:
     name: Unit Tests / Python ${{ matrix.python-version }}

@@ -75,7 +75,7 @@ def _register_commands() -> None:
         js,
         network,
         profile,
-        site_cmd,
+        spell_cmd,
         tab,
         upload,
         wait_cmd,
@@ -120,9 +120,9 @@ def _register_commands() -> None:
         help="Network traffic capture: record, export, analyze.",
     )
     app.add_typer(
-        site_cmd.app,
-        name="adapter",
-        help="Adapters: list, info, run, scaffold.",
+        spell_cmd.app,
+        name="spell",
+        help="Spells: list, info, run, scaffold.",
     )
     app.add_typer(
         tab.app,
@@ -173,13 +173,13 @@ def _register_shortcuts() -> None:
         do_type,
     )
     from agentcloak.cli.commands.browser import (
-        browser_open,
+        browser_navigate,
         browser_resume,
         browser_screenshot,
         browser_snapshot,
     )
 
-    app.command("open", hidden=True)(browser_open)
+    app.command("navigate", hidden=True)(browser_navigate)
     app.command("snapshot", hidden=True)(browser_snapshot)
     app.command("screenshot", hidden=True)(browser_screenshot)
     app.command("resume", hidden=True)(browser_resume)
