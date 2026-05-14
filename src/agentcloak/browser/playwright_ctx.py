@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import re
 import shutil
 import socket
 from datetime import UTC
@@ -16,9 +15,8 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
+from agentcloak.browser._snapshot_builder import build_snapshot
 from agentcloak.browser.state import (
-    CONTEXT_ROLES,
-    INTERACTIVE_ROLES,
     ElementRef,
     FrameInfo,
     PageSnapshot,
@@ -38,47 +36,6 @@ from agentcloak.core.types import StealthTier
 __all__ = ["PlaywrightContext"]
 
 logger = structlog.get_logger()
-
-_INTERACTIVE_ROLES = INTERACTIVE_ROLES
-_CONTEXT_ROLES = CONTEXT_ROLES
-
-_SKIP_ROLES = frozenset({"none", "InlineTextBox", "LineBreak"})
-
-# Zero-width and invisible characters to strip from names/values
-_INVISIBLE_RE = re.compile(
-    "[​‌‍⁠﻿]"
-)
-
-# Boolean AX properties: output name when true, name=false only for expanded
-_BOOL_PROPS = frozenset(
-    {
-        "checked",
-        "disabled",
-        "expanded",
-        "selected",
-        "pressed",
-        "invalid",
-        "required",
-        "focused",
-        "hidden",
-    }
-)
-
-# Value AX properties to extract
-_VALUE_PROPS = frozenset(
-    {
-        "valuemin",
-        "valuemax",
-        "valuenow",
-        "valuetext",
-        "level",
-        "haspopup",
-        "autocomplete",
-    }
-)
-
-# Properties where false is semantically meaningful and should be output
-_FALSE_MEANINGFUL = frozenset({"expanded"})
 
 _SNAP_CHROMIUM = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
 
@@ -197,9 +154,7 @@ class PlaywrightContext:
             }
             _accept_task = asyncio.ensure_future(dialog.accept())
             self._pending_captures.add(_accept_task)
-            _accept_task.add_done_callback(
-                self._pending_captures.discard
-            )
+            _accept_task.add_done_callback(self._pending_captures.discard)
             logger.info(
                 "dialog_auto_accepted",
                 dialog_type=dtype,
@@ -398,9 +353,7 @@ class PlaywrightContext:
         """Fetch the full accessibility tree via CDP with Shadow DOM pierce."""
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
-            tree = await cdp.send(
-                "Accessibility.getFullAXTree", {"pierce": True}
-            )
+            tree = await cdp.send("Accessibility.getFullAXTree", {"pierce": True})
         finally:
             await cdp.detach()
         return tree.get("nodes", [])
@@ -416,353 +369,24 @@ class PlaywrightContext:
         focus: int = 0,
         offset: int = 0,
     ) -> PageSnapshot:
-        """Build accessible or compact snapshot with tree structure."""
+        """Build accessible or compact snapshot via shared builder."""
         raw_nodes = await self._get_ax_tree()
-
-        # Phase 1: index nodes by nodeId, build child lookup
-        node_by_id: dict[str, dict[str, Any]] = {}
-        root_ids: list[str] = []
-        for raw in raw_nodes:
-            nid = raw.get("nodeId", "")
-            if nid:
-                node_by_id[nid] = raw
-        # Find roots: nodes not referenced as children by any other node
-        all_child_ids: set[str] = set()
-        for raw in raw_nodes:
-            for cid in raw.get("childIds", []):
-                all_child_ids.add(cid)
-        for raw in raw_nodes:
-            nid = raw.get("nodeId", "")
-            if nid and nid not in all_child_ids:
-                root_ids.append(nid)
-        if not root_ids and raw_nodes:
-            root_ids = [raw_nodes[0].get("nodeId", "")]
-
-        # Phase 2: recursive tree build with ref assignment
-        selector_map: dict[int, ElementRef] = {}
-        backend_node_map: dict[int, int] = {}
-        counter = [1]  # mutable counter for ref assignment
-        compact = mode == "compact"
-
-        # Build tree structure as a list of (depth, line_str, ref_or_none)
-        all_lines: list[tuple[int, str, int | None]] = []
-
-        def _clean_text(text: str) -> str:
-            """Strip invisible characters from AX text."""
-            text = _INVISIBLE_RE.sub("", text)
-            text = text.replace("\xa0", " ")
-            return text.strip()
-
-        def _ax_value(obj: dict[str, Any] | None) -> Any:
-            """Unwrap CDP AXValue: {type, value} -> value."""
-            if isinstance(obj, dict):
-                return obj.get("value")
-            return obj
-
-        def _extract_props(node: dict[str, Any]) -> dict[str, str]:
-            """Extract ARIA properties from AXNode properties array."""
-            attrs: dict[str, str] = {}
-            props: list[dict[str, Any]] = node.get("properties", [])
-            is_password = False
-            for prop in props:
-                pname: str = prop.get("name", "")
-                val: object = _ax_value(prop.get("value"))
-
-                if (
-                    pname == "autocomplete"
-                    and isinstance(val, str)
-                    and "password" in val
-                ):
-                    is_password = True
-
-                if pname in _BOOL_PROPS:
-                    if val is True:
-                        attrs[pname] = ""
-                    elif val is False and pname in _FALSE_MEANINGFUL:
-                        attrs[pname] = "false"
-                elif pname in _VALUE_PROPS and val is not None:
-                    attrs[pname] = str(val)
-
-            # Extract value from top-level AXNode value field
-            val_raw: object = _ax_value(node.get("value"))
-            if val_raw is not None and str(val_raw).strip():
-                if is_password:
-                    attrs["value"] = "••••"
-                else:
-                    attrs["value"] = _clean_text(str(val_raw))
-
-            # Extract description
-            desc_raw: object = _ax_value(node.get("description"))
-            if desc_raw is not None and str(desc_raw).strip():
-                attrs["description"] = _clean_text(str(desc_raw))
-
-            return attrs
-
-        def _format_attrs(attrs: dict[str, str]) -> str:
-            """Format attributes for output line."""
-            parts: list[str] = []
-            # Output order: value first, then booleans, then others
-            if "value" in attrs:
-                parts.append(f'value="{attrs["value"]}"')
-            for key in ("checked", "disabled", "expanded", "selected",
-                        "pressed", "invalid", "required", "focused", "hidden"):
-                if key in attrs:
-                    val = attrs[key]
-                    if val == "":
-                        parts.append(key)
-                    else:
-                        parts.append(f"{key}={val}")
-            for key in ("level", "haspopup", "valuemin", "valuemax",
-                        "valuenow", "valuetext", "description"):
-                if key in attrs:
-                    parts.append(f"{key}={attrs[key]}")
-            return " ".join(parts)
-
-        def _should_fold(node: dict[str, Any], role: str, name: str) -> bool:
-            """Whether a node should be folded (children promoted)."""
-            if role in ("generic", "group", "none", ""):
-                child_ids = node.get("childIds", [])
-                if not name and len(child_ids) <= 1:
-                    return True
-            return False
-
-        def _is_static_text_like(node: dict[str, Any]) -> bool:
-            role = node.get("role", {}).get("value", "")
-            return role == "StaticText"
-
-        def _visit(
-            node_id: str,
-            depth: int,
-        ) -> None:
-            node = node_by_id.get(node_id)
-            if node is None:
-                return
-
-            ignored = node.get("ignored", False)
-            role = node.get("role", {}).get("value", "")
-            name_raw = node.get("name", {}).get("value", "")
-            name = _clean_text(name_raw)
-            child_ids: list[str] = node.get("childIds", [])
-
-            # Skip roles we never show
-            if role in _SKIP_ROLES or ignored:
-                for cid in child_ids:
-                    _visit(cid, depth)
-                return
-
-            # Fold transparent containers (promote children)
-            if _should_fold(node, role, name):
-                for cid in child_ids:
-                    _visit(cid, depth)
-                return
-
-            # StaticText dedup: if parent name matches this, skip
-            # (handled during aggregation below)
-
-            role_lower = role.lower()
-            is_interactive = role_lower in _INTERACTIVE_ROLES
-            is_context = role_lower in _CONTEXT_ROLES
-
-            if is_interactive:
-                ref = counter[0]
-                attrs = _extract_props(node)
-                selector_map[ref] = ElementRef(
-                    index=ref,
-                    tag=role,
-                    role=role,
-                    text=name,
-                    attributes=attrs,
-                    depth=depth,
-                    description=attrs.get("description", ""),
-                )
-                backend_dom_id = node.get("backendDOMNodeId")
-                if backend_dom_id is not None:
-                    backend_node_map[ref] = int(backend_dom_id)
-
-                attr_str = _format_attrs(attrs)
-                line = f"[{ref}] {role}"
-                if name:
-                    line += f' "{name}"'
-                if attr_str:
-                    line += f" {attr_str}"
-                all_lines.append((depth, line, ref))
-                counter[0] += 1
-            elif is_context and name:
-                # Context/structure role: show as tree node, no ref
-                attrs = _extract_props(node)
-                attr_str = _format_attrs(attrs)
-                line = f'{role} "{name}"'
-                if attr_str:
-                    line += f" {attr_str}"
-                all_lines.append((depth, line, None))
-            elif role == "StaticText" and name:
-                # StaticText: show as plain text
-                all_lines.append((depth, name, None))
-            elif not compact and name and role:
-                # Accessible mode: show named non-interactive elements
-                attrs = _extract_props(node)
-                attr_str = _format_attrs(attrs)
-                line = f'{role} "{name}"'
-                if attr_str:
-                    line += f" {attr_str}"
-                all_lines.append((depth, line, None))
-
-            # Recurse into children
-            # StaticText aggregation: merge consecutive StaticTexts
-            i = 0
-            while i < len(child_ids):
-                cid = child_ids[i]
-                cnode = node_by_id.get(cid)
-                if cnode and _is_static_text_like(cnode):
-                    # Collect consecutive StaticText children
-                    texts: list[str] = []
-                    while i < len(child_ids):
-                        cn = node_by_id.get(child_ids[i])
-                        if cn and _is_static_text_like(cn):
-                            t = _clean_text(cn.get("name", {}).get("value", ""))
-                            if t:
-                                texts.append(t)
-                            i += 1
-                        else:
-                            break
-                    merged = " ".join(texts)
-                    # Dedup: skip if merged text equals parent name
-                    if merged and merged != name:
-                        all_lines.append((depth + 1, merged, None))
-                else:
-                    _visit(cid, depth + 1)
-                    i += 1
-
-        for rid in root_ids:
-            _visit(rid, 0)
-
-        # Phase 3: compact mode tree pruning
-        total_nodes = len(all_lines)
-        total_interactive = len(selector_map)
-
-        if compact:
-            # Bottom-up ancestor preservation: keep lines with refs
-            # and their structural ancestors
-            keep = [False] * total_nodes
-            for idx, (_, _, ref) in enumerate(all_lines):
-                if ref is not None:
-                    keep[idx] = True
-                    # Walk up to find ancestors with less indentation
-                    target_depth = all_lines[idx][0]
-                    for anc in range(idx - 1, -1, -1):
-                        if all_lines[anc][0] < target_depth:
-                            keep[anc] = True
-                            target_depth = all_lines[anc][0]
-                            if target_depth == 0:
-                                break
-            pruned = [
-                all_lines[i] for i in range(total_nodes) if keep[i]
-            ]
-            all_lines = pruned
-
-        # Store full selector_map and backend_node_map (R4: daemon caches full mapping)
-        self._backend_node_map = backend_node_map
-        self._selector_map = selector_map
-        # Cache full lines for progressive loading
-        self._cached_lines = all_lines
-        self._cached_mode = mode
-
-        # Phase 4: progressive loading (focus / offset / truncation)
-        output_lines = all_lines
-
-        if focus > 0 and focus in selector_map:
-            # Focus mode: show subtree around target ref
-            output_lines = self._extract_focus_subtree(all_lines, focus)
-        elif offset > 0:
-            output_lines = all_lines[offset:]
-
-        # Apply max_nodes truncation
-        truncated_at = 0
-        if max_nodes and max_nodes > 0 and len(output_lines) > max_nodes:
-            visible = output_lines[:max_nodes]
-            remaining = output_lines[max_nodes:]
-            truncated_at = max_nodes + (offset if offset > 0 else 0)
-            output_lines = visible
-            # Build truncation summary
-            remaining_refs = [
-                r for _, _, r in remaining if r is not None
-            ]
-            if remaining_refs:
-                min_ref = min(remaining_refs)
-                max_ref = max(remaining_refs)
-                summary = (
-                    f"--- not shown: [{min_ref}]-[{max_ref}]"
-                    f" {len(remaining)} elements"
-                    f" (--focus=N to expand subtree,"
-                    f" --offset={truncated_at} to page) ---"
-                )
-            else:
-                summary = (
-                    f"--- not shown: {len(remaining)} elements"
-                    f" (--offset={truncated_at} to page) ---"
-                )
-            output_lines = [*output_lines, (0, summary, None)]
-
-        # Render lines with 2-space indentation
-        rendered: list[str] = []
-        for depth, text, _ in output_lines:
-            rendered.append("  " * depth + text)
-        tree_text = "\n".join(rendered)
-
-        # Apply max_chars fallback truncation
-        if max_chars and max_chars > 0 and len(tree_text) > max_chars:
-            tree_text = tree_text[:max_chars] + "\n[...truncated...]"
-
-        return PageSnapshot(
+        result = build_snapshot(
+            raw_nodes,
+            mode=mode,
+            max_nodes=max_nodes,
+            max_chars=max_chars,
+            focus=focus,
+            offset=offset,
             seq=self._seq_counter.value,
             url=self._page.url,
             title=await self._page.title(),
-            mode=mode,
-            tree_text=tree_text,
-            selector_map=selector_map,
-            total_nodes=total_nodes,
-            total_interactive=total_interactive,
-            truncated_at=truncated_at,
         )
-
-    def _extract_focus_subtree(
-        self,
-        lines: list[tuple[int, str, int | None]],
-        target_ref: int,
-    ) -> list[tuple[int, str, int | None]]:
-        """Extract the subtree containing a given ref, plus ancestor breadcrumbs."""
-        # Find the line with the target ref
-        target_idx = -1
-        for i, (_, _, ref) in enumerate(lines):
-            if ref == target_ref:
-                target_idx = i
-                break
-        if target_idx < 0:
-            return lines  # ref not found, return all
-
-        target_depth = lines[target_idx][0]
-
-        # Collect ancestor breadcrumbs (walk up)
-        ancestors: list[int] = []
-        search_depth = target_depth
-        for i in range(target_idx - 1, -1, -1):
-            if lines[i][0] < search_depth:
-                ancestors.append(i)
-                search_depth = lines[i][0]
-                if search_depth == 0:
-                    break
-        ancestors.reverse()
-
-        # Collect subtree (target + all deeper children)
-        subtree: list[int] = [target_idx]
-        for i in range(target_idx + 1, len(lines)):
-            if lines[i][0] > target_depth:
-                subtree.append(i)
-            else:
-                break
-
-        result_indices = ancestors + subtree
-        return [lines[i] for i in result_indices]
+        self._backend_node_map = result.backend_node_map
+        self._selector_map = result.selector_map
+        self._cached_lines = result.cached_lines
+        self._cached_mode = mode
+        return result.snapshot
 
     async def _snapshot_dom(self) -> PageSnapshot:
         html = await self._page.content()
@@ -822,9 +446,7 @@ class PlaywrightContext:
 
         return await self._resolve_by_role(index)
 
-    async def _resolve_by_backend_node(
-        self, backend_node_id: int, index: int
-    ) -> Any:
+    async def _resolve_by_backend_node(self, backend_node_id: int, index: int) -> Any:
         """Resolve via CDP backendDOMNodeId — exact match, no re-snapshot."""
         marker = f"__cloak_{index}"
         cdp = await self._page.context.new_cdp_session(self._page)
@@ -916,9 +538,7 @@ class PlaywrightContext:
                 "message": self._pending_dialog.message,
             }
             if self._pending_dialog.default_value:
-                result["dialog"]["default_value"] = (
-                    self._pending_dialog.default_value
-                )
+                result["dialog"]["default_value"] = self._pending_dialog.default_value
         if self._last_navigation_event is not None:
             result["navigation"] = self._last_navigation_event
             self._last_navigation_event = None
@@ -940,11 +560,7 @@ class PlaywrightContext:
                 "dialog": {
                     "type": d.dialog_type,
                     "message": d.message,
-                    **(
-                        {"default_value": d.default_value}
-                        if d.default_value
-                        else {}
-                    ),
+                    **({"default_value": d.default_value} if d.default_value else {}),
                 },
                 "hint": "A dialog is pending — handle it before continuing",
                 "action": "use 'dialog accept' or 'dialog dismiss'",
@@ -959,8 +575,15 @@ class PlaywrightContext:
 
         pre_url = self._page.url
         valid_kinds = {
-            "click", "fill", "type", "scroll", "hover",
-            "select", "press", "keydown", "keyup",
+            "click",
+            "fill",
+            "type",
+            "scroll",
+            "hover",
+            "select",
+            "press",
+            "keydown",
+            "keyup",
         }
         if kind not in valid_kinds:
             raise BackendError(
@@ -998,8 +621,7 @@ class PlaywrightContext:
 
         post_url = self._page.url
         caused_navigation = (
-            post_url != pre_url
-            or self._last_navigation_event is not None
+            post_url != pre_url or self._last_navigation_event is not None
         )
 
         new_seq = self._seq_counter.increment_action()
@@ -1264,9 +886,7 @@ class PlaywrightContext:
 
         try:
             if condition == "selector":
-                await target.wait_for_selector(
-                    value, state=state, timeout=timeout
-                )
+                await target.wait_for_selector(value, state=state, timeout=timeout)
             elif condition == "url":
                 await self._page.wait_for_url(value, timeout=timeout)
             elif condition == "load":
@@ -1316,9 +936,7 @@ class PlaywrightContext:
 
     # ── R4: File upload ──
 
-    async def upload(
-        self, index: int, files: list[str]
-    ) -> dict[str, Any]:
+    async def upload(self, index: int, files: list[str]) -> dict[str, Any]:
         element = await self._resolve_element(index)
         validated: list[str] = []
         for f in files:
@@ -1365,15 +983,12 @@ class PlaywrightContext:
         result: list[FrameInfo] = []
         for frame in frames:
             is_current = frame == (
-                self._active_frame if self._active_frame is not None
+                self._active_frame
+                if self._active_frame is not None
                 else self._page.main_frame
             )
             is_main = frame == self._page.main_frame
-            fname = (
-                frame.name or "(main)"
-                if is_main
-                else frame.name or ""
-            )
+            fname = frame.name or "(main)" if is_main else frame.name or ""
             result.append(
                 FrameInfo(
                     name=fname,
@@ -1409,9 +1024,7 @@ class PlaywrightContext:
                     break
 
         if target_frame is None:
-            available = [
-                f.name or f.url[:60] for f in self._page.frames
-            ]
+            available = [f.name or f.url[:60] for f in self._page.frames]
             raise BackendError(
                 error="frame_not_found",
                 hint=f"No frame matching name={name!r} url={url!r}",
@@ -1482,9 +1095,7 @@ class PlaywrightContext:
                 remaining = [
                     {
                         "index": j,
-                        "kind": actions[j].get(
-                            "kind", actions[j].get("action", "")
-                        ),
+                        "kind": actions[j].get("kind", actions[j].get("action", "")),
                     }
                     for j in range(i + 1, total)
                 ]
@@ -1748,22 +1359,30 @@ class PlaywrightContext:
         )
 
         _useful_headers = {
-            "content-type", "content-length", "content-encoding",
-            "set-cookie", "location", "cache-control",
-            "x-ratelimit-remaining", "x-ratelimit-limit",
-            "retry-after", "www-authenticate",
+            "content-type",
+            "content-length",
+            "content-encoding",
+            "set-cookie",
+            "location",
+            "cache-control",
+            "x-ratelimit-remaining",
+            "x-ratelimit-limit",
+            "retry-after",
+            "www-authenticate",
         }
         filtered_headers = {
-            k: v for k, v in resp.headers.items()
-            if k.lower() in _useful_headers
+            k: v for k, v in resp.headers.items() if k.lower() in _useful_headers
         }
 
         parsed_body: Any = resp_body
         if body_encoding == "text" and "json" in content_type:
             import contextlib
             import json as _json
+
             with contextlib.suppress(Exception):
-                parsed_body = _json.loads(resp_body if isinstance(resp_body, str) else resp.text)
+                parsed_body = _json.loads(
+                    resp_body if isinstance(resp_body, str) else resp.text
+                )
 
         return {
             "status": resp.status_code,
@@ -1892,9 +1511,7 @@ class PlaywrightContext:
             title = ""
         return {"tab_id": tab_id, "url": url, "title": title}
 
-    async def raw_cdp(
-        self, method: str, params: dict[str, Any] | None = None
-    ) -> Any:
+    async def raw_cdp(self, method: str, params: dict[str, Any] | None = None) -> Any:
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
             return await cdp.send(method, params or {})

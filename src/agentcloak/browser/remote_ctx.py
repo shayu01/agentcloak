@@ -8,8 +8,8 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from agentcloak.browser._snapshot_builder import build_snapshot
 from agentcloak.browser.state import (
-    INTERACTIVE_ROLES,
     ElementRef,
     FrameInfo,
     PageSnapshot,
@@ -33,6 +33,9 @@ class RemoteBridgeContext:
         self._seq_counter = SeqCounter()
         self._ring_buffer = RingBuffer()
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._selector_map: dict[int, ElementRef] = {}
+        self._backend_node_map: dict[int, int] = {}
+        self._cached_lines: list[tuple[int, str, int | None]] = []
 
     @property
     def seq(self) -> int:
@@ -109,6 +112,72 @@ class RemoteBridgeContext:
         result["seq"] = new_seq
         return result
 
+    async def _resolve_element_center(self, ref: int) -> tuple[float, float]:
+        """Resolve [N] ref to element center coordinates via backendDOMNodeId."""
+        backend_id = self._backend_node_map.get(ref)
+        if backend_id is None:
+            raise BackendError(
+                error="element_not_found",
+                hint=f"Ref [{ref}] not in current snapshot",
+                action="re-snapshot and use a valid [N] ref",
+            )
+        desc = await self._send(
+            "cdp",
+            {
+                "method": "DOM.describeNode",
+                "params": {"backendNodeId": backend_id},
+            },
+        )
+        node_id = desc.get("node", {}).get("nodeId", 0)
+        if not node_id:
+            resolve_result = await self._send(
+                "cdp",
+                {
+                    "method": "DOM.resolveNode",
+                    "params": {"backendNodeId": backend_id},
+                },
+            )
+            object_id = resolve_result.get("object", {}).get("objectId")
+            if object_id:
+                box = await self._send(
+                    "cdp",
+                    {
+                        "method": "Runtime.callFunctionOn",
+                        "params": {
+                            "objectId": object_id,
+                            "functionDeclaration": (
+                                "function(){"
+                                "const r=this.getBoundingClientRect();"
+                                "return JSON.stringify("
+                                "{x:r.x,y:r.y,w:r.width,h:r.height})}"
+                            ),
+                            "returnByValue": True,
+                        },
+                    },
+                )
+                import json as _json
+
+                rect = _json.loads(box.get("result", {}).get("value", "{}"))
+                cx = rect.get("x", 0) + rect.get("w", 0) / 2
+                cy = rect.get("y", 0) + rect.get("h", 0) / 2
+                return float(cx), float(cy)
+        box_model = await self._send(
+            "cdp",
+            {"method": "DOM.getBoxModel", "params": {"nodeId": node_id}},
+        )
+        content = box_model.get("model", {}).get("content", [0] * 8)
+        cx = (content[0] + content[4]) / 2
+        cy = (content[1] + content[5]) / 2
+        return float(cx), float(cy)
+
+    async def _get_tab_info(self) -> tuple[str, str]:
+        """Get current page URL and title via JS evaluate."""
+        result = await self._send("evaluate", {"js": "[document.URL, document.title]"})
+        raw: list[str] = result.get("result", ["", ""])
+        url = str(raw[0]) if len(raw) > 0 else ""
+        title = str(raw[1]) if len(raw) > 1 else ""
+        return url, title
+
     async def snapshot(
         self,
         *,
@@ -118,70 +187,46 @@ class RemoteBridgeContext:
         focus: int = 0,
         offset: int = 0,
     ) -> PageSnapshot:
-        # Progressive loading params not supported in remote bridge
-        if mode == "accessible":
-            result = await self._send(
+        if mode in ("accessible", "compact"):
+            cdp_result = await self._send(
                 "cdp",
                 {"method": "Accessibility.getFullAXTree", "params": {"pierce": True}},
             )
-            return self._parse_ax_tree(result)
+            raw_nodes: list[dict[str, Any]] = cdp_result.get("nodes", [])
+            url, title = await self._get_tab_info()
+            result = build_snapshot(
+                raw_nodes,
+                mode=mode,
+                max_nodes=max_nodes,
+                max_chars=max_chars,
+                focus=focus,
+                offset=offset,
+                seq=self._seq_counter.value,
+                url=url,
+                title=title,
+            )
+            self._selector_map = result.selector_map
+            self._backend_node_map = result.backend_node_map
+            self._cached_lines = result.cached_lines
+            return result.snapshot
 
         if mode == "content":
-            result = await self._send(
+            text_result = await self._send(
                 "evaluate", {"js": "document.body?.innerText || ''"}
             )
-            js = "[document.URL, document.title]"
-            tab_info = await self._send("evaluate", {"js": js})
-            raw: list[str] = tab_info.get("result", ["", ""])
-            url = str(raw[0]) if len(raw) > 0 else ""
-            title = str(raw[1]) if len(raw) > 1 else ""
+            url, title = await self._get_tab_info()
             return PageSnapshot(
                 seq=self._seq_counter.value,
                 url=url,
                 title=title,
                 mode="content",
-                tree_text=str(result.get("result", "")),
+                tree_text=str(text_result.get("result", "")),
             )
 
         raise BackendError(
             error="invalid_snapshot_mode",
             hint=f"Unknown mode: {mode}",
-            action="use one of: accessible, content",
-        )
-
-    def _parse_ax_tree(self, cdp_result: dict[str, Any]) -> PageSnapshot:
-        nodes = cdp_result.get("nodes", [])
-        selector_map: dict[int, ElementRef] = {}
-        lines: list[str] = []
-        counter = 1
-        interactive_roles = INTERACTIVE_ROLES
-        skip_roles = {"none", "InlineTextBox", "LineBreak"}
-
-        for node in nodes:
-            role = node.get("role", {}).get("value", "")
-            name = node.get("name", {}).get("value", "")
-            if not role or role in skip_roles:
-                continue
-            if role.lower() in interactive_roles:
-                selector_map[counter] = ElementRef(
-                    index=counter,
-                    tag=role,
-                    role=role,
-                    text=name,
-                    attributes={},
-                )
-                lines.append(f"[{counter}] <{role}> {name}")
-                counter += 1
-            elif name:
-                lines.append(f"{role}: {name}")
-
-        return PageSnapshot(
-            seq=self._seq_counter.value,
-            url="",
-            title="",
-            mode="accessible",
-            tree_text="\n".join(lines),
-            selector_map=selector_map,
+            action="use one of: accessible, compact, content",
         )
 
     async def action(self, kind: str, target: str, **kw: Any) -> dict[str, Any]:
@@ -236,14 +281,30 @@ class RemoteBridgeContext:
                     },
                 )
             else:
-                # Validate idx is strictly an integer to prevent JS injection
                 idx = int(target)
-                js = (
-                    "document.querySelector("
-                    f"'[data-agentcloak-idx=\"{idx}\"]'"
-                    ")?.click()"
+                cx, cy = await self._resolve_element_center(idx)
+                mouse_p = {
+                    "type": "mousePressed",
+                    "x": cx,
+                    "y": cy,
+                    "button": "left",
+                    "clickCount": 1,
+                }
+                mouse_r = {
+                    "type": "mouseReleased",
+                    "x": cx,
+                    "y": cy,
+                    "button": "left",
+                    "clickCount": 1,
+                }
+                await self._send(
+                    "cdp",
+                    {"method": "Input.dispatchMouseEvent", "params": mouse_p},
                 )
-                await self._send("evaluate", {"js": js})
+                await self._send(
+                    "cdp",
+                    {"method": "Input.dispatchMouseEvent", "params": mouse_r},
+                )
 
         elif kind == "press":
             key = kw.get("key", "")
@@ -333,9 +394,7 @@ class RemoteBridgeContext:
         b64 = result.get("base64", "")
         return base64.b64decode(b64)
 
-    async def raw_cdp(
-        self, method: str, params: dict[str, Any] | None = None
-    ) -> Any:
+    async def raw_cdp(self, method: str, params: dict[str, Any] | None = None) -> Any:
         return await self.send_command(
             "cdp", {"method": method, "params": params or {}}
         )
@@ -379,9 +438,7 @@ class RemoteBridgeContext:
             action="use 'ms' condition or switch to a local backend",
         )
 
-    async def upload(
-        self, index: int, files: list[str]
-    ) -> dict[str, Any]:
+    async def upload(self, index: int, files: list[str]) -> dict[str, Any]:
         raise BackendError(
             error="upload_not_supported",
             hint="File upload not supported via remote bridge",
