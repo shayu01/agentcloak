@@ -7,36 +7,57 @@ description: "Browser automation via cloak CLI. Navigates pages with anti-bot st
 
 Stealth browser automation for AI agents. Daemon auto-starts on first command.
 
-Use `cloak` (short for `agentcloak`). High-frequency commands have top-level shortcuts — `cloak open`, `cloak snapshot`, `cloak click` etc.
+Use `cloak` (short for `agentcloak`). High-frequency commands have top-level shortcuts -- `cloak open`, `cloak snapshot`, `cloak click` etc.
 
 ## Core Workflow
 
 Observe-then-act. Snapshot first because `[N]` refs are only valid for the current page state.
 
 1. **Navigate**: `cloak open "https://example.com"`
-2. **Observe**: `cloak snapshot` — get a11y tree with `[N]` element refs
+2. **Observe**: `cloak snapshot` -- get a11y tree with `[N]` element refs
 3. **Act**: `cloak click --target 5` or `cloak fill --target 3 --text "query"`
 4. **Re-observe if page changed**: when `caused_navigation: true` in response, snapshot again
 5. **Repeat** steps 2-4
 
 ## Element Addressing
 
-`cloak snapshot` returns an accessibility tree with `[N]` indexed elements:
+`cloak snapshot` returns an indented accessibility tree with `[N]` indexed elements:
 
 ```
-[1] <link> About
-[2] <button> Settings
-[3] <combobox> Search
-[4] <button> Google Search
+navigation "Main Nav"
+  [1] link "Home"
+  [2] link "Shop"
+  [3] textbox "Search" value="shoes" focused
+main "Content"
+  heading "Products" level=2
+    [4] link "Item 1 - $29.99"
+    [5] button "Add to cart"
+    [6] link "Item 2 - $49.99"
+    [7] button "Add to cart" disabled
+form "Login"
+  [8] textbox "Email" value="user@example.com" required
+  [9] textbox "Password" value="••••" required
+  [10] checkbox "Remember me" checked
+  [11] button "Submit"
 ```
 
-Use the number as `--target` in action commands. Numbers are **page-specific and change on navigation/DOM update** — always re-snapshot for fresh refs.
+Use the number as `--target` in action commands. Numbers are **page-specific and change on navigation/DOM update** -- always re-snapshot for fresh refs.
 
-Snapshot modes:
-- `accessible` (default) — full a11y tree with `[N]`, best for interaction
-- `compact` — interactive elements only, smaller output
-- `content` — text extraction, no `[N]` refs
-- `dom` — raw HTML, very large, rarely needed
+### Snapshot output includes
+
+- **ARIA states**: `checked`, `disabled`, `expanded`, `selected`, `pressed`, `invalid`, `required`, `focused`, `hidden`
+- **Current values**: `value="..."` for inputs, `value=75 min=0 max=100` for sliders
+- **Heading levels**: `level=2` for h2, etc.
+- **Password redaction**: password fields show `value="••••"` (real value hidden)
+- **Indentation**: 2-space indent shows parent-child relationships
+- **Dialog/menu/grid**: interactive overlays get `[N]` refs too
+
+### Snapshot modes
+
+- `accessible` (default) -- full a11y tree with `[N]`, ARIA states, values, indentation
+- `compact` -- interactive elements + named containers only, much smaller output
+- `content` -- text extraction, no `[N]` refs
+- `dom` -- raw HTML, very large, rarely needed
 
 ## Command Reference
 
@@ -46,11 +67,28 @@ Snapshot modes:
 |---------|---------|
 | `cloak open URL` | Navigate to URL |
 | `cloak snapshot` | Get a11y tree with `[N]` refs |
-| `cloak snapshot --mode compact` | Interactive elements only |
+| `cloak snapshot --mode compact` | Interactive elements + containers only |
 | `cloak snapshot --mode content` | Text extraction |
-| `cloak snapshot --max-chars 5000` | Limit output size |
+| `cloak snapshot --max-nodes 50` | Limit to 50 nodes (shows summary of hidden elements) |
+| `cloak snapshot --focus N` | Expand subtree around element [N] |
+| `cloak snapshot --offset 50` | Start from 50th element (pagination) |
+| `cloak snapshot --max-chars 5000` | Limit by character count |
 | `cloak screenshot` | Take page screenshot |
 | `cloak resume` | Current state: URL, tabs, last 5 actions |
+
+### Progressive Loading (large pages)
+
+When a page has many elements, use progressive loading:
+
+1. Start with compact mode: `cloak snapshot --mode compact`
+2. If truncated, use `--focus=N` to zoom into an area: `cloak snapshot --focus 15`
+3. Or paginate with `--offset`: `cloak snapshot --offset 80`
+4. You can **always action on any [N] ref**, even if not visible in truncated output -- the daemon keeps the full ref mapping
+
+Truncated output shows a summary like:
+```
+--- not shown: [13]-[24] 12 elements (--focus=N to expand subtree, --offset=12 to page) ---
+```
 
 ### Interaction
 
@@ -156,6 +194,17 @@ cloak open "https://example.com/article"
 cloak snapshot --mode content
 ```
 
+### Explore Large Page
+
+```bash
+cloak open "https://example.com/dashboard"
+cloak snapshot --mode compact --max-nodes 50
+# see summary of hidden elements, then zoom in:
+cloak snapshot --focus 12  # expand area around element [12]
+# or page through:
+cloak snapshot --offset 50 --max-nodes 50
+```
+
 ### Capture API Traffic
 
 ```bash
@@ -173,4 +222,5 @@ cloak capture export --format har -o traffic.har
 - **Follow error `action` field**: it tells you exactly what to do next
 - **Use compact mode**: `--mode compact` for focused interaction, less output
 - **Use content mode**: `--mode content` for reading text, no refs needed
-- **Default snapshot limit is 30000 chars**: adjust with `--max-chars`
+- **Progressive loading**: use `--focus=N` or `--offset=N` for large pages
+- **Action on any ref**: even truncated refs work -- daemon keeps full mapping

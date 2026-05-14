@@ -103,11 +103,20 @@ class RemoteBridgeContext:
         result["seq"] = new_seq
         return result
 
-    async def snapshot(self, *, mode: str = "accessible") -> PageSnapshot:
+    async def snapshot(
+        self,
+        *,
+        mode: str = "accessible",
+        max_nodes: int = 0,
+        max_chars: int = 0,
+        focus: int = 0,
+        offset: int = 0,
+    ) -> PageSnapshot:
+        # Progressive loading params not supported in remote bridge
         if mode == "accessible":
             result = await self._send(
                 "cdp",
-                {"method": "Accessibility.getFullAXTree", "params": {}},
+                {"method": "Accessibility.getFullAXTree", "params": {"pierce": True}},
             )
             return self._parse_ax_tree(result)
 

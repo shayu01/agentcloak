@@ -41,8 +41,22 @@ class SecureBrowserContext:
         check_domain_allowed(url, whitelist=self._whitelist, blacklist=self._blacklist)
         return await self._inner.navigate(url, timeout=timeout)
 
-    async def snapshot(self, *, mode: str = "accessible") -> PageSnapshot:
-        snap: PageSnapshot = await self._inner.snapshot(mode=mode)
+    async def snapshot(
+        self,
+        *,
+        mode: str = "accessible",
+        max_nodes: int = 0,
+        max_chars: int = 0,
+        focus: int = 0,
+        offset: int = 0,
+    ) -> PageSnapshot:
+        snap: PageSnapshot = await self._inner.snapshot(
+            mode=mode,
+            max_nodes=max_nodes,
+            max_chars=max_chars,
+            focus=focus,
+            offset=offset,
+        )
 
         warnings: list[dict[str, str | int]] = []
         if self._content_scan and self._patterns:

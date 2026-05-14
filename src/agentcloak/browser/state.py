@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from agentcloak.core.types import StealthTier
 
 __all__ = [
+    "CONTEXT_ROLES",
     "INTERACTIVE_ROLES",
     "BrowserState",
     "ElementRef",
@@ -35,6 +36,34 @@ INTERACTIVE_ROLES = frozenset(
         "tab",
         "textbox",
         "treeitem",
+        # R3: expanded interactive roles
+        "dialog",
+        "alertdialog",
+        "menu",
+        "listbox",
+        "tree",
+        "grid",
+    }
+)
+
+CONTEXT_ROLES = frozenset(
+    {
+        "toolbar",
+        "tabpanel",
+        "figure",
+        "table",
+        "form",
+        "status",
+        "alert",
+        # Structural landmark roles (always show in tree for context)
+        "heading",
+        "banner",
+        "navigation",
+        "main",
+        "region",
+        "contentinfo",
+        "complementary",
+        "search",
     }
 )
 
@@ -57,7 +86,11 @@ class ElementRef:
     tag: str
     role: str
     text: str
-    attributes: dict[str, str] = field(default_factory=dict[str, str])
+    attributes: dict[str, str] = field(
+        default_factory=lambda: dict[str, str]()
+    )
+    depth: int = 0
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,10 +111,15 @@ class PageSnapshot:
     title: str
     mode: str
     tree_text: str
-    selector_map: dict[int, ElementRef] = field(default_factory=dict[int, ElementRef])
-    security_warnings: list[dict[str, str | int]] = field(
-        default_factory=list[dict[str, str | int]]
+    selector_map: dict[int, ElementRef] = field(
+        default_factory=lambda: dict[int, ElementRef]()
     )
+    security_warnings: list[dict[str, str | int]] = field(
+        default_factory=lambda: list[dict[str, str | int]]()
+    )
+    total_nodes: int = 0
+    total_interactive: int = 0
+    truncated_at: int = 0
 
 
 @dataclass

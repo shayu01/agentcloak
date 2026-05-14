@@ -130,28 +130,41 @@ async def handle_screenshot(request: Request) -> Response:
 async def handle_snapshot(request: Request) -> Response:
     ctx = _ctx(request)
     mode = request.query.get("mode", "accessible")
+
+    # Parse progressive loading params
+    max_nodes_raw = request.query.get("max_nodes", "0")
+    max_nodes = int(max_nodes_raw) if max_nodes_raw.isdigit() else 0
     max_chars_raw = request.query.get("max_chars", "0")
     max_chars = int(max_chars_raw) if max_chars_raw.isdigit() else 0
+    focus_raw = request.query.get("focus", "0")
+    focus = int(focus_raw) if focus_raw.isdigit() else 0
+    offset_raw = request.query.get("offset", "0")
+    offset = int(offset_raw) if offset_raw.isdigit() else 0
 
     include_sm = request.query.get(
         "include_selector_map", "true"
     ).lower() != "false"
 
-    snap = await ctx.snapshot(mode=mode)
-    tree_text = snap.tree_text
-    truncated = False
-    if max_chars and len(tree_text) > max_chars:
-        tree_text = tree_text[:max_chars] + "\n[...truncated...]"
-        truncated = True
+    snap = await ctx.snapshot(
+        mode=mode,
+        max_nodes=max_nodes,
+        max_chars=max_chars,
+        focus=focus,
+        offset=offset,
+    )
 
     data: dict[str, Any] = {
         "url": snap.url,
         "title": snap.title,
         "mode": snap.mode,
-        "tree_text": tree_text,
+        "tree_text": snap.tree_text,
         "tree_size": len(snap.tree_text),
-        "truncated": truncated,
+        "truncated": snap.truncated_at > 0,
+        "total_nodes": snap.total_nodes,
+        "total_interactive": snap.total_interactive,
     }
+    if snap.truncated_at > 0:
+        data["truncated_at"] = snap.truncated_at
     if include_sm:
         data["selector_map"] = {
             str(k): {
@@ -159,6 +172,7 @@ async def handle_snapshot(request: Request) -> Response:
                 "tag": v.tag,
                 "role": v.role,
                 "text": v.text,
+                "attributes": v.attributes,
             }
             for k, v in snap.selector_map.items()
         }

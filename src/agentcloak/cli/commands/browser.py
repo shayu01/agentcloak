@@ -76,14 +76,37 @@ def browser_snapshot(
         help="Snapshot mode: accessible, compact, dom, content.",
     ),
     max_chars: int = typer.Option(
-        30000,
+        0,
         "--max-chars",
         help="Truncate tree_text to this many characters (0 = no limit).",
+    ),
+    max_nodes: int = typer.Option(
+        0,
+        "--max-nodes",
+        help="Truncate after N nodes (0 = no limit).",
+    ),
+    focus: int = typer.Option(
+        0,
+        "--focus",
+        help="Expand subtree around element [N] from cached snapshot.",
+    ),
+    offset: int = typer.Option(
+        0,
+        "--offset",
+        help="Start output from Nth element (pagination).",
     ),
 ) -> None:
     """Get page snapshot (accessible tree, DOM, or text content)."""
     client = DaemonClient()
-    result = _run(client.snapshot(mode=mode, max_chars=max_chars))
+    result = _run(
+        client.snapshot(
+            mode=mode,
+            max_chars=max_chars,
+            max_nodes=max_nodes,
+            focus=focus,
+            offset=offset,
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

@@ -202,11 +202,23 @@ class DaemonClient:
         return await self._request("GET", "/screenshot", params=params)
 
     async def snapshot(
-        self, *, mode: str = "accessible", max_chars: int = 0
+        self,
+        *,
+        mode: str = "accessible",
+        max_chars: int = 0,
+        max_nodes: int = 0,
+        focus: int = 0,
+        offset: int = 0,
     ) -> dict[str, Any]:
         params: dict[str, str] = {"mode": mode}
         if max_chars:
             params["max_chars"] = str(max_chars)
+        if max_nodes:
+            params["max_nodes"] = str(max_nodes)
+        if focus:
+            params["focus"] = str(focus)
+        if offset:
+            params["offset"] = str(offset)
         return await self._request("GET", "/snapshot", params=params)
 
     async def state(self) -> dict[str, Any]:

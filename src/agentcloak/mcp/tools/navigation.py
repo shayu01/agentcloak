@@ -32,24 +32,38 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
 
     @mcp.tool(annotations={"readOnlyHint": True})
     async def agentcloak_snapshot(
-        mode: str = "accessible", max_chars: int = 30000
+        mode: str = "accessible",
+        max_chars: int = 0,
+        max_nodes: int = 0,
+        focus: int = 0,
+        offset: int = 0,
     ) -> str:
         """Get page content as an accessibility tree with [N] element references.
 
         This is the primary way to see what's on the page. Each interactive
-        element gets a [N] reference number — use that number as the target
+        element gets a [N] reference number -- use that number as the target
         in agentcloak_action.
 
+        The tree shows ARIA states (checked, disabled, expanded, focused),
+        current input values, heading levels, and hierarchical indentation.
+        Password fields are redacted as value="••••".
+
         Args:
-            mode: 'accessible' (a11y tree with [N] refs — default, filters
-                  redundant Chrome-internal nodes), 'compact' (interactive
-                  elements + headings only — much smaller output), 'dom'
+            mode: 'accessible' (a11y tree with [N] refs -- default, includes
+                  ARIA states and values), 'compact' (interactive elements +
+                  named containers only -- much smaller output), 'dom'
                   (raw HTML), or 'content' (text extraction)
-            max_chars: Truncate tree_text to this many characters (default 30000).
-                Pass 0 to disable truncation. Large pages benefit from 'compact' mode.
+            max_chars: Truncate tree_text to this many characters (0 = no limit).
+            max_nodes: Truncate after N nodes (0 = no limit).
+                Node-level truncation is more precise than char truncation.
+                Truncated output includes a summary of hidden elements.
+            focus: Expand subtree around element [N] from cached snapshot.
+                Use when you need details about a specific area of the page.
+            offset: Start output from Nth element (pagination for large pages).
 
         Returns:
-            JSON with url, title, tree_text, tree_size, truncated, and selector_map.
+            JSON with url, title, tree_text, tree_size, truncated,
+            total_nodes, total_interactive, and selector_map.
         """
         params: dict[str, str] = {
             "mode": mode,
@@ -57,6 +71,12 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         }
         if max_chars:
             params["max_chars"] = str(max_chars)
+        if max_nodes:
+            params["max_nodes"] = str(max_nodes)
+        if focus:
+            params["focus"] = str(focus)
+        if offset:
+            params["offset"] = str(offset)
         result = await bridge.request("GET", "/snapshot", params=params)
         return bridge.format_result(result)
 

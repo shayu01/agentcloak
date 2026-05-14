@@ -11,19 +11,52 @@ from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.errors import BackendError, BrowserTimeoutError, NavigationError
 from agentcloak.core.seq import RingBuffer, SeqCounter
 
+_NODE_ID_COUNTER = 0
 
-def _cdp_node(role: str, name: str) -> dict[str, Any]:
-    return {"role": {"value": role}, "name": {"value": name}}
+
+def _cdp_node(
+    role: str,
+    name: str,
+    *,
+    node_id: str = "",
+    child_ids: list[str] | None = None,
+    backend_dom_id: int | None = None,
+    properties: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    global _NODE_ID_COUNTER
+    if not node_id:
+        _NODE_ID_COUNTER += 1
+        node_id = str(_NODE_ID_COUNTER)
+    node: dict[str, Any] = {
+        "nodeId": node_id,
+        "role": {"value": role},
+        "name": {"value": name},
+    }
+    if child_ids is not None:
+        node["childIds"] = child_ids
+    if backend_dom_id is not None:
+        node["backendDOMNodeId"] = backend_dom_id
+    if properties is not None:
+        node["properties"] = properties
+    return node
 
 
 def _ax_tree_response() -> dict[str, Any]:
     return {
         "nodes": [
-            _cdp_node("RootWebArea", "Example"),
-            _cdp_node("heading", "Main Title"),
-            _cdp_node("link", "Click me"),
-            _cdp_node("button", "Submit"),
-            _cdp_node("textbox", "Search"),
+            _cdp_node(
+                "RootWebArea", "Example",
+                node_id="root",
+                child_ids=["h1", "lnk", "btn", "txt"],
+            ),
+            _cdp_node("heading", "Main Title", node_id="h1"),
+            _cdp_node("link", "Click me", node_id="lnk", backend_dom_id=10),
+            _cdp_node(
+                "button", "Submit", node_id="btn", backend_dom_id=11,
+            ),
+            _cdp_node(
+                "textbox", "Search", node_id="txt", backend_dom_id=12,
+            ),
         ]
     }
 
@@ -161,11 +194,15 @@ class TestSnapshot:
             if method == "Accessibility.getFullAXTree":
                 return {
                     "nodes": [
-                        _cdp_node("RootWebArea", "Page"),
-                        _cdp_node("button", "OK"),
-                        _cdp_node("InlineTextBox", "some inline text"),
-                        _cdp_node("LineBreak", ""),
-                        _cdp_node("StaticText", "visible"),
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="r",
+                            child_ids=["b1", "itb", "lb", "st"],
+                        ),
+                        _cdp_node("button", "OK", node_id="b1"),
+                        _cdp_node("InlineTextBox", "some inline text", node_id="itb"),
+                        _cdp_node("LineBreak", "", node_id="lb"),
+                        _cdp_node("StaticText", "visible", node_id="st"),
                     ]
                 }
             return {}
@@ -183,15 +220,41 @@ class TestSnapshot:
 
     @pytest.mark.asyncio
     async def test_compact_mode(self) -> None:
-        """Compact mode outputs only interactive elements and heading-type roles."""
-        ctx = _make_ctx()
+        """Compact mode: interactive elements + ancestor context roles."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="cr",
+                            child_ids=["nav", "btn1"],
+                        ),
+                        _cdp_node(
+                            "navigation", "Main Nav",
+                            node_id="nav",
+                            child_ids=["lnk1"],
+                        ),
+                        _cdp_node("link", "Home", node_id="lnk1"),
+                        _cdp_node("button", "Submit", node_id="btn1"),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
         snap = await ctx.snapshot(mode="compact")
         assert snap.mode == "compact"
-        assert len(snap.selector_map) == 3
+        assert len(snap.selector_map) == 2
         assert "[1]" in snap.tree_text
-        # heading is in _HEADING_ROLES, so it appears as structural context
-        assert "heading: Main Title" in snap.tree_text
-        # RootWebArea is not interactive and not in _HEADING_ROLES, so excluded
+        # navigation is an ancestor context role of the link, preserved
+        assert "Main Nav" in snap.tree_text
+        # RootWebArea is not interactive and not a context role
         assert "RootWebArea" not in snap.tree_text
 
     @pytest.mark.asyncio
@@ -427,6 +490,478 @@ class TestSeqBehavior:
         ctx = _make_ctx()
         await ctx.evaluate("1+1")
         assert ctx.seq == 1
+
+
+class TestSnapshotProperties:
+    """Tests for R1: ARIA property extraction."""
+
+    @pytest.mark.asyncio
+    async def test_checkbox_checked_state(self) -> None:
+        """Checkbox shows checked state in output."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="pr",
+                            child_ids=["cb1"],
+                        ),
+                        _cdp_node(
+                            "checkbox", "I agree",
+                            node_id="cb1",
+                            backend_dom_id=20,
+                            properties=[{
+                                "name": "checked",
+                                "value": {"type": "tristate", "value": True},
+                            }],
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert "checked" in snap.tree_text
+        assert '"I agree"' in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_textbox_value_shown(self) -> None:
+        """Textbox shows current value in output."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="pr2",
+                            child_ids=["tb1"],
+                        ),
+                        {
+                            "nodeId": "tb1",
+                            "role": {"value": "textbox"},
+                            "name": {"value": "Email"},
+                            "value": {"value": "user@example.com"},
+                            "backendDOMNodeId": 30,
+                        },
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert 'value="user@example.com"' in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_password_redaction(self) -> None:
+        """Password fields have their values redacted."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="pr3",
+                            child_ids=["pw1"],
+                        ),
+                        {
+                            "nodeId": "pw1",
+                            "role": {"value": "textbox"},
+                            "name": {"value": "Password"},
+                            "value": {"value": "s3cr3t!"},
+                            "backendDOMNodeId": 40,
+                            "properties": [{
+                                "name": "autocomplete",
+                                "value": {
+                                    "type": "string",
+                                    "value": "current-password",
+                                },
+                            }],
+                        },
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert "s3cr3t!" not in snap.tree_text
+        assert "••••" in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_disabled_button(self) -> None:
+        """Disabled button shows disabled state."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="pr4",
+                            child_ids=["db1"],
+                        ),
+                        _cdp_node(
+                            "button", "Submit",
+                            node_id="db1",
+                            backend_dom_id=50,
+                            properties=[{
+                                "name": "disabled",
+                                "value": {"type": "boolean", "value": True},
+                            }],
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert "disabled" in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_expanded_false_shown(self) -> None:
+        """expanded=false is meaningful and should be output."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="pr5",
+                            child_ids=["mb1"],
+                        ),
+                        _cdp_node(
+                            "button", "Menu",
+                            node_id="mb1",
+                            backend_dom_id=60,
+                            properties=[
+                                {
+                                    "name": "expanded",
+                                    "value": {"type": "boolean", "value": False},
+                                },
+                                {
+                                    "name": "haspopup",
+                                    "value": {"type": "string", "value": "menu"},
+                                },
+                            ],
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert "expanded=false" in snap.tree_text
+        assert "haspopup=menu" in snap.tree_text
+
+
+class TestSnapshotTree:
+    """Tests for R2: tree structure with indentation."""
+
+    @pytest.mark.asyncio
+    async def test_indentation_present(self) -> None:
+        """Tree output uses 2-space indentation for nested elements."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="tr",
+                            child_ids=["tnav"],
+                        ),
+                        _cdp_node(
+                            "navigation", "Main",
+                            node_id="tnav",
+                            child_ids=["tl1"],
+                        ),
+                        _cdp_node(
+                            "link", "Home",
+                            node_id="tl1",
+                            backend_dom_id=70,
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        lines = snap.tree_text.split("\n")
+        # RootWebArea at depth 0, navigation at depth 1, link at depth 2
+        nav_line = next(ln for ln in lines if "Main" in ln)
+        link_line = next(ln for ln in lines if "Home" in ln)
+        # nav is child of root, so indented once
+        assert nav_line.startswith("  ")
+        # link is child of nav, so indented twice
+        assert link_line.startswith("    ")
+
+    @pytest.mark.asyncio
+    async def test_generic_fold_single_child(self) -> None:
+        """Generic nodes with no name and <= 1 child are folded."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="fr",
+                            child_ids=["fgen"],
+                        ),
+                        _cdp_node(
+                            "generic", "",
+                            node_id="fgen",
+                            child_ids=["fb1"],
+                        ),
+                        _cdp_node(
+                            "button", "Click",
+                            node_id="fb1",
+                            backend_dom_id=80,
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        assert "generic" not in snap.tree_text
+        assert "Click" in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_static_text_dedup(self) -> None:
+        """StaticText matching parent name is deduplicated."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="dr",
+                            child_ids=["dl1"],
+                        ),
+                        _cdp_node(
+                            "link", "Home",
+                            node_id="dl1",
+                            backend_dom_id=90,
+                            child_ids=["ds1"],
+                        ),
+                        _cdp_node(
+                            "StaticText", "Home",
+                            node_id="ds1",
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible")
+        # "Home" should appear only once (in the link line), not twice
+        assert snap.tree_text.count("Home") == 1
+
+
+class TestProgressiveLoading:
+    """Tests for R4/R5: progressive loading features."""
+
+    @pytest.mark.asyncio
+    async def test_max_nodes_truncation(self) -> None:
+        """max_nodes limits output and shows truncation summary."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                children = [f"ml{i}" for i in range(10)]
+                nodes = [
+                    _cdp_node(
+                        "RootWebArea", "Page",
+                        node_id="mr",
+                        child_ids=children,
+                    ),
+                ]
+                for i in range(10):
+                    nodes.append(
+                        _cdp_node(
+                            "link", f"Link {i}",
+                            node_id=f"ml{i}",
+                            backend_dom_id=100 + i,
+                        )
+                    )
+                return {"nodes": nodes}
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible", max_nodes=3)
+        assert snap.truncated_at > 0
+        assert "not shown" in snap.tree_text
+        assert snap.total_interactive == 10
+
+    @pytest.mark.asyncio
+    async def test_offset_pagination(self) -> None:
+        """offset skips initial elements."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                children = [f"ol{i}" for i in range(5)]
+                nodes = [
+                    _cdp_node(
+                        "RootWebArea", "Page",
+                        node_id="or",
+                        child_ids=children,
+                    ),
+                ]
+                for i in range(5):
+                    nodes.append(
+                        _cdp_node(
+                            "link", f"Link {i}",
+                            node_id=f"ol{i}",
+                            backend_dom_id=200 + i,
+                        )
+                    )
+                return {"nodes": nodes}
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible", offset=3)
+        assert "Link 0" not in snap.tree_text
+        assert "Link 3" in snap.tree_text or "Link 4" in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_focus_subtree(self) -> None:
+        """--focus=N returns subtree around the target ref."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                return {
+                    "nodes": [
+                        _cdp_node(
+                            "RootWebArea", "Page",
+                            node_id="fcr",
+                            child_ids=["fcnav", "fcbtn"],
+                        ),
+                        _cdp_node(
+                            "navigation", "Nav",
+                            node_id="fcnav",
+                            child_ids=["fcl1", "fcl2"],
+                        ),
+                        _cdp_node(
+                            "link", "Home",
+                            node_id="fcl1",
+                            backend_dom_id=300,
+                        ),
+                        _cdp_node(
+                            "link", "About",
+                            node_id="fcl2",
+                            backend_dom_id=301,
+                        ),
+                        _cdp_node(
+                            "button", "Unrelated",
+                            node_id="fcbtn",
+                            backend_dom_id=302,
+                        ),
+                    ]
+                }
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        # First snapshot to build cache
+        await ctx.snapshot(mode="accessible")
+        # Focus on ref [1] (first link)
+        snap = await ctx.snapshot(mode="accessible", focus=1)
+        assert "Home" in snap.tree_text
+
+    @pytest.mark.asyncio
+    async def test_action_on_truncated_ref(self) -> None:
+        """Agent can action on refs that were not visible in truncated output."""
+        cdp = MagicMock()
+
+        async def _send(method: str, params: Any = None) -> Any:
+            if method == "Accessibility.getFullAXTree":
+                children = [f"atl{i}" for i in range(10)]
+                nodes = [
+                    _cdp_node(
+                        "RootWebArea", "Page",
+                        node_id="atr",
+                        child_ids=children,
+                    ),
+                ]
+                for i in range(10):
+                    nodes.append(
+                        _cdp_node(
+                            "button", f"Btn {i}",
+                            node_id=f"atl{i}",
+                            backend_dom_id=400 + i,
+                        )
+                    )
+                return {"nodes": nodes}
+            return {}
+
+        cdp.send = AsyncMock(side_effect=_send)
+        cdp.detach = AsyncMock()
+        page = _default_page()
+        page.context.new_cdp_session = AsyncMock(return_value=cdp)
+        ctx = _make_ctx(page=page)
+        snap = await ctx.snapshot(mode="accessible", max_nodes=3)
+        # Ref [10] should exist in selector_map even though truncated
+        assert 10 in ctx._selector_map
+        assert snap.total_interactive == 10
 
 
 class TestProperties:

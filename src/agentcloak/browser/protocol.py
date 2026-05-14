@@ -21,7 +21,15 @@ class BrowserContext(Protocol):
 
     async def navigate(self, url: str, *, timeout: float = 30.0) -> ActionResult: ...
 
-    async def snapshot(self, *, mode: str = "accessible") -> PageSnapshot: ...
+    async def snapshot(
+        self,
+        *,
+        mode: str = "accessible",
+        max_nodes: int = 0,
+        max_chars: int = 0,
+        focus: int = 0,
+        offset: int = 0,
+    ) -> PageSnapshot: ...
 
     async def action(self, kind: str, target: str, **kw: Any) -> ActionResult: ...
 
