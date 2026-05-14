@@ -100,6 +100,11 @@ def browser_snapshot(
         "--frames",
         help="Include iframe content in the snapshot (merges child frame AX trees).",
     ),
+    diff: bool = typer.Option(
+        False,
+        "--diff",
+        help="Compare with previous snapshot, mark [+] added and [~] changed.",
+    ),
 ) -> None:
     """Get page snapshot (accessible tree, DOM, or text content)."""
     client = DaemonClient()
@@ -111,6 +116,7 @@ def browser_snapshot(
             focus=focus,
             offset=offset,
             frames=frames,
+            diff=diff,
         )
     )
     data = result.get("data", result)

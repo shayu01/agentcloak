@@ -38,6 +38,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         focus: int = 0,
         offset: int = 0,
         frames: bool = False,
+        diff: bool = False,
     ) -> str:
         """Get page content as an accessibility tree with [N] element references.
 
@@ -64,10 +65,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             frames: Include iframe content in the snapshot. When true, child
                 frame AX trees are merged under [frame "name"] context nodes.
                 Opt-in to avoid performance penalty on simple pages.
+            diff: Compare with the previous snapshot and mark changes.
+                Added elements are prefixed with [+], changed with [~].
+                Removed interactive refs are listed at the bottom.
+                Useful for seeing what changed after an action.
 
         Returns:
             JSON with url, title, tree_text, tree_size, truncated,
-            total_nodes, total_interactive, and selector_map.
+            total_nodes, total_interactive, and diff (bool, when requested).
         """
         params: dict[str, str] = {
             "mode": mode,
@@ -83,6 +88,8 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             params["offset"] = str(offset)
         if frames:
             params["frames"] = "true"
+        if diff:
+            params["diff"] = "true"
         result = await bridge.request("GET", "/snapshot", params=params)
         return bridge.format_result(result)
 

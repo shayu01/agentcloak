@@ -14,7 +14,12 @@ from aiohttp.test_utils import TestClient, TestServer
 from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 from agentcloak.daemon.middleware import error_middleware
-from agentcloak.daemon.routes import setup_routes
+from agentcloak.daemon.routes import (
+    _batch_has_refs,
+    _resolve_action_refs,
+    _traverse,
+    setup_routes,
+)
 
 
 def _mock_cdp() -> MagicMock:
@@ -419,3 +424,311 @@ class TestRoutes:
         data = orjson.loads(await resp.read())
         assert data["ok"] is False
         assert data["error"] == "profile_writer_failed"
+
+
+class TestBatchRefResolution:
+    """Unit tests for $N.path batch reference resolution (R4.4)."""
+
+    def test_traverse_simple(self) -> None:
+        obj = {"data": {"url": "https://example.com"}}
+        assert _traverse(obj, "data.url") == "https://example.com"
+
+    def test_traverse_single_key(self) -> None:
+        obj = {"name": "test"}
+        assert _traverse(obj, "name") == "test"
+
+    def test_traverse_deep_path(self) -> None:
+        obj = {"a": {"b": {"c": {"d": 42}}}}
+        assert _traverse(obj, "a.b.c.d") == 42
+
+    def test_traverse_missing_key_raises(self) -> None:
+        obj = {"data": {"url": "test"}}
+        with pytest.raises(KeyError):
+            _traverse(obj, "data.missing")
+
+    def test_traverse_non_dict_raises(self) -> None:
+        obj = {"data": "string_value"}
+        with pytest.raises(KeyError, match="Cannot traverse"):
+            _traverse(obj, "data.nested")
+
+    def test_batch_has_refs_true(self) -> None:
+        actions = [
+            {"kind": "click", "target": "5"},
+            {"kind": "fill", "text": "$0.data.url"},
+        ]
+        assert _batch_has_refs(actions) is True
+
+    def test_batch_has_refs_false(self) -> None:
+        actions = [
+            {"kind": "click", "target": "5"},
+            {"kind": "fill", "text": "plain text"},
+        ]
+        assert _batch_has_refs(actions) is False
+
+    def test_batch_has_refs_empty(self) -> None:
+        assert _batch_has_refs([]) is False
+
+    def test_batch_has_refs_non_string_values(self) -> None:
+        actions = [{"kind": "click", "index": 5, "click_count": 1}]
+        assert _batch_has_refs(actions) is False
+
+    def test_resolve_action_refs_basic(self) -> None:
+        params = {"kind": "fill", "text": "$0.data.url"}
+        results = [{"data": {"url": "https://example.com"}}]
+        resolved = _resolve_action_refs(params, results)
+        assert resolved == {"kind": "fill", "text": "https://example.com"}
+
+    def test_resolve_action_refs_no_refs(self) -> None:
+        params = {"kind": "click", "target": "5"}
+        results = [{"data": {"url": "test"}}]
+        resolved = _resolve_action_refs(params, results)
+        assert resolved == {"kind": "click", "target": "5"}
+
+    def test_resolve_action_refs_non_string_preserved(self) -> None:
+        params = {"kind": "click", "index": 5, "click_count": 1}
+        resolved = _resolve_action_refs(params, [])
+        assert resolved == {"kind": "click", "index": 5, "click_count": 1}
+
+    def test_resolve_action_refs_out_of_bounds_preserved(self) -> None:
+        params = {"text": "$99.data.url"}
+        results = [{"data": {"url": "test"}}]
+        resolved = _resolve_action_refs(params, results)
+        # Out-of-bounds $N is preserved as-is
+        assert resolved == {"text": "$99.data.url"}
+
+    def test_resolve_action_refs_multiple(self) -> None:
+        params = {"url": "$0.data.url", "title": "$1.data.title", "kind": "fill"}
+        results = [
+            {"data": {"url": "https://a.com"}},
+            {"data": {"title": "Page B"}},
+        ]
+        resolved = _resolve_action_refs(params, results)
+        assert resolved["url"] == "https://a.com"
+        assert resolved["title"] == "Page B"
+        assert resolved["kind"] == "fill"
+
+    def test_resolve_action_refs_bad_path_raises(self) -> None:
+        params = {"text": "$0.missing.key"}
+        results = [{"data": {"url": "test"}}]
+        with pytest.raises(KeyError):
+            _resolve_action_refs(params, results)
+
+
+class TestIncludeSnapshot:
+    """Tests for includeSnapshot action parameter (R4.3)."""
+
+    @pytest.mark.asyncio
+    async def test_action_include_snapshot(self, client: TestClient) -> None:
+        """Action with include_snapshot=true should attach snapshot data."""
+        ctx = client.app["browser_ctx"]
+        # Mock action to return a simple click result
+        ctx.action = AsyncMock(
+            return_value={"ok": True, "clicked": True, "seq": 1, "action": "click"}
+        )
+
+        resp = await client.post(
+            "/action",
+            data=orjson.dumps(
+                {
+                    "kind": "click",
+                    "target": "5",
+                    "include_snapshot": True,
+                }
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        # Snapshot should be included in the action result
+        assert "snapshot" in data["data"]
+        snap = data["data"]["snapshot"]
+        assert "tree_text" in snap
+        assert "mode" in snap
+        assert "total_nodes" in snap
+        assert "total_interactive" in snap
+
+    @pytest.mark.asyncio
+    async def test_action_without_include_snapshot(self, client: TestClient) -> None:
+        """Action without include_snapshot should NOT attach snapshot."""
+        ctx = client.app["browser_ctx"]
+        ctx.action = AsyncMock(
+            return_value={"ok": True, "clicked": True, "seq": 1, "action": "click"}
+        )
+
+        resp = await client.post(
+            "/action",
+            data=orjson.dumps({"kind": "click", "target": "5"}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert "snapshot" not in data["data"]
+
+
+class TestStaleRefRetry:
+    """Tests for stale ref auto-retry (R4.5)."""
+
+    @pytest.mark.asyncio
+    async def test_stale_ref_retries_on_numeric_target(
+        self, client: TestClient
+    ) -> None:
+        """ElementNotFoundError with numeric target triggers retry."""
+        from agentcloak.core.errors import ElementNotFoundError
+
+        ctx = client.app["browser_ctx"]
+        call_count = 0
+
+        async def action_side_effect(kind: str, target: str, **kw: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ElementNotFoundError(
+                    error="element_not_found",
+                    hint="Element [5] not in selector_map",
+                    action="take a new snapshot",
+                )
+            return {"ok": True, "clicked": True, "seq": 2, "action": "click"}
+
+        ctx.action = AsyncMock(side_effect=action_side_effect)
+
+        resp = await client.post(
+            "/action",
+            data=orjson.dumps({"kind": "click", "target": "5"}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        assert data["data"]["retried"] is True
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_stale_ref_no_retry_on_non_numeric(
+        self, client: TestClient
+    ) -> None:
+        """ElementNotFoundError with non-numeric target propagates (no retry)."""
+        from agentcloak.core.errors import ElementNotFoundError
+
+        ctx = client.app["browser_ctx"]
+        ctx.action = AsyncMock(
+            side_effect=ElementNotFoundError(
+                error="element_not_found",
+                hint="fill requires a target element",
+                action="provide target",
+            )
+        )
+
+        resp = await client.post(
+            "/action",
+            data=orjson.dumps({"kind": "fill", "target": ""}),
+            headers={"Content-Type": "application/json"},
+        )
+        # Should return 400 from middleware (ElementNotFoundError is AgentBrowserError)
+        assert resp.status == 400
+        data = orjson.loads(await resp.read())
+        assert data["error"] == "element_not_found"
+
+
+class TestBatchWithRefs:
+    """Integration tests for $N batch references in handle_action_batch (R4.4)."""
+
+    @pytest.mark.asyncio
+    async def test_batch_with_refs_resolves(self, client: TestClient) -> None:
+        """Batch with $N.path references resolves correctly."""
+        ctx = client.app["browser_ctx"]
+        call_count = 0
+
+        async def action_side_effect(kind: str, target: str, **kw: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if kind == "click":
+                return {
+                    "ok": True,
+                    "clicked": True,
+                    "seq": 1,
+                    "action": "click",
+                    "result_url": "https://clicked.com",
+                }
+            if kind == "fill":
+                return {
+                    "ok": True,
+                    "filled": True,
+                    "seq": 2,
+                    "action": "fill",
+                    "text": kw.get("text", ""),
+                }
+            return {"ok": True}
+
+        ctx.action = AsyncMock(side_effect=action_side_effect)
+
+        actions = [
+            {"kind": "click", "target": "5"},
+            {"kind": "fill", "target": "3", "text": "$0.result_url"},
+        ]
+        resp = await client.post(
+            "/action/batch",
+            data=orjson.dumps({"actions": actions, "sleep": 0}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        assert data["ok"] is True
+        results = data["data"]["results"]
+        assert len(results) == 2
+        # Second action should have received the resolved URL as text
+        assert results[1]["text"] == "https://clicked.com"
+
+    @pytest.mark.asyncio
+    async def test_batch_without_refs_delegates_to_backend(
+        self, client: TestClient
+    ) -> None:
+        """Batch without $N refs uses the backend's action_batch directly."""
+        ctx = client.app["browser_ctx"]
+        ctx.action_batch = AsyncMock(
+            return_value={"results": [], "completed": 0, "total": 0}
+        )
+
+        actions = [
+            {"kind": "click", "target": "5"},
+            {"kind": "fill", "target": "3", "text": "hello"},
+        ]
+        resp = await client.post(
+            "/action/batch",
+            data=orjson.dumps({"actions": actions, "sleep": 0}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        # Backend's action_batch should have been called
+        ctx.action_batch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_batch_ref_resolution_failure(self, client: TestClient) -> None:
+        """Invalid $N reference path aborts batch with error."""
+        ctx = client.app["browser_ctx"]
+        ctx.action = AsyncMock(
+            return_value={
+                "ok": True,
+                "clicked": True,
+                "seq": 1,
+                "action": "click",
+            }
+        )
+
+        actions = [
+            {"kind": "click", "target": "5"},
+            {"kind": "fill", "target": "3", "text": "$0.nonexistent.path"},
+        ]
+        resp = await client.post(
+            "/action/batch",
+            data=orjson.dumps({"actions": actions, "sleep": 0}),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200
+        data = orjson.loads(await resp.read())
+        results = data["data"]["results"]
+        # First action succeeded, second failed during ref resolution
+        assert results[0]["ok"] is True
+        assert results[1]["error"] == "ref_resolution_failed"
+        assert data["data"]["aborted_reason"] == "ref_resolution_failed"

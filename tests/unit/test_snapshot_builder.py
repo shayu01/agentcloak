@@ -1,4 +1,4 @@
-"""Tests for the shared snapshot builder, including frame merge logic."""
+"""Tests for the shared snapshot builder, including frame merge and diff logic."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from agentcloak.browser._snapshot_builder import (
     FrameData,
     SnapshotResult,
     build_snapshot,
+    diff_snapshots,
+    render_diff_tree,
 )
 
 
@@ -228,3 +230,168 @@ class TestBuildSnapshotFrameMerge:
         link_line = [ln for ln in lines if "[2] link" in ln]
         assert len(link_line) == 1
         assert link_line[0].startswith("  ")  # at least depth 1
+
+
+class TestDiffSnapshots:
+    """Verify diff_snapshots correctly marks added, changed, and removed lines."""
+
+    def test_first_snapshot_all_added(self) -> None:
+        """When previous is empty, every line is marked '+'."""
+        current = [
+            (0, '[1] button "Submit"', 1),
+            (0, 'heading "Title"', None),
+        ]
+        result = diff_snapshots([], current)
+        assert len(result) == 2
+        assert result[0] == (0, '[1] button "Submit"', 1, "+")
+        assert result[1] == (0, 'heading "Title"', None, "+")
+
+    def test_identical_snapshots_no_markers(self) -> None:
+        """When nothing changed, all markers are None."""
+        lines = [
+            (0, '[1] button "Submit"', 1),
+            (1, 'heading "Title"', None),
+        ]
+        result = diff_snapshots(lines, lines)
+        assert all(marker is None for _, _, _, marker in result)
+        # No removed summary
+        assert not any("# removed:" in text for _, text, _, _ in result)
+
+    def test_added_element(self) -> None:
+        """New element appears with '+' marker."""
+        previous = [
+            (0, '[1] button "Submit"', 1),
+        ]
+        current = [
+            (0, '[1] button "Submit"', 1),
+            (0, '[2] link "More"', 2),
+        ]
+        result = diff_snapshots(previous, current)
+        assert result[0][3] is None  # button unchanged
+        assert result[1][3] == "+"  # link is new
+
+    def test_changed_interactive_element(self) -> None:
+        """Interactive element with same ref but different text is marked '~'."""
+        previous = [
+            (0, '[1] button "Submit"', 1),
+        ]
+        current = [
+            (0, '[1] button "Submit" disabled', 1),
+        ]
+        result = diff_snapshots(previous, current)
+        assert result[0][3] == "~"
+
+    def test_changed_depth(self) -> None:
+        """Element at different depth is marked '~'."""
+        previous = [
+            (0, '[1] button "Submit"', 1),
+        ]
+        current = [
+            (2, '[1] button "Submit"', 1),
+        ]
+        result = diff_snapshots(previous, current)
+        assert result[0][3] == "~"
+
+    def test_removed_refs_summary(self) -> None:
+        """Removed interactive elements are listed in a summary line."""
+        previous = [
+            (0, '[1] button "Submit"', 1),
+            (0, '[2] link "More"', 2),
+            (0, '[3] checkbox "Agree"', 3),
+        ]
+        current = [
+            (0, '[1] button "Submit"', 1),
+        ]
+        result = diff_snapshots(previous, current)
+        # Last line should be the removed summary
+        summary = result[-1]
+        assert "# removed:" in summary[1]
+        assert "[2]" in summary[1]
+        assert "[3]" in summary[1]
+
+    def test_no_removed_summary_when_all_present(self) -> None:
+        """No removed summary if all previous refs still exist."""
+        lines = [
+            (0, '[1] button "A"', 1),
+            (0, '[2] button "B"', 2),
+        ]
+        result = diff_snapshots(lines, lines)
+        assert not any("# removed:" in text for _, text, _, _ in result)
+
+    def test_non_interactive_change(self) -> None:
+        """Non-interactive lines use text as identity key."""
+        previous = [
+            (0, 'heading "Welcome"', None),
+        ]
+        current = [
+            (0, 'heading "Goodbye"', None),
+        ]
+        result = diff_snapshots(previous, current)
+        # "Welcome" gone, "Goodbye" new
+        assert result[0][3] == "+"
+
+    def test_mixed_scenario(self) -> None:
+        """Full mixed scenario: unchanged, added, changed, removed."""
+        previous = [
+            (0, '[1] button "OK"', 1),
+            (0, '[2] textbox "Email" value="old@test.com"', 2),
+            (0, '[3] link "Help"', 3),
+            (0, 'heading "Form"', None),
+        ]
+        current = [
+            (0, '[1] button "OK"', 1),
+            (0, '[2] textbox "Email" value="new@test.com"', 2),
+            (0, '[4] checkbox "Remember"', 4),
+            (0, 'heading "Form"', None),
+        ]
+        result = diff_snapshots(previous, current)
+        markers = {text: marker for _, text, _, marker in result}
+
+        assert markers['[1] button "OK"'] is None  # unchanged
+        assert markers['[2] textbox "Email" value="new@test.com"'] == "~"  # changed
+        assert markers['[4] checkbox "Remember"'] == "+"  # added
+        assert markers['heading "Form"'] is None  # unchanged
+
+        # ref 3 removed
+        summary_lines = [text for _, text, _, _ in result if "# removed:" in text]
+        assert len(summary_lines) == 1
+        assert "[3]" in summary_lines[0]
+
+
+class TestRenderDiffTree:
+    """Verify render_diff_tree formatting."""
+
+    def test_markers_in_output(self) -> None:
+        diff_lines = [
+            (0, '[1] button "Submit"', 1, None),
+            (0, '[2] link "New"', 2, "+"),
+            (1, '[3] textbox "Name" value="changed"', 3, "~"),
+        ]
+        rendered = render_diff_tree(diff_lines)
+        lines = rendered.split("\n")
+        assert lines[0] == '[1] button "Submit"'
+        assert lines[1] == '[+] [2] link "New"'
+        assert lines[2] == '  [~] [3] textbox "Name" value="changed"'
+
+    def test_indentation_preserved(self) -> None:
+        diff_lines = [
+            (0, 'navigation "Nav"', None, None),
+            (1, '[1] link "Home"', 1, "+"),
+            (2, 'More text', None, "~"),
+        ]
+        rendered = render_diff_tree(diff_lines)
+        lines = rendered.split("\n")
+        assert lines[0] == 'navigation "Nav"'
+        assert lines[1] == '  [+] [1] link "Home"'
+        assert lines[2] == '    [~] More text'
+
+    def test_empty_input(self) -> None:
+        assert render_diff_tree([]) == ""
+
+    def test_removed_summary_line(self) -> None:
+        diff_lines = [
+            (0, '[1] button "OK"', 1, None),
+            (0, "# removed: [2] [3]", None, None),
+        ]
+        rendered = render_diff_tree(diff_lines)
+        assert "# removed: [2] [3]" in rendered

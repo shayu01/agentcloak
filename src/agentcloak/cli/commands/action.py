@@ -29,6 +29,11 @@ def do_click(
     y: float | None = typer.Option(None, "--y", help="Y coordinate (fallback)."),
     button: str = typer.Option("left", "--button", help="Mouse button."),
     click_count: int = typer.Option(1, "--click-count", help="Number of clicks."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Click an element by index or coordinates."""
     resolved = target if index is None else index
@@ -41,7 +46,14 @@ def do_click(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    result = _run(client.action("click", index=resolved, **kwargs))
+    result = _run(
+        client.action(
+            "click",
+            index=resolved,
+            include_snapshot=include_snapshot,
+            **kwargs,
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -52,6 +64,11 @@ def do_fill(
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
     target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     text: str = typer.Option(..., "--text", "-t", help="Text to fill."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Fill an input element (clear then set value)."""
     resolved = target if index is None else index
@@ -59,7 +76,11 @@ def do_fill(
         typer.echo("Error: provide --target or --index", err=True)
         raise typer.Exit(2)
     client = DaemonClient()
-    result = _run(client.action("fill", index=resolved, text=text))
+    result = _run(
+        client.action(
+            "fill", index=resolved, include_snapshot=include_snapshot, text=text
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -71,6 +92,11 @@ def do_type(
     target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     text: str = typer.Option(..., "--text", "-t", help="Text to type."),
     delay: float = typer.Option(0, "--delay", help="Delay between keystrokes in ms."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Type text character by character (per-key events)."""
     resolved = target if index is None else index
@@ -78,7 +104,15 @@ def do_type(
         typer.echo("Error: provide --target or --index", err=True)
         raise typer.Exit(2)
     client = DaemonClient()
-    result = _run(client.action("type", index=resolved, text=text, delay=delay))
+    result = _run(
+        client.action(
+            "type",
+            index=resolved,
+            include_snapshot=include_snapshot,
+            text=text,
+            delay=delay,
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -92,6 +126,11 @@ def do_scroll(
         "down", "--direction", "-d", help="up/down/left/right."
     ),
     amount: int = typer.Option(300, "--amount", help="Scroll amount in pixels."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Scroll the page or an element into view."""
     resolved = target if index is None else index
@@ -100,6 +139,7 @@ def do_scroll(
         client.action(
             "scroll",
             index=resolved,
+            include_snapshot=include_snapshot,
             direction=direction,
             amount=amount,
         )
@@ -115,6 +155,11 @@ def do_hover(
     target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     x: float | None = typer.Option(None, "--x", help="X coordinate (fallback)."),
     y: float | None = typer.Option(None, "--y", help="Y coordinate (fallback)."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Hover over an element or coordinates."""
     resolved = target if index is None else index
@@ -124,7 +169,14 @@ def do_hover(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    result = _run(client.action("hover", index=resolved, **kwargs))
+    result = _run(
+        client.action(
+            "hover",
+            index=resolved,
+            include_snapshot=include_snapshot,
+            **kwargs,
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -136,6 +188,11 @@ def do_select(
     target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     value: str | None = typer.Option(None, "--value", help="Option value."),
     label: str | None = typer.Option(None, "--label", help="Option display text."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Select a dropdown option."""
     resolved = target if index is None else index
@@ -148,7 +205,11 @@ def do_select(
         kwargs["value"] = value
     if label is not None:
         kwargs["label"] = label
-    result = _run(client.action("select", index=resolved, **kwargs))
+    result = _run(
+        client.action(
+            "select", index=resolved, include_snapshot=include_snapshot, **kwargs
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -160,10 +221,17 @@ def do_press(
     target: int | None = typer.Option(
         None, "--target", help="Element index [N] to focus before pressing."
     ),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Press a keyboard key."""
     client = DaemonClient()
-    result = _run(client.action("press", index=target, key=key))
+    result = _run(
+        client.action("press", index=target, include_snapshot=include_snapshot, key=key)
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -172,10 +240,15 @@ def do_press(
 @app.command("keydown")
 def do_keydown(
     key: str = typer.Option(..., "--key", "-k", help="Key to hold down."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Hold a key down (e.g. Shift, Control)."""
     client = DaemonClient()
-    result = _run(client.action("keydown", key=key))
+    result = _run(client.action("keydown", include_snapshot=include_snapshot, key=key))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -184,10 +257,15 @@ def do_keydown(
 @app.command("keyup")
 def do_keyup(
     key: str = typer.Option(..., "--key", "-k", help="Key to release."),
+    include_snapshot: bool = typer.Option(
+        False,
+        "--include-snapshot",
+        help="Attach compact snapshot to action result.",
+    ),
 ) -> None:
     """Release a held key."""
     client = DaemonClient()
-    result = _run(client.action("keyup", key=key))
+    result = _run(client.action("keyup", include_snapshot=include_snapshot, key=key))
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -200,7 +278,11 @@ def do_batch(
     ),
     sleep: float = typer.Option(0.15, "--sleep", help="Seconds between actions."),
 ) -> None:
-    """Execute a batch of actions from a JSONL file."""
+    """Execute a batch of actions from a JSONL file.
+
+    Actions in the JSONL can reference prior results with $N.path syntax.
+    For example, $0.data.url references the URL from the first action's result.
+    """
     if not calls_file.exists():
         typer.echo(f"File not found: {calls_file}", err=True)
         raise typer.Exit(2)

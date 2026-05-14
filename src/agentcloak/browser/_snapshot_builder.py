@@ -20,7 +20,13 @@ from agentcloak.browser.state import (
     PageSnapshot,
 )
 
-__all__ = ["FrameData", "SnapshotResult", "build_snapshot"]
+__all__ = [
+    "FrameData",
+    "SnapshotResult",
+    "build_snapshot",
+    "diff_snapshots",
+    "render_diff_tree",
+]
 
 _SKIP_ROLES = frozenset({"none", "InlineTextBox", "LineBreak"})
 
@@ -450,3 +456,96 @@ def build_snapshot(
         backend_node_map=backend_node_map,
         cached_lines=cached_lines,
     )
+
+
+# ---------------------------------------------------------------------------
+# Snapshot diff
+# ---------------------------------------------------------------------------
+
+CachedLine = tuple[int, str, int | None]
+DiffLine = tuple[int, str, int | None, str | None]
+
+
+def _line_key(line: CachedLine) -> str:
+    """Build a stable identity key for a snapshot line.
+
+    Interactive elements (ref is not None) use the ref number as key so the
+    same logical element maps across snapshots even if its text changes.
+    Non-interactive lines use a ``role:text`` composite since they have no
+    stable ref.
+    """
+    _depth, text, ref = line
+    if ref is not None:
+        return f"ref:{ref}"
+    # Use the rendered text as a composite key for non-interactive lines.
+    # This is intentionally coarse — we care about structural identity,
+    # not exact character equality.
+    return f"ctx:{text}"
+
+
+def diff_snapshots(
+    previous: list[CachedLine],
+    current: list[CachedLine],
+) -> list[DiffLine]:
+    """Compare two snapshot cached_lines lists and mark changes.
+
+    Returns lines from *current* with a 4th tuple element indicating
+    the diff status:
+
+    * ``None``  — unchanged
+    * ``"+"``   — added (not present in previous)
+    * ``"~"``   — changed (same identity key but different rendered text)
+
+    A trailing summary line lists removed ref numbers (interactive elements
+    that were in *previous* but absent from *current*).
+    """
+    if not previous:
+        # First snapshot — everything is new.
+        return [(d, t, r, "+") for d, t, r in current]
+
+    # Build lookup from key -> (depth, text) for previous.
+    prev_by_key: dict[str, tuple[int, str]] = {}
+    prev_refs: set[int] = set()
+    for depth, text, ref in previous:
+        key = _line_key((depth, text, ref))
+        prev_by_key[key] = (depth, text)
+        if ref is not None:
+            prev_refs.add(ref)
+
+    result: list[DiffLine] = []
+    cur_refs: set[int] = set()
+
+    for depth, text, ref in current:
+        if ref is not None:
+            cur_refs.add(ref)
+        key = _line_key((depth, text, ref))
+        prev_entry = prev_by_key.get(key)
+
+        if prev_entry is None:
+            result.append((depth, text, ref, "+"))
+        elif prev_entry != (depth, text):
+            result.append((depth, text, ref, "~"))
+        else:
+            result.append((depth, text, ref, None))
+
+    # Removed interactive elements summary
+    removed = sorted(prev_refs - cur_refs)
+    if removed:
+        refs_str = " ".join(f"[{r}]" for r in removed)
+        result.append((0, f"# removed: {refs_str}", None, None))
+
+    return result
+
+
+def render_diff_tree(diff_lines: list[DiffLine]) -> str:
+    """Render diff lines into indented tree text with ``[+]``/``[~]`` markers."""
+    rendered: list[str] = []
+    for depth, text, _ref, marker in diff_lines:
+        prefix = "  " * depth
+        if marker == "+":
+            rendered.append(f"{prefix}[+] {text}")
+        elif marker == "~":
+            rendered.append(f"{prefix}[~] {text}")
+        else:
+            rendered.append(f"{prefix}{text}")
+    return "\n".join(rendered)

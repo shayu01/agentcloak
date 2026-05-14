@@ -210,6 +210,7 @@ class DaemonClient:
         focus: int = 0,
         offset: int = 0,
         frames: bool = False,
+        diff: bool = False,
     ) -> dict[str, Any]:
         params: dict[str, str] = {"mode": mode}
         if max_chars:
@@ -222,6 +223,8 @@ class DaemonClient:
             params["offset"] = str(offset)
         if frames:
             params["frames"] = "true"
+        if diff:
+            params["diff"] = "true"
         return await self._request("GET", "/snapshot", params=params)
 
     async def state(self) -> dict[str, Any]:
@@ -241,6 +244,8 @@ class DaemonClient:
         *,
         index: int | None = None,
         target: str | None = None,
+        include_snapshot: bool = False,
+        snapshot_mode: str = "compact",
         **kwargs: Any,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"kind": kind}
@@ -248,6 +253,9 @@ class DaemonClient:
             body["index"] = index
         if target is not None:
             body["target"] = target
+        if include_snapshot:
+            body["include_snapshot"] = True
+            body["snapshot_mode"] = snapshot_mode
         body.update(kwargs)
         return await self._request("POST", "/action", json_body=body)
 

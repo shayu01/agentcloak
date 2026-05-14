@@ -33,6 +33,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         key: str = "",
         value: str = "",
         direction: str = "down",
+        include_snapshot: bool = False,
     ) -> str:
         """Interact with the page. Use [N] refs from agentcloak_snapshot as target.
 
@@ -53,6 +54,10 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
           navigation — new URL if page navigated
           current_value — current value after fill/select
 
+        If the target [N] ref is stale (element_not_found), the daemon
+        automatically re-snapshots and retries once. The result will
+        include retried=true when this happens.
+
         If a dialog is blocking, returns error='blocked_by_dialog'.
         Handle it with agentcloak_dialog before retrying.
 
@@ -63,9 +68,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             key: Key name for press/keydown/keyup (e.g. 'Enter', 'Control+a', 'Shift')
             value: Option value for select action
             direction: Scroll direction — 'up' or 'down'
+            include_snapshot: If true, attach a compact snapshot to the
+                action result. Saves a round-trip when you need to see
+                the page state after an action.
 
         Returns:
             JSON with action result, seq number, and state feedback fields.
+            When include_snapshot=true, includes a 'snapshot' object with
+            tree_text, mode, total_nodes, and total_interactive.
         """
         body: dict[str, Any] = {"kind": kind, "target": target}
         if kind in ("fill", "type") and text:
@@ -76,5 +86,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             body["value"] = value
         if kind == "scroll":
             body["direction"] = direction
+        if include_snapshot:
+            body["include_snapshot"] = True
         result = await bridge.request("POST", "/action", json_body=body)
         return bridge.format_result(result)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 import orjson
@@ -150,6 +151,7 @@ async def handle_snapshot(request: Request) -> Response:
 
     include_sm = request.query.get("include_selector_map", "true").lower() != "false"
     frames = request.query.get("frames", "false").lower() in ("true", "1", "yes")
+    diff = request.query.get("diff", "false").lower() in ("true", "1", "yes")
 
     snap = await ctx.snapshot(
         mode=mode,
@@ -159,6 +161,37 @@ async def handle_snapshot(request: Request) -> Response:
         offset=offset,
         frames=frames,
     )
+
+    # Snapshot diff: compare with previous cached_lines for this tab
+    diff_applied = False
+    if diff:
+        from agentcloak.browser._snapshot_builder import (
+            diff_snapshots,
+            render_diff_tree,
+        )
+
+        prev_cache = request.app.get("_prev_snapshot_lines")
+        cur_cache = getattr(ctx, "_cached_lines", None)
+        if prev_cache is not None and cur_cache is not None:
+            diff_lines = diff_snapshots(prev_cache, cur_cache)
+            snap = type(snap)(
+                seq=snap.seq,
+                url=snap.url,
+                title=snap.title,
+                mode=snap.mode,
+                tree_text=render_diff_tree(diff_lines),
+                selector_map=snap.selector_map,
+                security_warnings=snap.security_warnings,
+                total_nodes=snap.total_nodes,
+                total_interactive=snap.total_interactive,
+                truncated_at=snap.truncated_at,
+            )
+            diff_applied = True
+
+    # Cache current cached_lines for next diff
+    cur_cache = getattr(ctx, "_cached_lines", None)
+    if cur_cache is not None:
+        request.app["_prev_snapshot_lines"] = cur_cache
 
     data: dict[str, Any] = {
         "url": snap.url,
@@ -170,6 +203,8 @@ async def handle_snapshot(request: Request) -> Response:
         "total_nodes": snap.total_nodes,
         "total_interactive": snap.total_interactive,
     }
+    if diff:
+        data["diff"] = diff_applied
     if snap.truncated_at > 0:
         data["truncated_at"] = snap.truncated_at
     if include_sm:
@@ -246,13 +281,38 @@ async def handle_network(request: Request) -> Response:
 
 
 async def handle_action(request: Request) -> Response:
+    from agentcloak.core.errors import ElementNotFoundError
+
     body = await request.json()
     kind: str = body["kind"]
     index = body.get("index")
     target = str(index) if index is not None else body.get("target", "")
-    extra = {k: v for k, v in body.items() if k not in ("kind", "index", "target")}
+    include_snapshot: bool = body.get("include_snapshot", False)
+    snapshot_mode: str = body.get("snapshot_mode", "compact")
+    extra = {
+        k: v
+        for k, v in body.items()
+        if k not in ("kind", "index", "target", "include_snapshot", "snapshot_mode")
+    }
     ctx = _ctx(request)
-    result = await ctx.action(kind, target, **extra)
+
+    # Execute action with stale ref auto-retry (R4.5)
+    try:
+        result = await ctx.action(kind, target, **extra)
+    except ElementNotFoundError:
+        # Only retry if target looks like a numeric [N] ref
+        if target and target.isdigit():
+            logger.info(
+                "stale_ref_retry",
+                kind=kind,
+                target=target,
+                reason="element_not_found",
+            )
+            await ctx.snapshot(mode="compact")
+            result = await ctx.action(kind, target, **extra)
+            result["retried"] = True
+        else:
+            raise
 
     # R0/R1: if blocked_by_dialog, return as error response
     if result.get("error") == "blocked_by_dialog":
@@ -268,19 +328,185 @@ async def handle_action(request: Request) -> Response:
     elif kind == "select":
         summary["value"] = extra.get("value", "")
     await _update_resume(request, action_summary=summary)
+
+    # R4.3: includeSnapshot — attach compact snapshot to action result
+    if include_snapshot:
+        try:
+            snap = await ctx.snapshot(mode=snapshot_mode)
+            result["snapshot"] = {
+                "tree_text": snap.tree_text,
+                "mode": snap.mode,
+                "total_nodes": snap.total_nodes,
+                "total_interactive": snap.total_interactive,
+            }
+        except Exception:
+            logger.debug("include_snapshot_failed", exc_info=True)
+
     return _ok(result, seq=ctx.seq)
 
 
 async def handle_action_batch(request: Request) -> Response:
     body = await request.json()
     actions: list[dict[str, Any]] = body.get("actions", [])
-    sleep: float = body.get("sleep", 0.0)
+    sleep_s: float = body.get("sleep", 0.0)
     settle_timeout: int = int(
         body.get("settle_timeout", request.app.get("batch_settle_timeout", 5000))
     )
     ctx = _ctx(request)
-    result = await ctx.action_batch(actions, sleep=sleep, settle_timeout=settle_timeout)
+
+    # R4.4: if any action contains $N.path references, resolve during execution
+    if _batch_has_refs(actions):
+        result = await _run_batch_with_refs(
+            ctx, actions, sleep_s=sleep_s, settle_timeout=settle_timeout
+        )
+    else:
+        result = await ctx.action_batch(
+            actions, sleep=sleep_s, settle_timeout=settle_timeout
+        )
     return _ok(result, seq=ctx.seq)
+
+
+# -- $N batch reference resolution (R4.4) --
+
+_REF_PATTERN = re.compile(r"^\$(\d+)\.(.+)$")
+
+
+def _batch_has_refs(actions: list[dict[str, Any]]) -> bool:
+    """Check if any action param contains a $N.path reference."""
+    for act in actions:
+        for val in act.values():
+            if isinstance(val, str) and _REF_PATTERN.match(val):
+                return True
+    return False
+
+
+def _resolve_action_refs(
+    params: dict[str, Any], results: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Replace $N.path string values in params with values from prior results.
+
+    Only top-level string values matching the ``$N.dotted.path`` pattern are
+    resolved. N must be a valid index into *results* (0-based). Path
+    components are traversed with dict key lookup.
+    """
+    resolved = {}
+    for key, val in params.items():
+        if isinstance(val, str):
+            m = _REF_PATTERN.match(val)
+            if m:
+                idx = int(m.group(1))
+                path = m.group(2)
+                if 0 <= idx < len(results):
+                    resolved[key] = _traverse(results[idx], path)
+                    continue
+        resolved[key] = val
+    return resolved
+
+
+def _traverse(obj: Any, path: str) -> Any:
+    """Walk a dotted path through nested dicts."""
+    for segment in path.split("."):
+        if isinstance(obj, dict):
+            obj = obj[segment]
+        else:
+            raise KeyError(f"Cannot traverse '{segment}' on {type(obj).__name__}")
+    return obj
+
+
+async def _run_batch_with_refs(
+    ctx: Any,
+    actions: list[dict[str, Any]],
+    *,
+    sleep_s: float = 0.0,
+    settle_timeout: int = 5000,
+) -> dict[str, Any]:
+    """Execute batch actions with $N.path reference resolution between steps.
+
+    Mirrors the backend's action_batch logic but resolves references from
+    prior results before each action.
+    """
+    results: list[dict[str, Any]] = []
+    total = len(actions)
+
+    if total == 0:
+        return {"results": [], "completed": 0, "total": 0}
+
+    for i, act in enumerate(actions):
+        # Resolve $N references from prior results
+        try:
+            resolved_act = _resolve_action_refs(act, results)
+        except (KeyError, IndexError, TypeError) as exc:
+            results.append(
+                {
+                    "ok": False,
+                    "error": "ref_resolution_failed",
+                    "hint": f"Failed to resolve $N reference in action {i}: {exc}",
+                    "action": "check that $N index is valid and path exists in result",
+                }
+            )
+            return {
+                "results": results,
+                "completed": i,
+                "total": total,
+                "aborted_reason": "ref_resolution_failed",
+            }
+
+        kind = resolved_act.get("kind", resolved_act.get("action", ""))
+        idx = resolved_act.get("index")
+        target = str(idx) if idx is not None else resolved_act.get("target", "")
+        extra = {
+            k: v
+            for k, v in resolved_act.items()
+            if k not in ("kind", "action", "index", "target")
+        }
+
+        # Handle 'wait' as batch step (same as backend)
+        if kind == "wait":
+            try:
+                result = await ctx.wait(
+                    condition=extra.get("condition", "ms"),
+                    value=str(extra.get("value", "1000")),
+                    timeout=int(extra.get("timeout", 30000)),
+                    state=str(extra.get("state", "visible")),
+                )
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc), "action": "wait"}
+            results.append(result)
+            continue
+
+        result = await ctx.action(str(kind), str(target), **extra)
+        results.append(result)
+
+        # Dialog interruption
+        if result.get("error") == "blocked_by_dialog":
+            remaining = [
+                {
+                    "index": j,
+                    "kind": actions[j].get("kind", actions[j].get("action", "")),
+                }
+                for j in range(i + 1, total)
+            ]
+            return {
+                "results": results,
+                "completed": i,
+                "total": total,
+                "aborted_reason": "dialog_pending",
+                "dialog": result.get("dialog"),
+                "remaining": remaining,
+            }
+
+        if result.get("caused_navigation"):
+            return {
+                "results": results,
+                "completed": i + 1,
+                "total": total,
+                "aborted_reason": "url_changed",
+            }
+
+        if sleep_s > 0 and i < total - 1:
+            await asyncio.sleep(sleep_s)
+
+    return {"results": results, "completed": total, "total": total}
 
 
 async def handle_fetch(request: Request) -> Response:
