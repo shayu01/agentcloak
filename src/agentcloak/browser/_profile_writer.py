@@ -40,7 +40,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile-dir", required=True, help="Profile directory.")
     parser.add_argument(
-        "--cookies-file", required=True, help="Path to JSON cookie file.",
+        "--cookies-file",
+        required=True,
+        help="Path to JSON cookie file.",
     )
     parser.add_argument("--executable-path", default=None, help="Chrome binary.")
     args = parser.parse_args()

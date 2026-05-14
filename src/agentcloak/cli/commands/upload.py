@@ -24,9 +24,7 @@ def do_upload(
     index: int = typer.Option(
         ..., "--index", "-i", help="Element index [N] of file input."
     ),
-    file: list[str] = typer.Option(
-        ..., "--file", "-f", help="File path(s) to upload."
-    ),
+    file: list[str] = typer.Option(..., "--file", "-f", help="File path(s) to upload."),
 ) -> None:
     """Upload file(s) to a file input element."""
     client = DaemonClient()

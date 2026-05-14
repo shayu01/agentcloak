@@ -107,9 +107,7 @@ class ElementRef:
     tag: str
     role: str
     text: str
-    attributes: dict[str, str] = field(
-        default_factory=lambda: dict[str, str]()
-    )
+    attributes: dict[str, str] = field(default_factory=lambda: dict[str, str]())
     depth: int = 0
     description: str = ""
 

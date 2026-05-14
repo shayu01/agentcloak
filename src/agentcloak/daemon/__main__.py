@@ -13,15 +13,18 @@ def main() -> None:
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--profile", default=None, help="Browser profile name.")
     parser.add_argument(
-        "--stealth", action="store_true",
+        "--stealth",
+        action="store_true",
         help="[Deprecated] CloakBrowser is now the default.",
     )
     parser.add_argument(
-        "--humanize", action="store_true",
+        "--humanize",
+        action="store_true",
         help="Enable humanize behavioral layer.",
     )
     parser.add_argument(
-        "--no-humanize", action="store_true",
+        "--no-humanize",
+        action="store_true",
         help="Explicitly disable humanize layer.",
     )
     args = parser.parse_args()

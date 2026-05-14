@@ -12,8 +12,15 @@ if TYPE_CHECKING:
 __all__ = ["register"]
 
 ActionKind = Literal[
-    "click", "fill", "type", "scroll", "hover", "select", "press",
-    "keydown", "keyup",
+    "click",
+    "fill",
+    "type",
+    "scroll",
+    "hover",
+    "select",
+    "press",
+    "keydown",
+    "keyup",
 ]
 
 

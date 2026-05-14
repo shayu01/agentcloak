@@ -221,7 +221,9 @@ class TestRoutes:
         mock_get_resp.__aenter__ = AsyncMock(return_value=mock_get_resp)
         mock_get_resp.__aexit__ = AsyncMock(return_value=None)
         mock_get_resp.json = AsyncMock(
-            return_value={"webSocketDebuggerUrl": "ws://127.0.0.1:19222/devtools/browser/abc"}
+            return_value={
+                "webSocketDebuggerUrl": "ws://127.0.0.1:19222/devtools/browser/abc"
+            }
         )
 
         mock_session = MagicMock()
@@ -236,7 +238,9 @@ class TestRoutes:
                 data = orjson.loads(await resp.read())
 
         assert data["ok"] is True
-        assert data["data"]["ws_endpoint"] == "ws://127.0.0.1:19222/devtools/browser/abc"
+        assert (
+            data["data"]["ws_endpoint"] == "ws://127.0.0.1:19222/devtools/browser/abc"
+        )
         assert data["data"]["port"] == 19222
         assert data["data"]["http_url"] == "http://127.0.0.1:19222"
 
@@ -292,7 +296,9 @@ class TestRoutes:
         assert "authorization" in passed_headers
 
     @pytest.mark.asyncio
-    async def test_profile_create_from_current_ok(self, tmp_path: Any, client: TestClient) -> None:
+    async def test_profile_create_from_current_ok(
+        self, tmp_path: Any, client: TestClient
+    ) -> None:
         ctx = client.app["browser_ctx"]
         mock_bctx = MagicMock()
         mock_bctx.cookies = AsyncMock(return_value=[{"name": "sid", "value": "abc"}])
@@ -305,8 +311,15 @@ class TestRoutes:
         mock_paths = MagicMock()
         mock_paths.profiles_dir = tmp_path / "profiles"
 
-        with patch("agentcloak.core.config.load_config", return_value=(mock_paths, MagicMock())), \
-             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
+        with (
+            patch(
+                "agentcloak.core.config.load_config",
+                return_value=(mock_paths, MagicMock()),
+            ),
+            patch(
+                "asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)
+            ),
+        ):
             resp = await client.post(
                 "/profile/create-from-current",
                 data=orjson.dumps({"name": "my-profile"}),
@@ -321,7 +334,9 @@ class TestRoutes:
         assert data["data"]["cookie_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_profile_create_from_current_renamed(self, tmp_path: Any, client: TestClient) -> None:
+    async def test_profile_create_from_current_renamed(
+        self, tmp_path: Any, client: TestClient
+    ) -> None:
         ctx = client.app["browser_ctx"]
         mock_bctx = MagicMock()
         mock_bctx.cookies = AsyncMock(return_value=[])
@@ -338,8 +353,15 @@ class TestRoutes:
         mock_paths = MagicMock()
         mock_paths.profiles_dir = profiles_dir
 
-        with patch("agentcloak.core.config.load_config", return_value=(mock_paths, MagicMock())), \
-             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
+        with (
+            patch(
+                "agentcloak.core.config.load_config",
+                return_value=(mock_paths, MagicMock()),
+            ),
+            patch(
+                "asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)
+            ),
+        ):
             resp = await client.post(
                 "/profile/create-from-current",
                 data=orjson.dumps({"name": "my-site"}),
@@ -362,7 +384,9 @@ class TestRoutes:
         assert event.is_set()
 
     @pytest.mark.asyncio
-    async def test_profile_create_from_current_writer_error(self, tmp_path: Any, client: TestClient) -> None:
+    async def test_profile_create_from_current_writer_error(
+        self, tmp_path: Any, client: TestClient
+    ) -> None:
         """Subprocess failure returns 500 with error info."""
         ctx = client.app["browser_ctx"]
         mock_bctx = MagicMock()
@@ -376,8 +400,15 @@ class TestRoutes:
         mock_paths = MagicMock()
         mock_paths.profiles_dir = tmp_path / "profiles"
 
-        with patch("agentcloak.core.config.load_config", return_value=(mock_paths, MagicMock())), \
-             patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)):
+        with (
+            patch(
+                "agentcloak.core.config.load_config",
+                return_value=(mock_paths, MagicMock()),
+            ),
+            patch(
+                "asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)
+            ),
+        ):
             resp = await client.post(
                 "/profile/create-from-current",
                 data=orjson.dumps({"name": "my-profile"}),

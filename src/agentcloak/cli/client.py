@@ -304,10 +304,14 @@ class DaemonClient:
         return await self._request("POST", "/capture/clear")
 
     async def capture_replay(self, *, url: str, method: str = "GET") -> dict[str, Any]:
-        return await self._request("POST", "/capture/replay", json_body={"url": url, "method": method})
+        return await self._request(
+            "POST", "/capture/replay", json_body={"url": url, "method": method}
+        )
 
     async def profile_create_from_current(self, *, name: str) -> dict[str, Any]:
-        return await self._request("POST", "/profile/create-from-current", json_body={"name": name})
+        return await self._request(
+            "POST", "/profile/create-from-current", json_body={"name": name}
+        )
 
     async def cdp_endpoint(self) -> dict[str, Any]:
         return await self._request("GET", "/cdp/endpoint")
@@ -365,9 +369,7 @@ class DaemonClient:
         }
         return await self._request("POST", "/wait", json_body=body)
 
-    async def upload(
-        self, *, index: int, files: list[str]
-    ) -> dict[str, Any]:
+    async def upload(self, *, index: int, files: list[str]) -> dict[str, Any]:
         return await self._request(
             "POST", "/upload", json_body={"index": index, "files": files}
         )

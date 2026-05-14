@@ -164,13 +164,11 @@ def site_scaffold(
     params: dict[str, str] = {}
     if domain:
         params["domain"] = domain
-    analyze_result = _run(
-        client.capture_analyze(domain=domain)
-    )
+    analyze_result = _run(client.capture_analyze(domain=domain))
 
-    patterns_data: list[dict[str, Any]] = analyze_result.get(
-        "data", {}
-    ).get("patterns", [])
+    patterns_data: list[dict[str, Any]] = analyze_result.get("data", {}).get(
+        "patterns", []
+    )
 
     if not patterns_data:
         output_json(
@@ -192,10 +190,7 @@ def site_scaffold(
                 domain=p.get("domain", ""),
                 call_count=p.get("call_count", 0),
                 query_params=p.get("query_params", []),
-                status_codes={
-                    int(k): v
-                    for k, v in p.get("status_codes", {}).items()
-                },
+                status_codes={int(k): v for k, v in p.get("status_codes", {}).items()},
                 auth_headers=p.get("auth_headers", []),
                 content_type=p.get("content_type", ""),
                 category=p.get("category", "read"),

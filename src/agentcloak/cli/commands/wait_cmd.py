@@ -28,18 +28,15 @@ def do_wait(
         None, "--url", help="URL pattern to wait for (glob)."
     ),
     load: str | None = typer.Option(
-        None, "--load",
+        None,
+        "--load",
         help="Load state: load, domcontentloaded, networkidle.",
     ),
     js: str | None = typer.Option(
         None, "--js", help="JS expression that must return truthy."
     ),
-    ms: int | None = typer.Option(
-        None, "--ms", help="Milliseconds to sleep."
-    ),
-    timeout: int = typer.Option(
-        30000, "--timeout", help="Timeout in milliseconds."
-    ),
+    ms: int | None = typer.Option(None, "--ms", help="Milliseconds to sleep."),
+    timeout: int = typer.Option(30000, "--timeout", help="Timeout in milliseconds."),
     state: str = typer.Option(
         "visible",
         "--state",
@@ -60,8 +57,7 @@ def do_wait(
         condition, value = "ms", str(ms)
     else:
         typer.echo(
-            "Error: provide one of"
-            " --selector, --url, --load, --js, or --ms",
+            "Error: provide one of --selector, --url, --load, --js, or --ms",
             err=True,
         )
         raise typer.Exit(2)

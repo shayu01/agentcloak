@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -79,16 +80,12 @@ class BridgeHub:
                 auth="bypass" if is_local and self._cfg.token else "none",
             )
         else:
-            logger.info(
-                "extension_connected_pending_auth", remote=request.remote
-            )
+            logger.info("extension_connected_pending_auth", remote=request.remote)
 
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
-                    should_close = await self._handle_ext_message(
-                        msg.data, is_local
-                    )
+                    should_close = await self._handle_ext_message(msg.data, is_local)
                     if should_close:
                         await ws.close(code=4001, message=b"invalid token")
                         break
@@ -259,6 +256,7 @@ def _get_display_host(host: str) -> str:
     if host != "0.0.0.0":
         return host
     import socket as _socket
+
     try:
         with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
@@ -286,10 +284,8 @@ def _write_bridge_info(host: str, port: int, token: str | None) -> None:
         os.replace(tmp_path, str(info_path))
     except Exception:
         # Clean up on failure
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         raise
 
 
@@ -383,10 +379,8 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
     finally:
         daemon_task.cancel()
         # Clean up bridge.json on shutdown
-        try:
+        with contextlib.suppress(Exception):
             (Path.home() / ".agentcloak" / "bridge.json").unlink(missing_ok=True)
-        except Exception:
-            pass
         await runner.cleanup()
 
 

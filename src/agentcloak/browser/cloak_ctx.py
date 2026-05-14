@@ -64,7 +64,7 @@ async def launch_cloak(
 
     # Allocate a free port for CDP; Chrome 90+ supports pipe+port coexistence.
     cdp_port = _find_free_port()
-    all_args = ext_args + [f"--remote-debugging-port={cdp_port}"]
+    all_args = [*ext_args, f"--remote-debugging-port={cdp_port}"]
 
     seq_counter = SeqCounter()
     ring_buffer = RingBuffer()

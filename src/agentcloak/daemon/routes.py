@@ -148,9 +148,7 @@ async def handle_snapshot(request: Request) -> Response:
     offset_raw = request.query.get("offset", "0")
     offset = int(offset_raw) if offset_raw.isdigit() else 0
 
-    include_sm = request.query.get(
-        "include_selector_map", "true"
-    ).lower() != "false"
+    include_sm = request.query.get("include_selector_map", "true").lower() != "false"
 
     snap = await ctx.snapshot(
         mode=mode,
@@ -279,9 +277,7 @@ async def handle_action_batch(request: Request) -> Response:
         body.get("settle_timeout", request.app.get("batch_settle_timeout", 5000))
     )
     ctx = _ctx(request)
-    result = await ctx.action_batch(
-        actions, sleep=sleep, settle_timeout=settle_timeout
-    )
+    result = await ctx.action_batch(actions, sleep=sleep, settle_timeout=settle_timeout)
     return _ok(result, seq=ctx.seq)
 
 
@@ -690,11 +686,20 @@ async def handle_site_list(request: Request) -> Response:
     return _ok({"adapters": adapters, "count": len(adapters)}, seq=_ctx(request).seq)
 
 
-_HOP_BY_HOP = frozenset({
-    "host", "content-length", "connection", "transfer-encoding",
-    "keep-alive", "te", "trailer", "upgrade",
-    "proxy-authorization", "proxy-authenticate",
-})
+_HOP_BY_HOP = frozenset(
+    {
+        "host",
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "keep-alive",
+        "te",
+        "trailer",
+        "upgrade",
+        "proxy-authorization",
+        "proxy-authenticate",
+    }
+)
 
 
 async def handle_capture_replay(request: Request) -> Response:
@@ -706,8 +711,12 @@ async def handle_capture_replay(request: Request) -> Response:
 
     if not url:
         return _json(
-            {"ok": False, "error": "missing_url", "hint": "url is required",
-             "action": "provide a URL to replay"},
+            {
+                "ok": False,
+                "error": "missing_url",
+                "hint": "url is required",
+                "action": "provide a URL to replay",
+            },
             status=400,
         )
 
@@ -724,8 +733,7 @@ async def handle_capture_replay(request: Request) -> Response:
         )
 
     replay_headers = {
-        k: v for k, v in entry.request_headers.items()
-        if k.lower() not in _HOP_BY_HOP
+        k: v for k, v in entry.request_headers.items() if k.lower() not in _HOP_BY_HOP
     }
 
     result = await ctx.fetch(
@@ -735,7 +743,9 @@ async def handle_capture_replay(request: Request) -> Response:
         headers=replay_headers if replay_headers else None,
     )
     result["replayed_from"] = {
-        "url": entry.url, "method": entry.method, "seq": entry.seq
+        "url": entry.url,
+        "method": entry.method,
+        "seq": entry.seq,
     }
     return _ok(result, seq=ctx.seq)
 
@@ -748,8 +758,12 @@ async def handle_profile_create_from_current(request: Request) -> Response:
 
     if not name:
         return _json(
-            {"ok": False, "error": "missing_name", "hint": "name is required",
-             "action": "provide 'name' parameter"},
+            {
+                "ok": False,
+                "error": "missing_name",
+                "hint": "name is required",
+                "action": "provide 'name' parameter",
+            },
             status=400,
         )
     if not _PROFILE_NAME_RE.match(name):
@@ -785,6 +799,7 @@ async def handle_profile_create_from_current(request: Request) -> Response:
     remote_ctx = request.app.get("remote_ctx")
     if remote_ctx is not None:
         from agentcloak.browser.remote_ctx import RemoteBridgeContext
+
         if not isinstance(remote_ctx, RemoteBridgeContext):
             raise RuntimeError("remote_ctx is not a RemoteBridgeContext instance")
         cookies: list[dict[str, Any]] = await remote_ctx.send_command("cookies", {})
@@ -803,6 +818,7 @@ async def handle_profile_create_from_current(request: Request) -> Response:
     exec_path: str | None = None
     try:
         import cloakbrowser as _cb
+
         info = _cb.binary_info()
         if info.get("installed"):
             exec_path = info["binary_path"]
@@ -817,9 +833,13 @@ async def handle_profile_create_from_current(request: Request) -> Response:
         _os.chmod(cookies_file, 0o600)
 
         cmd = [
-            sys.executable, "-m", "agentcloak.browser._profile_writer",
-            "--profile-dir", str(profile_dir),
-            "--cookies-file", cookies_file,
+            sys.executable,
+            "-m",
+            "agentcloak.browser._profile_writer",
+            "--profile-dir",
+            str(profile_dir),
+            "--cookies-file",
+            cookies_file,
         ]
         if exec_path:
             cmd.extend(["--executable-path", exec_path])
@@ -833,6 +853,7 @@ async def handle_profile_create_from_current(request: Request) -> Response:
     finally:
         # Always clean up the temp file
         import contextlib
+
         with contextlib.suppress(OSError):
             _os.unlink(cookies_file)
     if proc.returncode != 0:
@@ -962,10 +983,7 @@ async def handle_upload(request: Request) -> Response:
 async def handle_frame_list(request: Request) -> Response:
     ctx = _ctx(request)
     frames = await ctx.frame_list()
-    data = [
-        {"name": f.name, "url": f.url, "is_current": f.is_current}
-        for f in frames
-    ]
+    data = [{"name": f.name, "url": f.url, "is_current": f.is_current} for f in frames]
     return _ok({"frames": data, "count": len(data)}, seq=ctx.seq)
 
 

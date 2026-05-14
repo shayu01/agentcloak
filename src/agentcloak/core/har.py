@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
-from agentcloak.core.capture import CaptureEntry
+if TYPE_CHECKING:
+    from agentcloak.core.capture import CaptureEntry
 
 __all__ = ["to_har"]
 
@@ -85,5 +86,3 @@ def _entry_to_har(entry: CaptureEntry) -> dict[str, Any]:
             "receive": 0,
         },
     }
-
-

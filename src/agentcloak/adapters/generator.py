@@ -26,9 +26,9 @@ def _slugify(text: str) -> str:
 
 def _derive_name(pattern: EndpointPattern) -> str:
     parts = [
-        p for p in pattern.path.strip("/").split("/")
-        if not p.startswith(":")
-        and p not in ("api", "v1", "v2", "v3", "v4")
+        p
+        for p in pattern.path.strip("/").split("/")
+        if not p.startswith(":") and p not in ("api", "v1", "v2", "v3", "v4")
     ]
     if parts:
         return _slugify("_".join(parts[-2:]))
@@ -40,13 +40,10 @@ def _build_args_code(pattern: EndpointPattern) -> str:
     for param in _path_params(pattern.path):
         help_text = f"{param.title()} parameter"
         lines.append(
-            f'        Arg("{param}", type=str,'
-            f' required=True, help="{help_text}"),'
+            f'        Arg("{param}", type=str, required=True, help="{help_text}"),'
         )
     for qp in pattern.query_params:
-        lines.append(
-            f'        Arg("{qp}", default=None, help="{qp} query parameter"),'
-        )
+        lines.append(f'        Arg("{qp}", default=None, help="{qp} query parameter"),')
     if not lines:
         return ""
     inner = "\n".join(lines)
@@ -73,8 +70,8 @@ def _build_pipeline_code(pattern: EndpointPattern) -> str:
 
     if pattern.method == "GET":
         steps.append(
-            f'        {{"evaluate": "fetch(\'{url}\', {{credentials: \'include\'}})'
-            f".then(r => r.json())\"}},"
+            f"        {{\"evaluate\": \"fetch('{url}', {{credentials: 'include'}})"
+            f'.then(r => r.json())"}},'
         )
     else:
         body_hint = "{}"

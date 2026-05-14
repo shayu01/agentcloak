@@ -50,8 +50,7 @@ def render_deep(obj: Any, context: dict[str, Any]) -> Any:
         return render(obj, context)
     if isinstance(obj, dict):
         return {
-            k: render_deep(v, context)
-            for k, v in cast("dict[str, Any]", obj).items()
+            k: render_deep(v, context) for k, v in cast("dict[str, Any]", obj).items()
         }
     if isinstance(obj, list):
         return [render_deep(el, context) for el in cast("list[Any]", obj)]

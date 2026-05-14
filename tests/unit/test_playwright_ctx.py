@@ -45,17 +45,24 @@ def _ax_tree_response() -> dict[str, Any]:
     return {
         "nodes": [
             _cdp_node(
-                "RootWebArea", "Example",
+                "RootWebArea",
+                "Example",
                 node_id="root",
                 child_ids=["h1", "lnk", "btn", "txt"],
             ),
             _cdp_node("heading", "Main Title", node_id="h1"),
             _cdp_node("link", "Click me", node_id="lnk", backend_dom_id=10),
             _cdp_node(
-                "button", "Submit", node_id="btn", backend_dom_id=11,
+                "button",
+                "Submit",
+                node_id="btn",
+                backend_dom_id=11,
             ),
             _cdp_node(
-                "textbox", "Search", node_id="txt", backend_dom_id=12,
+                "textbox",
+                "Search",
+                node_id="txt",
+                backend_dom_id=12,
             ),
         ]
     }
@@ -80,7 +87,9 @@ def _mock_cdp_session() -> MagicMock:
                     "origin": "https://example.com",
                     "name": "",
                     "auxData": {
-                        "isDefault": True, "type": "default", "frameId": "F1",
+                        "isDefault": True,
+                        "type": "default",
+                        "frameId": "F1",
                     },
                 }
             }
@@ -195,7 +204,8 @@ class TestSnapshot:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="r",
                             child_ids=["b1", "itb", "lb", "st"],
                         ),
@@ -228,12 +238,14 @@ class TestSnapshot:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="cr",
                             child_ids=["nav", "btn1"],
                         ),
                         _cdp_node(
-                            "navigation", "Main Nav",
+                            "navigation",
+                            "Main Nav",
                             node_id="nav",
                             child_ids=["lnk1"],
                         ),
@@ -307,8 +319,10 @@ class TestEvaluate:
                         "origin": "",
                         "name": "",
                         "auxData": {
-                        "isDefault": True, "type": "default", "frameId": "F1",
-                    },
+                            "isDefault": True,
+                            "type": "default",
+                            "frameId": "F1",
+                        },
                     }
                 }
                 for cb in _listeners.get("Runtime.executionContextCreated", []):
@@ -350,8 +364,10 @@ class TestEvaluate:
                         "origin": "",
                         "name": "",
                         "auxData": {
-                        "isDefault": True, "type": "default", "frameId": "F1",
-                    },
+                            "isDefault": True,
+                            "type": "default",
+                            "frameId": "F1",
+                        },
                     }
                 }
                 for cb in _listeners.get("Runtime.executionContextCreated", []):
@@ -390,8 +406,10 @@ class TestEvaluate:
                         "origin": "https://example.com",
                         "name": "",
                         "auxData": {
-                        "isDefault": True, "type": "default", "frameId": "F1",
-                    },
+                            "isDefault": True,
+                            "type": "default",
+                            "frameId": "F1",
+                        },
                     }
                 }
                 for cb in _listeners.get("Runtime.executionContextCreated", []):
@@ -505,18 +523,22 @@ class TestSnapshotProperties:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="pr",
                             child_ids=["cb1"],
                         ),
                         _cdp_node(
-                            "checkbox", "I agree",
+                            "checkbox",
+                            "I agree",
                             node_id="cb1",
                             backend_dom_id=20,
-                            properties=[{
-                                "name": "checked",
-                                "value": {"type": "tristate", "value": True},
-                            }],
+                            properties=[
+                                {
+                                    "name": "checked",
+                                    "value": {"type": "tristate", "value": True},
+                                }
+                            ],
                         ),
                     ]
                 }
@@ -541,7 +563,8 @@ class TestSnapshotProperties:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="pr2",
                             child_ids=["tb1"],
                         ),
@@ -574,7 +597,8 @@ class TestSnapshotProperties:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="pr3",
                             child_ids=["pw1"],
                         ),
@@ -584,13 +608,15 @@ class TestSnapshotProperties:
                             "name": {"value": "Password"},
                             "value": {"value": "s3cr3t!"},
                             "backendDOMNodeId": 40,
-                            "properties": [{
-                                "name": "autocomplete",
-                                "value": {
-                                    "type": "string",
-                                    "value": "current-password",
-                                },
-                            }],
+                            "properties": [
+                                {
+                                    "name": "autocomplete",
+                                    "value": {
+                                        "type": "string",
+                                        "value": "current-password",
+                                    },
+                                }
+                            ],
                         },
                     ]
                 }
@@ -615,18 +641,22 @@ class TestSnapshotProperties:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="pr4",
                             child_ids=["db1"],
                         ),
                         _cdp_node(
-                            "button", "Submit",
+                            "button",
+                            "Submit",
                             node_id="db1",
                             backend_dom_id=50,
-                            properties=[{
-                                "name": "disabled",
-                                "value": {"type": "boolean", "value": True},
-                            }],
+                            properties=[
+                                {
+                                    "name": "disabled",
+                                    "value": {"type": "boolean", "value": True},
+                                }
+                            ],
                         ),
                     ]
                 }
@@ -650,12 +680,14 @@ class TestSnapshotProperties:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="pr5",
                             child_ids=["mb1"],
                         ),
                         _cdp_node(
-                            "button", "Menu",
+                            "button",
+                            "Menu",
                             node_id="mb1",
                             backend_dom_id=60,
                             properties=[
@@ -696,17 +728,20 @@ class TestSnapshotTree:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="tr",
                             child_ids=["tnav"],
                         ),
                         _cdp_node(
-                            "navigation", "Main",
+                            "navigation",
+                            "Main",
                             node_id="tnav",
                             child_ids=["tl1"],
                         ),
                         _cdp_node(
-                            "link", "Home",
+                            "link",
+                            "Home",
                             node_id="tl1",
                             backend_dom_id=70,
                         ),
@@ -739,17 +774,20 @@ class TestSnapshotTree:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="fr",
                             child_ids=["fgen"],
                         ),
                         _cdp_node(
-                            "generic", "",
+                            "generic",
+                            "",
                             node_id="fgen",
                             child_ids=["fb1"],
                         ),
                         _cdp_node(
-                            "button", "Click",
+                            "button",
+                            "Click",
                             node_id="fb1",
                             backend_dom_id=80,
                         ),
@@ -776,18 +814,21 @@ class TestSnapshotTree:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="dr",
                             child_ids=["dl1"],
                         ),
                         _cdp_node(
-                            "link", "Home",
+                            "link",
+                            "Home",
                             node_id="dl1",
                             backend_dom_id=90,
                             child_ids=["ds1"],
                         ),
                         _cdp_node(
-                            "StaticText", "Home",
+                            "StaticText",
+                            "Home",
                             node_id="ds1",
                         ),
                     ]
@@ -817,7 +858,8 @@ class TestProgressiveLoading:
                 children = [f"ml{i}" for i in range(10)]
                 nodes = [
                     _cdp_node(
-                        "RootWebArea", "Page",
+                        "RootWebArea",
+                        "Page",
                         node_id="mr",
                         child_ids=children,
                     ),
@@ -825,7 +867,8 @@ class TestProgressiveLoading:
                 for i in range(10):
                     nodes.append(
                         _cdp_node(
-                            "link", f"Link {i}",
+                            "link",
+                            f"Link {i}",
                             node_id=f"ml{i}",
                             backend_dom_id=100 + i,
                         )
@@ -853,7 +896,8 @@ class TestProgressiveLoading:
                 children = [f"ol{i}" for i in range(5)]
                 nodes = [
                     _cdp_node(
-                        "RootWebArea", "Page",
+                        "RootWebArea",
+                        "Page",
                         node_id="or",
                         child_ids=children,
                     ),
@@ -861,7 +905,8 @@ class TestProgressiveLoading:
                 for i in range(5):
                     nodes.append(
                         _cdp_node(
-                            "link", f"Link {i}",
+                            "link",
+                            f"Link {i}",
                             node_id=f"ol{i}",
                             backend_dom_id=200 + i,
                         )
@@ -888,27 +933,32 @@ class TestProgressiveLoading:
                 return {
                     "nodes": [
                         _cdp_node(
-                            "RootWebArea", "Page",
+                            "RootWebArea",
+                            "Page",
                             node_id="fcr",
                             child_ids=["fcnav", "fcbtn"],
                         ),
                         _cdp_node(
-                            "navigation", "Nav",
+                            "navigation",
+                            "Nav",
                             node_id="fcnav",
                             child_ids=["fcl1", "fcl2"],
                         ),
                         _cdp_node(
-                            "link", "Home",
+                            "link",
+                            "Home",
                             node_id="fcl1",
                             backend_dom_id=300,
                         ),
                         _cdp_node(
-                            "link", "About",
+                            "link",
+                            "About",
                             node_id="fcl2",
                             backend_dom_id=301,
                         ),
                         _cdp_node(
-                            "button", "Unrelated",
+                            "button",
+                            "Unrelated",
                             node_id="fcbtn",
                             backend_dom_id=302,
                         ),
@@ -937,7 +987,8 @@ class TestProgressiveLoading:
                 children = [f"atl{i}" for i in range(10)]
                 nodes = [
                     _cdp_node(
-                        "RootWebArea", "Page",
+                        "RootWebArea",
+                        "Page",
                         node_id="atr",
                         child_ids=children,
                     ),
@@ -945,7 +996,8 @@ class TestProgressiveLoading:
                 for i in range(10):
                     nodes.append(
                         _cdp_node(
-                            "button", f"Btn {i}",
+                            "button",
+                            f"Btn {i}",
                             node_id=f"atl{i}",
                             backend_dom_id=400 + i,
                         )

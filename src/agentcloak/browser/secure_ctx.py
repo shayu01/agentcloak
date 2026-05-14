@@ -162,9 +162,7 @@ class SecureBrowserContext:
             condition=condition, value=value, timeout=timeout, state=state
         )
 
-    async def upload(
-        self, index: int, files: list[str]
-    ) -> dict[str, Any]:
+    async def upload(self, index: int, files: list[str]) -> dict[str, Any]:
         return await self._inner.upload(index, files)
 
     async def frame_list(self) -> list[Any]:

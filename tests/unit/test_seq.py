@@ -51,21 +51,21 @@ class TestSeqCounter:
 
     def test_mixed_increment_and_increment_action(self) -> None:
         c = SeqCounter()
-        c.increment()           # seq=1, non-action
-        c.increment_action()    # seq=2, action
-        c.increment()           # seq=3, non-action
-        c.increment()           # seq=4, non-action
-        c.increment_action()    # seq=5, action
+        c.increment()  # seq=1, non-action
+        c.increment_action()  # seq=2, action
+        c.increment()  # seq=3, non-action
+        c.increment()  # seq=4, non-action
+        c.increment_action()  # seq=5, action
         assert c.value == 5
         assert c.last_action_seq == 5
 
     def test_last_action_seq_tracks_most_recent_action(self) -> None:
         c = SeqCounter()
-        c.increment_action()    # seq=1
-        c.increment()           # seq=2
-        c.increment()           # seq=3
+        c.increment_action()  # seq=1
+        c.increment()  # seq=2
+        c.increment()  # seq=3
         assert c.last_action_seq == 1
-        c.increment_action()    # seq=4
+        c.increment_action()  # seq=4
         assert c.last_action_seq == 4
 
 

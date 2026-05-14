@@ -19,7 +19,14 @@ __all__ = ["app"]
 
 app = typer.Typer()
 
-_REQUIRED_PACKAGES = ["typer", "orjson", "structlog", "aiohttp", "cloakbrowser", "playwright"]
+_REQUIRED_PACKAGES = [
+    "typer",
+    "orjson",
+    "structlog",
+    "aiohttp",
+    "cloakbrowser",
+    "playwright",
+]
 
 _STEALTH_PACKAGES = ["httpcloak"]
 

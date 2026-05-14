@@ -204,7 +204,9 @@ class TestPatternAnalyzer:
         entries = [
             _api_entry(
                 method="POST",
-                request_headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+                request_headers={
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                },
                 request_body="action=get&id=42",
             ),
         ]

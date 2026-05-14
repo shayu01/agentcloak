@@ -100,14 +100,10 @@ class TestXvfbManager:
         mgr = XvfbManager()
         call_count = 0
 
-        original_exists = Path.exists
-
         def mock_exists(self: Path) -> bool:
             nonlocal call_count
             name = self.name
-            if name == ".X99-lock" or name == "X99":
-                return True
-            return False
+            return bool(name == ".X99-lock" or name == "X99")
 
         with patch.object(Path, "exists", mock_exists):
             display = mgr._find_free_display(start=99)

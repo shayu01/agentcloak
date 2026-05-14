@@ -666,7 +666,10 @@ class PlaywrightContext:
             raise ElementNotFoundError(
                 error="element_not_found",
                 hint="click requires a target element",
-                action="provide 'target' as '[N]' ref from snapshot, or use (x, y) coordinates",
+                action=(
+                    "provide 'target' as '[N]' ref from snapshot,"
+                    " or use (x, y) coordinates"
+                ),
             )
 
         element = await self._resolve_element(index)
@@ -739,7 +742,10 @@ class PlaywrightContext:
             raise ElementNotFoundError(
                 error="element_not_found",
                 hint="hover requires a target element",
-                action="provide 'target' as '[N]' ref from snapshot, or use (x, y) coordinates",
+                action=(
+                    "provide 'target' as '[N]' ref from snapshot,"
+                    " or use (x, y) coordinates"
+                ),
             )
 
         element = await self._resolve_element(index)

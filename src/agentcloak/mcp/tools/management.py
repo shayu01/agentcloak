@@ -78,15 +78,17 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
                         "action": "pass cookies as JSON array string",
                     }
                 )
-            cookies = json.loads(cookies_json) if isinstance(cookies_json, str) else cookies_json
+            cookies = (
+                json.loads(cookies_json)
+                if isinstance(cookies_json, str)
+                else cookies_json
+            )
             result = await bridge.request(
                 "POST", "/cookies/import", json_body={"cookies": cookies}
             )
             return bridge.format_result(result)
 
-        return json.dumps(
-            {"error": "unknown_action", "hint": f"Unknown: {action}"}
-        )
+        return json.dumps({"error": "unknown_action", "hint": f"Unknown: {action}"})
 
     @mcp.tool(annotations={"destructiveHint": True, "readOnlyHint": False})
     async def agentcloak_launch(

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentcloak.adapters.context import AdapterContext
 from agentcloak.adapters.executor import execute_adapter
+
+if TYPE_CHECKING:
+    from agentcloak.adapters.context import AdapterContext
 from agentcloak.adapters.types import AdapterEntry, AdapterMeta
 from agentcloak.core.errors import AgentBrowserError
 from agentcloak.core.types import Strategy
@@ -81,7 +84,10 @@ class TestExecuteAdapter:
         )
         entry = AdapterEntry(meta=meta)
 
-        with patch("agentcloak.adapters.pipeline.steps.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "agentcloak.adapters.pipeline.steps.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = await execute_adapter(entry, args={})
 
         assert result == [42]

@@ -26,7 +26,5 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with requests array (method, url, status, resource_type) and count.
         """
-        result = await bridge.request(
-            "GET", "/network", params={"since": since}
-        )
+        result = await bridge.request("GET", "/network", params={"since": since})
         return bridge.format_result(result)

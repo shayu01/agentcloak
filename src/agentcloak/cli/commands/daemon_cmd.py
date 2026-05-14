@@ -30,14 +30,19 @@ def daemon_start(
         None, "--profile", "-p", help="Browser profile name."
     ),
     stealth: bool = typer.Option(
-        False, "--stealth", "-s", help="[Deprecated] CloakBrowser is now the default.",
+        False,
+        "--stealth",
+        "-s",
+        help="[Deprecated] CloakBrowser is now the default.",
         hidden=True,
     ),
     humanize: bool = typer.Option(
         False, "--humanize", help="Enable humanize behavioral layer."
     ),
     no_humanize: bool = typer.Option(
-        False, "--no-humanize", help="Explicitly disable humanize layer.",
+        False,
+        "--no-humanize",
+        help="Explicitly disable humanize layer.",
         hidden=True,
     ),
 ) -> None:

@@ -17,9 +17,7 @@ from agentcloak.core.seq import RingBuffer, SeqCounter
 from agentcloak.daemon.middleware import error_middleware
 from agentcloak.daemon.routes import setup_routes
 
-_HTTPX_CLIENT = (
-    "agentcloak.browser.playwright_ctx.httpx.AsyncClient"
-)
+_HTTPX_CLIENT = "agentcloak.browser.playwright_ctx.httpx.AsyncClient"
 
 
 def _mock_cdp() -> MagicMock:
@@ -52,18 +50,14 @@ def _make_page(
     page.content = AsyncMock(return_value="<html></html>")
 
     page.context = MagicMock()
-    page.context.new_cdp_session = AsyncMock(
-        return_value=_mock_cdp()
-    )
+    page.context.new_cdp_session = AsyncMock(return_value=_mock_cdp())
     page.context.cookies = AsyncMock(return_value=cookies or [])
     page.evaluate = AsyncMock(return_value=ua)
 
     return page
 
 
-def _make_ctx(
-    *, page: MagicMock | None = None
-) -> PlaywrightContext:
+def _make_ctx(*, page: MagicMock | None = None) -> PlaywrightContext:
     mock_page = page or _make_page()
     return PlaywrightContext(
         page=mock_page,
@@ -104,9 +98,7 @@ def _mock_httpx(
     return cls_mock, inst
 
 
-def _cookie(
-    name: str, value: str, domain: str
-) -> dict[str, str]:
+def _cookie(name: str, value: str, domain: str) -> dict[str, str]:
     return {
         "name": name,
         "value": value,
@@ -129,9 +121,7 @@ class TestPatchrightFetch:
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
-            result = await ctx.fetch(
-                "https://api.example.com/data"
-            )
+            result = await ctx.fetch("https://api.example.com/data")
 
         assert result["status"] == 200
         assert result["body_encoding"] == "text"
@@ -154,9 +144,7 @@ class TestPatchrightFetch:
     async def test_fetch_timeout_raises(self) -> None:
         ctx = _make_ctx()
         cls_mock, inst = _mock_httpx(_fake_httpx_response())
-        inst.request = AsyncMock(
-            side_effect=httpx.ReadTimeout("timed out")
-        )
+        inst.request = AsyncMock(side_effect=httpx.ReadTimeout("timed out"))
 
         with patch(_HTTPX_CLIENT, cls_mock):
             with pytest.raises(BrowserTimeoutError) as exc_info:
@@ -168,9 +156,7 @@ class TestPatchrightFetch:
     async def test_fetch_request_error_raises(self) -> None:
         ctx = _make_ctx()
         cls_mock, inst = _mock_httpx(_fake_httpx_response())
-        inst.request = AsyncMock(
-            side_effect=httpx.ConnectError("refused")
-        )
+        inst.request = AsyncMock(side_effect=httpx.ConnectError("refused"))
 
         with patch(_HTTPX_CLIENT, cls_mock):
             with pytest.raises(BackendError) as exc_info:
@@ -237,15 +223,11 @@ class TestPatchrightFetch:
         ]
         page = _make_page(cookies=cookies)
         ctx = _make_ctx(page=page)
-        fake_resp = _fake_httpx_response(
-            url="https://api.example.com/data"
-        )
+        fake_resp = _fake_httpx_response(url="https://api.example.com/data")
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
-            result = await ctx.fetch(
-                "https://api.example.com/data"
-            )
+            result = await ctx.fetch("https://api.example.com/data")
 
         assert "sid" in result["cookies_used"]
         assert "other" not in result["cookies_used"]
@@ -283,18 +265,14 @@ class TestFetchRoute:
             yield c
 
     @pytest.mark.asyncio
-    async def test_fetch_route_success(
-        self, client: TestClient
-    ) -> None:
+    async def test_fetch_route_success(self, client: TestClient) -> None:
         fake_resp = _fake_httpx_response(text='{"d": 1}')
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
             resp = await client.post(
                 "/fetch",
-                data=orjson.dumps(
-                    {"url": "https://api.example.com/data"}
-                ),
+                data=orjson.dumps({"url": "https://api.example.com/data"}),
                 headers={"Content-Type": "application/json"},
             )
 
@@ -305,20 +283,20 @@ class TestFetchRoute:
         assert data["seq"] >= 1
 
     @pytest.mark.asyncio
-    async def test_fetch_route_with_method_and_body(
-        self, client: TestClient
-    ) -> None:
+    async def test_fetch_route_with_method_and_body(self, client: TestClient) -> None:
         fake_resp = _fake_httpx_response(status_code=201)
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
             resp = await client.post(
                 "/fetch",
-                data=orjson.dumps({
-                    "url": "https://api.example.com/post",
-                    "method": "POST",
-                    "body": '{"key": "val"}',
-                }),
+                data=orjson.dumps(
+                    {
+                        "url": "https://api.example.com/post",
+                        "method": "POST",
+                        "body": '{"key": "val"}',
+                    }
+                ),
                 headers={"Content-Type": "application/json"},
             )
 
@@ -328,19 +306,19 @@ class TestFetchRoute:
         assert data["data"]["status"] == 201
 
     @pytest.mark.asyncio
-    async def test_fetch_route_with_headers(
-        self, client: TestClient
-    ) -> None:
+    async def test_fetch_route_with_headers(self, client: TestClient) -> None:
         fake_resp = _fake_httpx_response()
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
             resp = await client.post(
                 "/fetch",
-                data=orjson.dumps({
-                    "url": "https://api.example.com",
-                    "headers": {"Authorization": "Bearer t"},
-                }),
+                data=orjson.dumps(
+                    {
+                        "url": "https://api.example.com",
+                        "headers": {"Authorization": "Bearer t"},
+                    }
+                ),
                 headers={"Content-Type": "application/json"},
             )
 

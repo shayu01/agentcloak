@@ -34,9 +34,9 @@ def _pattern(
 class TestGenerateAdapter:
     def test_basic_get(self) -> None:
         code = generate_adapter("example", _pattern())
-        assert '@adapter(' in code
+        assert "@adapter(" in code
         assert 'site="example"' in code
-        assert 'Strategy.PUBLIC' in code
+        assert "Strategy.PUBLIC" in code
         assert "pipeline=" in code
 
     def test_includes_path_params_as_args(self) -> None:
@@ -45,23 +45,17 @@ class TestGenerateAdapter:
         assert "required=True" in code
 
     def test_includes_query_params_as_args(self) -> None:
-        code = generate_adapter(
-            "example", _pattern(query_params=["page", "limit"])
-        )
+        code = generate_adapter("example", _pattern(query_params=["page", "limit"]))
         assert 'Arg("page"' in code
         assert 'Arg("limit"' in code
 
     def test_cookie_strategy_has_navigate(self) -> None:
-        code = generate_adapter(
-            "example", _pattern(strategy=Strategy.COOKIE)
-        )
+        code = generate_adapter("example", _pattern(strategy=Strategy.COOKIE))
         assert '"navigate"' in code
         assert "Strategy.COOKIE" in code
 
     def test_post_method_generates_write_access(self) -> None:
-        code = generate_adapter(
-            "example", _pattern(method="POST")
-        )
+        code = generate_adapter("example", _pattern(method="POST"))
         assert 'access="write"' in code
 
     def test_custom_name(self) -> None:

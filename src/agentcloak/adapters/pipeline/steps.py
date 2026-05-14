@@ -12,9 +12,7 @@ from agentcloak.core.errors import AgentBrowserError
 
 __all__ = ["STEP_REGISTRY", "StepContext"]
 
-StepHandler = Callable[
-    [Any, Any, "StepContext"], Awaitable[Any]
-]
+StepHandler = Callable[[Any, Any, "StepContext"], Awaitable[Any]]
 
 
 class StepContext:
@@ -42,9 +40,7 @@ class StepContext:
         return ctx
 
 
-async def _step_fetch(
-    params: Any, data: Any, ctx: StepContext
-) -> Any:
+async def _step_fetch(params: Any, data: Any, ctx: StepContext) -> Any:
     rendered: Any = render_deep(params, ctx.template_context(data))
     if isinstance(rendered, str):
         rendered = {"url": rendered}
@@ -60,9 +56,7 @@ async def _step_fetch(
         return resp.json()
 
 
-async def _step_select(
-    params: Any, data: Any, ctx: StepContext
-) -> Any:
+async def _step_select(params: Any, data: Any, ctx: StepContext) -> Any:
     path: Any = render(params, ctx.template_context(data))
     if not isinstance(path, str):
         return data
@@ -78,9 +72,7 @@ async def _step_select(
     return result
 
 
-async def _step_map(
-    params: Any, data: Any, ctx: StepContext
-) -> list[dict[str, Any]]:
+async def _step_map(params: Any, data: Any, ctx: StepContext) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         msg = "map step requires a list as input"
         raise AgentBrowserError(
@@ -100,16 +92,12 @@ async def _step_map(
     result: list[dict[str, Any]] = []
     for i, item in enumerate(items):
         tctx = ctx.template_context(data, item=item, index=i)
-        row: dict[str, Any] = {
-            str(k): render(v, tctx) for k, v in mapping.items()
-        }
+        row: dict[str, Any] = {str(k): render(v, tctx) for k, v in mapping.items()}
         result.append(row)
     return result
 
 
-async def _step_filter(
-    params: Any, data: Any, ctx: StepContext
-) -> list[Any]:
+async def _step_filter(params: Any, data: Any, ctx: StepContext) -> list[Any]:
     if not isinstance(data, list):
         msg = "filter step requires a list as input"
         raise AgentBrowserError(
@@ -128,9 +116,7 @@ async def _step_filter(
     return result
 
 
-async def _step_limit(
-    params: Any, data: Any, ctx: StepContext
-) -> list[Any]:
+async def _step_limit(params: Any, data: Any, ctx: StepContext) -> list[Any]:
     if not isinstance(data, list):
         msg = "limit step requires a list as input"
         raise AgentBrowserError(
@@ -142,9 +128,7 @@ async def _step_limit(
     return list(cast("list[Any]", data)[: int(n)])
 
 
-async def _step_navigate(
-    params: Any, data: Any, ctx: StepContext
-) -> Any:
+async def _step_navigate(params: Any, data: Any, ctx: StepContext) -> Any:
     if ctx.browser is None:
         msg = "navigate step requires a browser context"
         raise AgentBrowserError(
@@ -157,9 +141,7 @@ async def _step_navigate(
     return data
 
 
-async def _step_evaluate(
-    params: Any, data: Any, ctx: StepContext
-) -> Any:
+async def _step_evaluate(params: Any, data: Any, ctx: StepContext) -> Any:
     if ctx.browser is None:
         msg = "evaluate step requires a browser context"
         raise AgentBrowserError(

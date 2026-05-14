@@ -31,8 +31,7 @@ async def execute_pipeline(
                 raise AgentBrowserError(
                     error="pipeline_unknown_step",
                     hint=f"Unknown pipeline step '{op}' at index {i}.",
-                    action="check available steps: "
-                    + ", ".join(sorted(STEP_REGISTRY)),
+                    action="check available steps: " + ", ".join(sorted(STEP_REGISTRY)),
                 )
             log.debug("pipeline.step", op=op, index=i)
             data = await handler(params, data, ctx)

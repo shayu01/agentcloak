@@ -15,13 +15,33 @@ _SKIP_RESOURCE_TYPES = frozenset(
 )
 
 _SKIP_EXTENSIONS = frozenset(
-    {".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
-     ".woff", ".woff2", ".ttf", ".eot", ".ico", ".mp4", ".webp"}
+    {
+        ".js",
+        ".css",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+        ".ico",
+        ".mp4",
+        ".webp",
+    }
 )
 
 _RECORDABLE_CONTENT_TYPES = frozenset(
-    {"application/json", "text/html", "text/plain", "text/xml",
-     "application/xml", "application/x-www-form-urlencoded"}
+    {
+        "application/json",
+        "text/html",
+        "text/plain",
+        "text/xml",
+        "application/xml",
+        "application/x-www-form-urlencoded",
+    }
 )
 
 
@@ -118,9 +138,9 @@ class CaptureStore:
     def api_entries(self) -> list[CaptureEntry]:
         """Return only JSON API entries (filtered for pattern analysis)."""
         return [
-            e for e in self._entries
-            if _is_recordable_content(e.content_type)
-            and e.status > 0
+            e
+            for e in self._entries
+            if _is_recordable_content(e.content_type) and e.status > 0
         ]
 
     def find_latest(self, url: str, method: str = "GET") -> CaptureEntry | None:

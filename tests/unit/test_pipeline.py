@@ -126,12 +126,14 @@ class TestPipelineEngine:
         assert exc_info.value.error == "pipeline_unknown_step"
 
     async def test_select_then_map(self) -> None:
-        mock_client, _ = _make_httpx_mocks({
-            "items": [
-                {"id": 1, "title": "First"},
-                {"id": 2, "title": "Second"},
-            ]
-        })
+        mock_client, _ = _make_httpx_mocks(
+            {
+                "items": [
+                    {"id": 1, "title": "First"},
+                    {"id": 2, "title": "Second"},
+                ]
+            }
+        )
 
         pipeline = (
             {"fetch": {"url": "https://api.example.com/items"}},
@@ -140,7 +142,10 @@ class TestPipelineEngine:
             {"limit": "1"},
         )
 
-        with patch("agentcloak.adapters.pipeline.steps.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "agentcloak.adapters.pipeline.steps.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = await execute_pipeline(pipeline, args={})
 
         assert result == [{"id": 1, "name": "First"}]

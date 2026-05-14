@@ -78,9 +78,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             params: dict[str, str] = {}
             if domain:
                 params["domain"] = domain
-            result = await bridge.request(
-                "GET", "/capture/analyze", params=params
-            )
+            result = await bridge.request("GET", "/capture/analyze", params=params)
         else:
             result = await bridge.request("GET", "/capture/status")
         return bridge.format_result(result)

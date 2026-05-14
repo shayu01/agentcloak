@@ -201,8 +201,11 @@ def profile_launch(
 
     if background:
         cmd = [
-            sys.executable, "-m", "agentcloak.daemon",
-            "--profile", name,
+            sys.executable,
+            "-m",
+            "agentcloak.daemon",
+            "--profile",
+            name,
         ]
         if host:
             cmd.extend(["--host", host])

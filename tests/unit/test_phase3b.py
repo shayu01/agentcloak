@@ -91,29 +91,21 @@ class TestMDNS:
             assert _has_zeroconf() is False
 
     def test_discover_daemon_without_zeroconf(self) -> None:
-        with patch(
-            "agentcloak.core.discovery._has_zeroconf", return_value=False
-        ):
+        with patch("agentcloak.core.discovery._has_zeroconf", return_value=False):
             assert discover_daemon() is None
 
     def test_register_daemon_without_zeroconf(self) -> None:
-        with patch(
-            "agentcloak.core.discovery._has_zeroconf", return_value=False
-        ):
+        with patch("agentcloak.core.discovery._has_zeroconf", return_value=False):
             assert register_daemon(9222) is False
 
 
 class TestPyInstallerSpec:
     def test_build_script_exists(self) -> None:
-        script = (
-            Path(__file__).parent.parent.parent / "scripts" / "build_bridge.py"
-        )
+        script = Path(__file__).parent.parent.parent / "scripts" / "build_bridge.py"
         assert script.is_file()
 
     def test_build_script_is_valid_python(self) -> None:
-        script = (
-            Path(__file__).parent.parent.parent / "scripts" / "build_bridge.py"
-        )
+        script = Path(__file__).parent.parent.parent / "scripts" / "build_bridge.py"
         compile(script.read_text(), str(script), "exec")
 
 

@@ -40,8 +40,7 @@ class AdapterRegistry:
     def list_by_site(self, site: str) -> list[AdapterEntry]:
         prefix = f"{site}/"
         return [
-            e for e in self._entries.values()
-            if e.meta.full_name.startswith(prefix)
+            e for e in self._entries.values() if e.meta.full_name.startswith(prefix)
         ]
 
     def __len__(self) -> int:

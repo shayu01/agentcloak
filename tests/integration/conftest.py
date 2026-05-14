@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-import pytest
+    import pytest
+
 import pytest_asyncio
 from aiohttp import web
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from agentcloak.adapters.context import AdapterContext
+from typing import TYPE_CHECKING
+
 from agentcloak.adapters.registry import AdapterRegistry, adapter, get_registry
+
+if TYPE_CHECKING:
+    from agentcloak.adapters.context import AdapterContext
 from agentcloak.adapters.types import AdapterEntry, AdapterMeta, Arg
 from agentcloak.core.types import Strategy
 
@@ -49,7 +53,10 @@ class TestAdapterMeta:
 
     def test_navigate_before_intercept(self) -> None:
         meta = AdapterMeta(
-            site="xhs", name="search", strategy=Strategy.INTERCEPT, domain="xiaohongshu.com"
+            site="xhs",
+            name="search",
+            strategy=Strategy.INTERCEPT,
+            domain="xiaohongshu.com",
         )
         assert meta.navigate_before is None
 

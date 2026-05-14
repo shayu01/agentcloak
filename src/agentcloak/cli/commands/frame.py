@@ -34,12 +34,8 @@ def frame_focus(
     name: str | None = typer.Option(
         None, "--name", "-n", help="Frame name to switch to."
     ),
-    url: str | None = typer.Option(
-        None, "--url", help="URL substring to match frame."
-    ),
-    main: bool = typer.Option(
-        False, "--main", help="Switch back to main frame."
-    ),
+    url: str | None = typer.Option(None, "--url", help="URL substring to match frame."),
+    main: bool = typer.Option(False, "--main", help="Switch back to main frame."),
 ) -> None:
     """Switch focus to a frame."""
     if not main and name is None and url is None:

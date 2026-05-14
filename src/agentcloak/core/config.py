@@ -127,8 +127,7 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
     cfg.log_level = _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
 
     cfg.action_timeout = int(
-        _env("ACTION_TIMEOUT")
-        or browser.get("action_timeout", cfg.action_timeout)
+        _env("ACTION_TIMEOUT") or browser.get("action_timeout", cfg.action_timeout)
     )
     cfg.batch_settle_timeout = int(
         _env("BATCH_SETTLE_TIMEOUT")

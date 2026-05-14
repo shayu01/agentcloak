@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 # -- Pipeline mode: public API, no browser needed --
 
+
 @adapter(
     site="httpbin",
     name="headers",

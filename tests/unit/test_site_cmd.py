@@ -37,6 +37,7 @@ class TestSiteInfo:
     def setup_method(self) -> None:
         get_registry().clear()
         from agentcloak.adapters.discovery import discover_adapters
+
         discover_adapters()
 
     def test_info_existing(self) -> None:
@@ -61,6 +62,7 @@ class TestSiteRun:
     def setup_method(self) -> None:
         get_registry().clear()
         from agentcloak.adapters.discovery import discover_adapters
+
         discover_adapters()
 
     def test_run_browser_required_adapter_fails_without_daemon(self) -> None:

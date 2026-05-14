@@ -200,10 +200,19 @@ class PatternAnalyzer:
 
             if entry.request_body:
                 try:
-                    req_ct = next(
-                        (v for k, v in entry.request_headers.items() if k.lower() == "content-type"),
-                        "",
-                    ).split(";", 1)[0].strip().lower()
+                    req_ct = (
+                        next(
+                            (
+                                v
+                                for k, v in entry.request_headers.items()
+                                if k.lower() == "content-type"
+                            ),
+                            "",
+                        )
+                        .split(";", 1)[0]
+                        .strip()
+                        .lower()
+                    )
                     if req_ct == "application/x-www-form-urlencoded":
                         parsed_qs = parse_qs(entry.request_body, keep_blank_values=True)
                         body_obj: Any = {

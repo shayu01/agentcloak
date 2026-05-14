@@ -42,7 +42,7 @@ class TestRender:
         ctx = {"args": {}}
         try:
             render("{args.missing}", ctx)
-            assert False, "should have raised"
+            raise AssertionError("should have raised")
         except KeyError:
             pass
 
@@ -58,9 +58,7 @@ class TestRenderDeep:
 
     def test_dict(self) -> None:
         ctx = {"args": {"title": "Test", "score": 42}}
-        result = render_deep(
-            {"title": "{args.title}", "score": "{args.score}"}, ctx
-        )
+        result = render_deep({"title": "{args.title}", "score": "{args.score}"}, ctx)
         assert result == {"title": "Test", "score": 42}
 
     def test_list(self) -> None:
@@ -70,9 +68,7 @@ class TestRenderDeep:
 
     def test_nested_structure(self) -> None:
         ctx = {"args": {"url": "https://example.com"}}
-        result = render_deep(
-            {"fetch": {"url": "{args.url}", "method": "GET"}}, ctx
-        )
+        result = render_deep({"fetch": {"url": "{args.url}", "method": "GET"}}, ctx)
         assert result == {"fetch": {"url": "https://example.com", "method": "GET"}}
 
     def test_non_template_values_preserved(self) -> None:
