@@ -35,14 +35,56 @@ The daemon starts automatically on your first command. It manages browser instan
 
 ## Configuration
 
-Config file: `~/.config/agentcloak/config.toml` (auto-created on first run).
+Config file: `~/.agentcloak/config.toml`. Precedence: env vars > config.toml > defaults.
 
-Key settings:
-- `humanize = true` — enable human-like mouse/keyboard timing
-- `action_timeout = 30000` — default action timeout (ms)
-- `batch_settle_timeout = 500` — settle time between batch actions (ms)
+```toml
+[daemon]
+host = "127.0.0.1"        # daemon bind address
+port = 18765               # daemon port (auto-increments if busy)
 
-Environment variable overrides: `AGENTCLOAK_HUMANIZE=1`, `AGENTCLOAK_ACTION_TIMEOUT=60000`.
+[browser]
+default_tier = "auto"      # "auto" (CloakBrowser) | "cloak" | "playwright"
+default_profile = ""       # auto-launch this profile
+viewport_width = 1280
+viewport_height = 720
+navigation_timeout = 30    # seconds
+action_timeout = 30000     # ms, per-action timeout
+batch_settle_timeout = 5000 # ms, settle between batch actions
+humanize = false           # human-like mouse/keyboard timing
+idle_timeout_min = 0       # auto-shutdown after idle (0 = disabled)
+stop_on_exit = false       # stop daemon when CLI exits
+log_level = "warning"      # debug | info | warning | error
+
+[security]
+domain_whitelist = []       # glob patterns, e.g. ["*.github.com", "example.com"]
+domain_blacklist = []       # blocked domains
+content_scan = false        # scan page content against patterns
+content_scan_patterns = []  # regex patterns for content scanning
+```
+
+### Environment Variables
+
+All settings can be overridden with `AGENTCLOAK_` prefix:
+
+| Variable | Example |
+|----------|---------|
+| `AGENTCLOAK_HOST` | `0.0.0.0` |
+| `AGENTCLOAK_PORT` | `9000` |
+| `AGENTCLOAK_DEFAULT_TIER` | `playwright` |
+| `AGENTCLOAK_DEFAULT_PROFILE` | `my-session` |
+| `AGENTCLOAK_VIEWPORT_WIDTH` | `1920` |
+| `AGENTCLOAK_VIEWPORT_HEIGHT` | `1080` |
+| `AGENTCLOAK_NAVIGATION_TIMEOUT` | `60` |
+| `AGENTCLOAK_ACTION_TIMEOUT` | `60000` |
+| `AGENTCLOAK_BATCH_SETTLE_TIMEOUT` | `1000` |
+| `AGENTCLOAK_HUMANIZE` | `true` |
+| `AGENTCLOAK_IDLE_TIMEOUT_MIN` | `30` |
+| `AGENTCLOAK_STOP_ON_EXIT` | `true` |
+| `AGENTCLOAK_LOG_LEVEL` | `debug` |
+| `AGENTCLOAK_DOMAIN_WHITELIST` | `*.github.com,example.com` |
+| `AGENTCLOAK_DOMAIN_BLACKLIST` | `evil.com` |
+| `AGENTCLOAK_CONTENT_SCAN` | `true` |
+| `AGENTCLOAK_CONTENT_SCAN_PATTERNS` | `password=.*,ssn:\d+` |
 
 ## Daemon Management
 
