@@ -221,32 +221,58 @@ Playwright API 已支持，暴露到 BrowserContext Protocol → daemon → CLI/
 - 推后项: jshook 松耦合（另开 Skill），Camoufox 后端，network route 拦截，drag & drop，剪贴板
 - Ref: `reference/chrome-devtools-mcp`（CLI 自动生成、Skill 拆分、includeSnapshot）, `reference/open-codex-browser-use`（tab group、session lifecycle）, `reference/pinchtab`（eN ref、snapshot diff、multi-frame）, `reference/GenericAgent`（alarms keepalive、双执行路径、$N batch）
 
-#### Phase 5i: 端到端测试 + 发布
+#### Phase 5i: 工程基础 + 接口审查 + 发布
 
-测试与稳定性：
-- [ ] daemon + 真实浏览器集成测试
-- [ ] 错误恢复（daemon 崩溃重连、浏览器意外关闭）
-- [ ] CLI / MCP 能力一致性检查（自动化验证两侧参数和输出格式对齐）
+CI / 工程基础 (done)：
+- [x] GitHub Actions CI（ruff + pyright + pytest unit 3.12/3.13 matrix + integration + build + pip-audit）
+- [x] MIT LICENSE 文件
+- [x] 全量 lint/format 清理（120+ 文件）
 
-CI / 工程基础：
-- [ ] GitHub Actions CI（ruff + pyright + pytest unit + build check）
-- [ ] 独立 LICENSE 文件（MIT）
-- [ ] SECURITY.md（威胁模型、漏洞报告方式、cookie/profile/bridge 安全边界）
+CLI / MCP 接口审查 (done)：
+- [x] `open` → `navigate`（MCP 生态共识对齐）
+- [x] `js execute-js` → `js evaluate`（MCP 生态共识对齐）
+- [x] `adapter`/`site` → **spell** 全链路重命名（内部代码 + 外部接口 + 文档，cloak+spell 品牌）
+- [x] 删除 `browser state`（被 snapshot+screenshot+network 完全覆盖，Phase 0 遗留）
+- [x] readOnlyHint 确认已标注（所有 MCP 工具）
+- [x] `scripts/check_consistency.py` 自动化一致性校验（34 routes, 23 MCP tools, 18 CLI groups）集成 CI
 
-CLI / MCP 接口审查：
-- [ ] CLI 命令名和参数一致性审查（`navigate` 为主命令名，高频参数统一为选项风格）
-- [ ] MCP 工具名和参数一致性审查（与 CLI 对齐，参数命名统一）
-- [ ] agent 易用性测试（不加载 Skill 的情况下，agent 能否凭直觉正确使用命令）
-
-文档与发布：
+文档与发布（待做）：
 - [ ] README 拆分（README 保持轻量 quickstart，长内容迁到 `docs/`）
-- [ ] Skill 文件 final packaging（反映 Phase 5e-5h 全部新能力）
-- [ ] Demo 素材（GIF / asciinema：CLI 完整案例 + MCP 集成案例）
-- [ ] 稳定性矩阵（各后端 × 各平台的支持状态表）
-- [ ] PyPI 发布 + GitHub Releases
-- [ ] Docker 分发（基于 CloakBrowser 官方 image `cloakhq/cloakbrowser`）
-- Deliverable: **production-ready release with CI, docs, and ecosystem readiness**
+- [ ] Skill 文件拆分（主文件精简，详细内容拆到 `references/` 按需加载）
+- [ ] PyPI v0.2.0 发布 + GitHub Releases
+- [ ] SECURITY.md（简版，漏洞报告方式）
+
+推后项：
+- Demo 素材（GIF / asciinema）
+- 稳定性矩阵（各后端 × 各平台支持状态表）
+- Docker 分发（基于 `cloakhq/cloakbrowser`）
+- daemon + 真实浏览器集成测试（CI 里配浏览器环境成本高，手动验证够用）
+- 错误恢复测试（推到用户反馈驱动）
+
+- Deliverable: **clean API surface, CI, consistency checks, ready for v0.2.0 release**
 - Ref: `research/neo-analyzer-wireshark.md`（Wireshark-MCP installer 模式）
+
+#### Phase 6: 架构优化 + 生态扩展
+
+CLI / MCP 自动生成（从 Phase 5i 决策 D7 推出）：
+- [ ] 共享接口定义层（daemon route 元数据或独立定义文件）
+- [ ] CLI 命令从定义自动生成（替代手写 typer）
+- [ ] MCP 工具从定义自动生成（替代手写 FastMCP）
+- [ ] 新增功能只写一次定义，三层自动对齐
+- 依据：Phase 5i 审查发现 CLI/MCP/daemon 三层各自手写易出不一致，校验脚本是止损方案，自动生成是根本解决
+
+jshook 松耦合（从 Phase 5h 推出）：
+- [ ] 拆除旧 6 patch 插件注入模式
+- [ ] 独立运行 + CDP 共享协调
+- [ ] Skill 文件 jshook 协调指导
+
+生态扩展：
+- [ ] 多平台分发配置（.claude-plugin, .mcp.json, gemini-extension.json 等）
+- [ ] Spell 社区共享（用户贡献 spell 发布 + 安装）
+- [ ] Camoufox Firefox 后端
+- [ ] network route 拦截（`page.route()`）
+- [ ] drag & drop、剪贴板
+- Deliverable: **自动生成消除手写不一致，jshook 协作稳定，生态开放**
 
 ---
 
