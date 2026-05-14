@@ -335,3 +335,56 @@ class DaemonClient:
         if url:
             body["url"] = url
         return await self._request("POST", "/cookies/export", json_body=body)
+
+    # Phase 5g: dialog, wait, upload, frame
+
+    async def dialog_status(self) -> dict[str, Any]:
+        return await self._request("GET", "/dialog/status")
+
+    async def dialog_handle(
+        self, action_type: str, *, text: str | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"action": action_type}
+        if text is not None:
+            body["text"] = text
+        return await self._request("POST", "/dialog/handle", json_body=body)
+
+    async def wait(
+        self,
+        *,
+        condition: str,
+        value: str = "",
+        timeout: int = 30000,
+        state: str = "visible",
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "condition": condition,
+            "value": value,
+            "timeout": timeout,
+            "state": state,
+        }
+        return await self._request("POST", "/wait", json_body=body)
+
+    async def upload(
+        self, *, index: int, files: list[str]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "POST", "/upload", json_body={"index": index, "files": files}
+        )
+
+    async def frame_list(self) -> dict[str, Any]:
+        return await self._request("GET", "/frame/list")
+
+    async def frame_focus(
+        self,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+        main: bool = False,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"main": main}
+        if name is not None:
+            body["name"] = name
+        if url is not None:
+            body["url"] = url
+        return await self._request("POST", "/frame/focus", json_body=body)

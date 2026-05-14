@@ -89,9 +89,12 @@ class SecureBrowserContext:
         actions: list[dict[str, Any]],
         *,
         sleep: float = 0.0,
+        settle_timeout: int = 5000,
     ) -> dict[str, Any]:
         if not self._content_scan or not self._patterns:
-            return await self._inner.action_batch(actions, sleep=sleep)
+            return await self._inner.action_batch(
+                actions, sleep=sleep, settle_timeout=settle_timeout
+            )
 
         results: list[dict[str, Any]] = []
         total = len(actions)
@@ -138,6 +141,43 @@ class SecureBrowserContext:
                 await asyncio.sleep(sleep)
 
         return {"results": results, "completed": total, "total": total}
+
+    async def dialog_status(self) -> Any:
+        return await self._inner.dialog_status()
+
+    async def dialog_handle(
+        self, action_type: str, *, text: str | None = None
+    ) -> dict[str, Any]:
+        return await self._inner.dialog_handle(action_type, text=text)
+
+    async def wait(
+        self,
+        *,
+        condition: str,
+        value: str = "",
+        timeout: int = 30000,
+        state: str = "visible",
+    ) -> dict[str, Any]:
+        return await self._inner.wait(
+            condition=condition, value=value, timeout=timeout, state=state
+        )
+
+    async def upload(
+        self, index: int, files: list[str]
+    ) -> dict[str, Any]:
+        return await self._inner.upload(index, files)
+
+    async def frame_list(self) -> list[Any]:
+        return await self._inner.frame_list()
+
+    async def frame_focus(
+        self,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+        main: bool = False,
+    ) -> dict[str, Any]:
+        return await self._inner.frame_focus(name=name, url=url, main=main)
 
     async def tab_list(self) -> list[dict[str, Any]]:
         return await self._inner.tab_list()

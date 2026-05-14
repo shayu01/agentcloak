@@ -20,7 +20,9 @@ from agentcloak.browser.state import (
     CONTEXT_ROLES,
     INTERACTIVE_ROLES,
     ElementRef,
+    FrameInfo,
     PageSnapshot,
+    PendingDialog,
     TabInfo,
 )
 from agentcloak.core.capture import CaptureEntry, CaptureStore
@@ -137,16 +139,102 @@ class PlaywrightContext:
         # Progressive loading cache (R4)
         self._cached_lines: list[tuple[int, str, int | None]] = []
         self._cached_mode: str = ""
+        # R0: Proactive State Feedback — pending network request counter
+        self._pending_request_count: int = 0
+        # R1: Dialog handling — pending dialog state
+        self._pending_dialog: PendingDialog | None = None
+        self._dialog_object: Any = None  # raw Playwright Dialog for accept/dismiss
+        # R5: Frame switching — active frame (None = main frame)
+        self._active_frame: Any = None
+        # R0: Proactive feedback event capture — per-action transient state
+        self._last_navigation_event: dict[str, str] | None = None
+        self._last_new_tab_event: dict[str, Any] | None = None
+        self._last_download_event: dict[str, str] | None = None
+        self._last_auto_dialog: dict[str, str] | None = None
         self._setup_network_listeners(page)
+        self._setup_feedback_listeners(page)
 
     @property
     def _page(self) -> Any:
         """Return the active tab's Page object."""
         return self._tabs[self._active_tab]
 
+    @property
+    def _target_frame(self) -> Any:
+        """Return the active frame (or main page) for actions/snapshots."""
+        if self._active_frame is not None:
+            return self._active_frame
+        return self._page
+
     def _setup_network_listeners(self, page: Any | None = None) -> None:
         target = page if page is not None else self._page
         target.on("response", self._on_response)
+
+    def _setup_feedback_listeners(self, page: Any | None = None) -> None:
+        """Register R0 proactive feedback event listeners on a page."""
+        target = page if page is not None else self._page
+        target.on("request", self._on_request_start)
+        target.on("requestfinished", self._on_request_end)
+        target.on("requestfailed", self._on_request_end)
+        target.on("dialog", self._on_dialog)
+        target.on("framenavigated", self._on_frame_navigated)
+        target.on("download", self._on_download)
+
+    def _on_request_start(self, _request: Any) -> None:
+        self._pending_request_count += 1
+
+    def _on_request_end(self, _request: Any) -> None:
+        if self._pending_request_count > 0:
+            self._pending_request_count -= 1
+
+    def _on_dialog(self, dialog: Any) -> None:
+        dtype = dialog.type
+        if dtype in ("alert", "beforeunload"):
+            # Auto-accept, record in transient state
+            self._last_auto_dialog = {
+                "type": dtype,
+                "message": dialog.message,
+            }
+            _accept_task = asyncio.ensure_future(dialog.accept())
+            self._pending_captures.add(_accept_task)
+            _accept_task.add_done_callback(
+                self._pending_captures.discard
+            )
+            logger.info(
+                "dialog_auto_accepted",
+                dialog_type=dtype,
+                message=dialog.message[:100],
+            )
+        else:
+            # confirm / prompt — store as pending for agent
+            self._pending_dialog = PendingDialog(
+                dialog_type=dtype,
+                message=dialog.message,
+                default_value=dialog.default_value or "",
+                url=self._page.url,
+            )
+            self._dialog_object = dialog
+            logger.info(
+                "dialog_pending",
+                dialog_type=dtype,
+                message=dialog.message[:100],
+            )
+
+    def _on_frame_navigated(self, frame: Any) -> None:
+        # Only track main frame navigations for proactive feedback
+        try:
+            if frame == self._page.main_frame:
+                self._last_navigation_event = {
+                    "url": frame.url,
+                }
+        except Exception:
+            pass
+
+    def _on_download(self, download: Any) -> None:
+        with contextlib.suppress(Exception):
+            self._last_download_event = {
+                "filename": download.suggested_filename,
+            }
 
     @property
     def capture_store(self) -> CaptureStore:
@@ -262,6 +350,13 @@ class PlaywrightContext:
         new_seq = self._seq_counter.increment_action()
         self._ring_buffer.append(
             SeqEvent(seq=new_seq, kind="navigate", data={"url": url})
+        )
+        # R6: audit logging for navigation
+        logger.info(
+            "audit_action",
+            action="navigate",
+            seq=new_seq,
+            url=url,
         )
 
         status = resp.status if resp else 0
@@ -811,9 +906,62 @@ class PlaywrightContext:
             action="the page may have changed — run 'snapshot' to refresh, then retry",
         )
 
+    def _collect_feedback(self, result: dict[str, Any]) -> None:
+        """R0: Attach proactive state feedback fields to action result."""
+        if self._pending_request_count > 0:
+            result["pending_requests"] = self._pending_request_count
+        if self._pending_dialog is not None:
+            result["dialog"] = {
+                "type": self._pending_dialog.dialog_type,
+                "message": self._pending_dialog.message,
+            }
+            if self._pending_dialog.default_value:
+                result["dialog"]["default_value"] = (
+                    self._pending_dialog.default_value
+                )
+        if self._last_navigation_event is not None:
+            result["navigation"] = self._last_navigation_event
+            self._last_navigation_event = None
+        if self._last_new_tab_event is not None:
+            result["new_tab"] = self._last_new_tab_event
+            self._last_new_tab_event = None
+        if self._last_download_event is not None:
+            result["download"] = self._last_download_event
+            self._last_download_event = None
+
+    def _check_dialog_blocked(self) -> dict[str, Any] | None:
+        """R1: If a pending dialog exists, return blocked error dict."""
+        if self._pending_dialog is not None:
+            d = self._pending_dialog
+            return {
+                "ok": False,
+                "error": "blocked_by_dialog",
+                "seq": self._seq_counter.value,
+                "dialog": {
+                    "type": d.dialog_type,
+                    "message": d.message,
+                    **(
+                        {"default_value": d.default_value}
+                        if d.default_value
+                        else {}
+                    ),
+                },
+                "hint": "A dialog is pending — handle it before continuing",
+                "action": "use 'dialog accept' or 'dialog dismiss'",
+            }
+        return None
+
     async def action(self, kind: str, target: str, **kw: Any) -> dict[str, Any]:
+        # R1: block if there is a pending dialog
+        blocked = self._check_dialog_blocked()
+        if blocked is not None:
+            return blocked
+
         pre_url = self._page.url
-        valid_kinds = {"click", "fill", "type", "scroll", "hover", "select", "press"}
+        valid_kinds = {
+            "click", "fill", "type", "scroll", "hover",
+            "select", "press", "keydown", "keyup",
+        }
         if kind not in valid_kinds:
             raise BackendError(
                 error="invalid_action_kind",
@@ -829,12 +977,19 @@ class PlaywrightContext:
             "hover": self._action_hover,
             "select": self._action_select,
             "press": self._action_press,
+            "keydown": self._action_keydown,
+            "keyup": self._action_keyup,
         }[kind]
+
+        # R0: reset per-action transient state before executing
+        self._last_navigation_event = None
+        self._last_new_tab_event = None
+        self._last_download_event = None
 
         result = await handler(target, **kw)
 
         with contextlib.suppress(Exception):
-            await self._page.wait_for_load_state("domcontentloaded", timeout=800)
+            await self._page.wait_for_load_state("domcontentloaded", timeout=2000)
         with contextlib.suppress(Exception):
             await self._page.evaluate(
                 "document.querySelectorAll('[data-cloak-ref]')"
@@ -842,7 +997,10 @@ class PlaywrightContext:
             )
 
         post_url = self._page.url
-        caused_navigation = post_url != pre_url
+        caused_navigation = (
+            post_url != pre_url
+            or self._last_navigation_event is not None
+        )
 
         new_seq = self._seq_counter.increment_action()
         self._ring_buffer.append(
@@ -853,12 +1011,20 @@ class PlaywrightContext:
             )
         )
 
+        # R6: audit logging for high-risk actions
+        if kind in ("fill", "select"):
+            current_val = kw.get("text") or kw.get("value") or kw.get("label")
+            if current_val is not None:
+                result["current_value"] = str(current_val)
+
         result["ok"] = True
         result["seq"] = new_seq
         result["action"] = kind
-        result["caused_navigation"] = caused_navigation
         if caused_navigation:
+            result["caused_navigation"] = True
             result["new_url"] = post_url
+        # R0: attach proactive state feedback
+        self._collect_feedback(result)
         return result
 
     async def _action_click(self, target: str, **kw: Any) -> dict[str, Any]:
@@ -1008,17 +1174,266 @@ class PlaywrightContext:
         await self._page.keyboard.press(str(key))
         return {"pressed": True, "key": key}
 
+    async def _action_keydown(self, target: str, **kw: Any) -> dict[str, Any]:
+        key = kw.get("key", "")
+        if not key:
+            raise BackendError(
+                error="keydown_missing_key",
+                hint="keydown requires 'key' parameter",
+                action="provide 'key' (e.g. 'Shift', 'Control', 'Alt')",
+            )
+        await self._page.keyboard.down(str(key))
+        return {"keydown": True, "key": key}
+
+    async def _action_keyup(self, target: str, **kw: Any) -> dict[str, Any]:
+        key = kw.get("key", "")
+        if not key:
+            raise BackendError(
+                error="keyup_missing_key",
+                hint="keyup requires 'key' parameter",
+                action="provide 'key' (e.g. 'Shift', 'Control', 'Alt')",
+            )
+        await self._page.keyboard.up(str(key))
+        return {"keyup": True, "key": key}
+
     def _get_ref(self, index: int) -> str:
         """Return a human-readable ref string for an element index."""
         return f"[{index}]"
+
+    # ── R1: Dialog handling ──
+
+    async def dialog_status(self) -> PendingDialog | None:
+        return self._pending_dialog
+
+    async def dialog_handle(
+        self, action_type: str, *, text: str | None = None
+    ) -> dict[str, Any]:
+        if self._pending_dialog is None:
+            return {"ok": True, "handled": False, "message": "no pending dialog"}
+
+        dialog_info = {
+            "type": self._pending_dialog.dialog_type,
+            "message": self._pending_dialog.message,
+        }
+
+        if self._dialog_object is not None:
+            try:
+                if action_type == "accept":
+                    if text is not None:
+                        await self._dialog_object.accept(text)
+                    else:
+                        await self._dialog_object.accept()
+                else:
+                    await self._dialog_object.dismiss()
+            except Exception as exc:
+                logger.debug("dialog_handle_error", error=str(exc))
+
+        self._pending_dialog = None
+        self._dialog_object = None
+
+        new_seq = self._seq_counter.increment_action()
+        self._ring_buffer.append(
+            SeqEvent(
+                seq=new_seq,
+                kind="dialog",
+                data={"action": action_type, **dialog_info},
+            )
+        )
+        return {
+            "ok": True,
+            "handled": True,
+            "action": action_type,
+            "dialog": dialog_info,
+            "seq": new_seq,
+        }
+
+    # ── R2: Conditional wait ──
+
+    async def wait(
+        self,
+        *,
+        condition: str,
+        value: str = "",
+        timeout: int = 30000,
+        state: str = "visible",
+    ) -> dict[str, Any]:
+        import time
+
+        t0 = time.monotonic()
+        target = self._target_frame
+
+        try:
+            if condition == "selector":
+                await target.wait_for_selector(
+                    value, state=state, timeout=timeout
+                )
+            elif condition == "url":
+                await self._page.wait_for_url(value, timeout=timeout)
+            elif condition == "load":
+                await self._page.wait_for_load_state(value, timeout=timeout)
+            elif condition == "js":
+                await self._page.wait_for_function(value, timeout=timeout)
+            elif condition == "ms":
+                await asyncio.sleep(int(value) / 1000)
+            else:
+                raise BackendError(
+                    error="invalid_wait_condition",
+                    hint=f"Unknown condition: '{condition}'",
+                    action="use one of: selector, url, load, js, ms",
+                )
+        except Exception as exc:
+            if "timeout" in str(exc).lower():
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                raise BrowserTimeoutError(
+                    error="wait_timeout",
+                    hint=f"Wait condition '{condition}' timed out after {timeout}ms",
+                    action="increase timeout or check the condition",
+                ) from exc
+            if isinstance(exc, BackendError):
+                raise
+            raise BackendError(
+                error="wait_failed",
+                hint=str(exc),
+                action="check the wait condition value",
+            ) from exc
+
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        new_seq = self._seq_counter.increment_action()
+        self._ring_buffer.append(
+            SeqEvent(
+                seq=new_seq,
+                kind="wait",
+                data={"condition": condition, "value": value},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "wait",
+            "condition": condition,
+            "elapsed_ms": elapsed_ms,
+            "seq": new_seq,
+        }
+
+    # ── R4: File upload ──
+
+    async def upload(
+        self, index: int, files: list[str]
+    ) -> dict[str, Any]:
+        element = await self._resolve_element(index)
+        validated: list[str] = []
+        for f in files:
+            p = Path(f)
+            if not p.is_file():
+                raise BackendError(
+                    error="upload_file_not_found",
+                    hint=f"File not found: {f}",
+                    action="check the file path and permissions",
+                )
+            validated.append(str(p.resolve()))
+
+        await element.set_input_files(validated)
+
+        new_seq = self._seq_counter.increment_action()
+        self._ring_buffer.append(
+            SeqEvent(
+                seq=new_seq,
+                kind="upload",
+                data={"index": index, "files": [Path(f).name for f in validated]},
+            )
+        )
+        # R6: audit log
+        logger.info(
+            "audit_action",
+            action="upload",
+            seq=new_seq,
+            files=[Path(f).name for f in validated],
+            ref=f"[{index}]",
+            url=self._page.url,
+        )
+        return {
+            "ok": True,
+            "action": "upload",
+            "ref": f"[{index}]",
+            "files": [Path(f).name for f in validated],
+            "seq": new_seq,
+        }
+
+    # ── R5: Frame switching ──
+
+    async def frame_list(self) -> list[FrameInfo]:
+        frames = self._page.frames
+        result: list[FrameInfo] = []
+        for frame in frames:
+            is_current = frame == (
+                self._active_frame if self._active_frame is not None
+                else self._page.main_frame
+            )
+            is_main = frame == self._page.main_frame
+            fname = (
+                frame.name or "(main)"
+                if is_main
+                else frame.name or ""
+            )
+            result.append(
+                FrameInfo(
+                    name=fname,
+                    url=frame.url,
+                    is_current=is_current,
+                )
+            )
+        return result
+
+    async def frame_focus(
+        self,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+        main: bool = False,
+    ) -> dict[str, Any]:
+        if main:
+            self._active_frame = None
+            return {
+                "ok": True,
+                "action": "frame_focus",
+                "frame": "(main)",
+                "url": self._page.main_frame.url,
+            }
+
+        target_frame = None
+        if name:
+            target_frame = self._page.frame(name=name)
+        elif url:
+            for frame in self._page.frames:
+                if url in frame.url:
+                    target_frame = frame
+                    break
+
+        if target_frame is None:
+            available = [
+                f.name or f.url[:60] for f in self._page.frames
+            ]
+            raise BackendError(
+                error="frame_not_found",
+                hint=f"No frame matching name={name!r} url={url!r}",
+                action=f"available frames: {available}",
+            )
+
+        self._active_frame = target_frame
+        return {
+            "ok": True,
+            "action": "frame_focus",
+            "frame": target_frame.name or "(unnamed)",
+            "url": target_frame.url,
+        }
 
     async def action_batch(
         self,
         actions: list[dict[str, Any]],
         *,
         sleep: float = 0.0,
+        settle_timeout: int = 5000,
     ) -> dict[str, Any]:
-        """Execute a batch of actions, aborting on URL change."""
+        """Execute a batch of actions with R7 enhancements."""
         results: list[dict[str, Any]] = []
         total = len(actions)
 
@@ -1035,8 +1450,52 @@ class PlaywrightContext:
                 if k not in ("kind", "action", "index", "target")
             }
 
+            # R7: handle 'wait' as batch step
+            if kind == "wait":
+                try:
+                    result = await self.wait(
+                        condition=extra.get("condition", "ms"),
+                        value=str(extra.get("value", "1000")),
+                        timeout=int(extra.get("timeout", 30000)),
+                        state=str(extra.get("state", "visible")),
+                    )
+                except Exception as exc:
+                    result = {"ok": False, "error": str(exc), "action": "wait"}
+                results.append(result)
+                continue
+
+            # R7: read-after-write settle — if previous action had pending
+            # requests and this is a read operation, wait for settle
+            if (
+                i > 0
+                and kind == "snapshot"
+                and results
+                and results[-1].get("pending_requests", 0) > 0
+            ):
+                await self._settle_pending_requests(settle_timeout)
+
             result = await self.action(str(kind), str(target), **extra)
             results.append(result)
+
+            # R7: dialog interruption
+            if result.get("error") == "blocked_by_dialog":
+                remaining = [
+                    {
+                        "index": j,
+                        "kind": actions[j].get(
+                            "kind", actions[j].get("action", "")
+                        ),
+                    }
+                    for j in range(i + 1, total)
+                ]
+                return {
+                    "results": results,
+                    "completed": i,
+                    "total": total,
+                    "aborted_reason": "dialog_pending",
+                    "dialog": result.get("dialog"),
+                    "remaining": remaining,
+                }
 
             if result.get("caused_navigation"):
                 return {
@@ -1050,6 +1509,15 @@ class PlaywrightContext:
                 await asyncio.sleep(sleep)
 
         return {"results": results, "completed": total, "total": total}
+
+    async def _settle_pending_requests(self, timeout_ms: int) -> None:
+        """R7: Wait until pending request count drops to 0 or timeout."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_ms / 1000
+        while self._pending_request_count > 0:
+            if loop.time() >= deadline:
+                break
+            await asyncio.sleep(0.1)
 
     async def evaluate(self, js: str, *, world: str = "main") -> Any:
         if world == "main":
@@ -1067,6 +1535,14 @@ class PlaywrightContext:
         new_seq = self._seq_counter.increment_action()
         self._ring_buffer.append(
             SeqEvent(seq=new_seq, kind="evaluate", data={"js": js[:200]})
+        )
+        # R6: audit logging
+        logger.info(
+            "audit_action",
+            action="evaluate",
+            seq=new_seq,
+            js_length=len(js),
+            url=self._page.url,
         )
         return result
 
@@ -1337,7 +1813,9 @@ class PlaywrightContext:
         self._next_tab_id += 1
         self._tabs[new_id] = new_page
         self._active_tab = new_id
+        self._active_frame = None  # reset frame on tab switch
         self._setup_network_listeners(new_page)
+        self._setup_feedback_listeners(new_page)
 
         result: dict[str, Any] = {"tab_id": new_id}
         if url:
@@ -1378,12 +1856,15 @@ class PlaywrightContext:
             self._next_tab_id += 1
             self._tabs[new_id] = new_page
             self._active_tab = new_id
+            self._active_frame = None
             self._setup_network_listeners(new_page)
+            self._setup_feedback_listeners(new_page)
             return {"closed": tab_id, "auto_created": new_id}
 
         if self._active_tab == tab_id:
             # Switch to the most recent remaining tab
             self._active_tab = max(self._tabs.keys())
+            self._active_frame = None
 
         return {"closed": tab_id}
 
@@ -1399,6 +1880,7 @@ class PlaywrightContext:
                 action="use 'tab list' to see available tab IDs",
             )
         self._active_tab = tab_id
+        self._active_frame = None  # reset frame on tab switch
         page = self._tabs[tab_id]
         try:
             url = page.url

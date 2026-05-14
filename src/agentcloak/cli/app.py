@@ -68,13 +68,17 @@ def _register_commands() -> None:
         cdp,
         cookies_cmd,
         daemon_cmd,
+        dialog,
         doctor,
         fetch,
+        frame,
         js,
         network,
         profile,
         site_cmd,
         tab,
+        upload,
+        wait_cmd,
     )
 
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
@@ -87,7 +91,8 @@ def _register_commands() -> None:
     app.add_typer(
         action.app,
         name="do",
-        help="Page actions: click, fill, type, scroll, hover, select, press.",
+        help="Page actions: click, fill, type, scroll, hover, "
+        "select, press, keydown, keyup.",
     )
     app.add_typer(
         profile.app,
@@ -129,6 +134,26 @@ def _register_commands() -> None:
         name="cdp",
         help="Chrome DevTools Protocol: endpoint.",
     )
+    app.add_typer(
+        dialog.app,
+        name="dialog",
+        help="Dialog handling: status, accept, dismiss.",
+    )
+    app.add_typer(
+        wait_cmd.app,
+        name="wait",
+        help="Conditional waiting: selector, URL, load state, JS, time.",
+    )
+    app.add_typer(
+        upload.app,
+        name="upload",
+        help="File upload to input elements.",
+    )
+    app.add_typer(
+        frame.app,
+        name="frame",
+        help="Frame switching: list, focus.",
+    )
 
 
 _register_commands()
@@ -140,6 +165,8 @@ def _register_shortcuts() -> None:
         do_click,
         do_fill,
         do_hover,
+        do_keydown,
+        do_keyup,
         do_press,
         do_scroll,
         do_select,
@@ -163,6 +190,8 @@ def _register_shortcuts() -> None:
     app.command("scroll", hidden=True)(do_scroll)
     app.command("hover", hidden=True)(do_hover)
     app.command("select", hidden=True)(do_select)
+    app.command("keydown", hidden=True)(do_keydown)
+    app.command("keyup", hidden=True)(do_keyup)
 
 
 _register_shortcuts()

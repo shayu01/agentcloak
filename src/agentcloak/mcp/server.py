@@ -29,10 +29,14 @@ def create_server() -> object:
     from agentcloak.mcp.tools import (
         capture,
         content,
+        dialog,
+        frame,
         interaction,
         management,
         navigation,
         network,
+        upload,
+        wait,
     )
 
     mcp = FastMCP(
@@ -59,6 +63,10 @@ def create_server() -> object:
     network.register(mcp, bridge)
     capture.register(mcp, bridge)
     management.register(mcp, bridge)
+    dialog.register(mcp, bridge)
+    wait.register(mcp, bridge)
+    upload.register(mcp, bridge)
+    frame.register(mcp, bridge)
 
     return mcp
 

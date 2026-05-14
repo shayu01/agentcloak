@@ -169,6 +169,30 @@ def do_press(
     output_json(data, seq=seq)
 
 
+@app.command("keydown")
+def do_keydown(
+    key: str = typer.Option(..., "--key", "-k", help="Key to hold down."),
+) -> None:
+    """Hold a key down (e.g. Shift, Control)."""
+    client = DaemonClient()
+    result = _run(client.action("keydown", key=key))
+    data = result.get("data", result)
+    seq = result.get("seq", data.get("seq", 0))
+    output_json(data, seq=seq)
+
+
+@app.command("keyup")
+def do_keyup(
+    key: str = typer.Option(..., "--key", "-k", help="Key to release."),
+) -> None:
+    """Release a held key."""
+    client = DaemonClient()
+    result = _run(client.action("keyup", key=key))
+    data = result.get("data", result)
+    seq = result.get("seq", data.get("seq", 0))
+    output_json(data, seq=seq)
+
+
 @app.command("batch")
 def do_batch(
     calls_file: Path = typer.Option(

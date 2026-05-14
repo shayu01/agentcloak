@@ -44,14 +44,14 @@ class TestMCPServerCreation:
 
             pytest.skip("mcp package not installed")
 
-    def test_tool_count_is_18(self) -> None:
+    def test_tool_count_is_22(self) -> None:
         try:
             from agentcloak.mcp.server import create_server
 
             mcp = create_server()
             tools = mcp._tool_manager._tools  # type: ignore[union-attr]
-            assert len(tools) == 18, (
-                f"Expected 18 tools, got {len(tools)}: {sorted(tools.keys())}"
+            assert len(tools) == 22, (
+                f"Expected 22 tools, got {len(tools)}: {sorted(tools.keys())}"
             )
         except ImportError:
             import pytest
@@ -98,6 +98,10 @@ class TestMCPServerCreation:
                 "agentcloak_doctor",
                 "agentcloak_tab",
                 "agentcloak_resume",
+                "agentcloak_dialog",
+                "agentcloak_wait",
+                "agentcloak_upload",
+                "agentcloak_frame",
             }
             assert set(tools.keys()) == expected
         except ImportError:

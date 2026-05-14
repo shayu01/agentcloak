@@ -13,8 +13,10 @@ __all__ = [
     "INTERACTIVE_ROLES",
     "BrowserState",
     "ElementRef",
+    "FrameInfo",
     "PageInfo",
     "PageSnapshot",
+    "PendingDialog",
     "TabInfo",
 ]
 
@@ -66,6 +68,25 @@ CONTEXT_ROLES = frozenset(
         "search",
     }
 )
+
+
+@dataclass(frozen=True)
+class PendingDialog:
+    """A dialog that is waiting for agent handling."""
+
+    dialog_type: str
+    message: str
+    default_value: str = ""
+    url: str = ""
+
+
+@dataclass(frozen=True)
+class FrameInfo:
+    """Metadata for a page frame."""
+
+    name: str
+    url: str
+    is_current: bool = False
 
 
 @dataclass(frozen=True)

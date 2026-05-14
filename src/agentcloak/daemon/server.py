@@ -235,6 +235,7 @@ async def start(
     app["resume_writer"] = resume_writer
 
     app["idle_timeout"] = idle_timeout
+    app["batch_settle_timeout"] = cfg.batch_settle_timeout
     import time as _time
 
     app["last_request_time"] = _time.monotonic()

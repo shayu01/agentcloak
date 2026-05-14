@@ -66,6 +66,13 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/profile/list", handle_profile_list)
     app.router.add_post("/profile/create", handle_profile_create)
     app.router.add_post("/profile/delete", handle_profile_delete)
+    # Phase 5g: dialog, wait, upload, frame
+    app.router.add_get("/dialog/status", handle_dialog_status)
+    app.router.add_post("/dialog/handle", handle_dialog_handle)
+    app.router.add_post("/wait", handle_wait)
+    app.router.add_post("/upload", handle_upload)
+    app.router.add_get("/frame/list", handle_frame_list)
+    app.router.add_post("/frame/focus", handle_frame_focus)
 
 
 def _ctx(request: Request) -> Any:
@@ -246,10 +253,15 @@ async def handle_action(request: Request) -> Response:
     extra = {k: v for k, v in body.items() if k not in ("kind", "index", "target")}
     ctx = _ctx(request)
     result = await ctx.action(kind, target, **extra)
+
+    # R0/R1: if blocked_by_dialog, return as error response
+    if result.get("error") == "blocked_by_dialog":
+        return _json(result, status=409)
+
     summary: dict[str, Any] = {"kind": kind, "target": target}
     if kind in ("fill", "type"):
         summary["text"] = extra.get("text", "")
-    elif kind == "press":
+    elif kind in ("press", "keydown", "keyup"):
         summary["key"] = extra.get("key", "")
     elif kind == "scroll":
         summary["direction"] = extra.get("direction", "down")
@@ -263,8 +275,13 @@ async def handle_action_batch(request: Request) -> Response:
     body = await request.json()
     actions: list[dict[str, Any]] = body.get("actions", [])
     sleep: float = body.get("sleep", 0.0)
+    settle_timeout: int = int(
+        body.get("settle_timeout", request.app.get("batch_settle_timeout", 5000))
+    )
     ctx = _ctx(request)
-    result = await ctx.action_batch(actions, sleep=sleep)
+    result = await ctx.action_batch(
+        actions, sleep=sleep, settle_timeout=settle_timeout
+    )
     return _ok(result, seq=ctx.seq)
 
 
@@ -880,6 +897,86 @@ async def handle_profile_create(request: Request) -> Response:
         )
     profile_path.mkdir(parents=True)
     return _json({"ok": True, "created": name})
+
+
+async def handle_dialog_status(request: Request) -> Response:
+    ctx = _ctx(request)
+    dialog = await ctx.dialog_status()
+    if dialog is None:
+        return _ok({"pending": False}, seq=ctx.seq)
+    return _ok(
+        {
+            "pending": True,
+            "dialog": {
+                "type": dialog.dialog_type,
+                "message": dialog.message,
+                "default_value": dialog.default_value,
+                "url": dialog.url,
+            },
+        },
+        seq=ctx.seq,
+    )
+
+
+async def handle_dialog_handle(request: Request) -> Response:
+    body = await request.json()
+    action_type: str = body.get("action", "accept")
+    text: str | None = body.get("text")
+    ctx = _ctx(request)
+    result = await ctx.dialog_handle(action_type, text=text)
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_wait(request: Request) -> Response:
+    body = await request.json()
+    condition: str = body.get("condition", "ms")
+    value: str = str(body.get("value", "1000"))
+    timeout: int = int(body.get("timeout", 30000))
+    state: str = body.get("state", "visible")
+    ctx = _ctx(request)
+    result = await ctx.wait(
+        condition=condition, value=value, timeout=timeout, state=state
+    )
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_upload(request: Request) -> Response:
+    body = await request.json()
+    index: int = body["index"]
+    files: list[str] = body.get("files", [])
+    if not files:
+        return _json(
+            {
+                "ok": False,
+                "error": "missing_files",
+                "hint": "No files provided for upload",
+                "action": "provide 'files' as a list of file paths",
+            },
+            status=400,
+        )
+    ctx = _ctx(request)
+    result = await ctx.upload(index, files)
+    return _ok(result, seq=ctx.seq)
+
+
+async def handle_frame_list(request: Request) -> Response:
+    ctx = _ctx(request)
+    frames = await ctx.frame_list()
+    data = [
+        {"name": f.name, "url": f.url, "is_current": f.is_current}
+        for f in frames
+    ]
+    return _ok({"frames": data, "count": len(data)}, seq=ctx.seq)
+
+
+async def handle_frame_focus(request: Request) -> Response:
+    body = await request.json()
+    name: str | None = body.get("name")
+    url: str | None = body.get("url")
+    main: bool = body.get("main", False)
+    ctx = _ctx(request)
+    result = await ctx.frame_focus(name=name, url=url, main=main)
+    return _ok(result, seq=ctx.seq)
 
 
 async def handle_profile_delete(request: Request) -> Response:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentcloak.browser.state import PageSnapshot
+    from agentcloak.browser.state import FrameInfo, PageSnapshot, PendingDialog
     from agentcloak.core.types import StealthTier
 
 __all__ = ["ActionResult", "BrowserContext", "NetworkRequest"]
@@ -50,6 +50,35 @@ class BrowserContext(Protocol):
     async def raw_cdp(
         self, method: str, params: dict[str, Any] | None = None
     ) -> Any: ...
+
+    async def dialog_status(self) -> PendingDialog | None: ...
+
+    async def dialog_handle(
+        self, action: str, *, text: str | None = None
+    ) -> ActionResult: ...
+
+    async def wait(
+        self,
+        *,
+        condition: str,
+        value: str = "",
+        timeout: int = 30000,
+        state: str = "visible",
+    ) -> ActionResult: ...
+
+    async def upload(
+        self, index: int, files: list[str]
+    ) -> ActionResult: ...
+
+    async def frame_list(self) -> list[FrameInfo]: ...
+
+    async def frame_focus(
+        self,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+        main: bool = False,
+    ) -> ActionResult: ...
 
     async def close(self) -> None: ...
 

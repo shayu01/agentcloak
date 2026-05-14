@@ -8,7 +8,13 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from agentcloak.browser.state import INTERACTIVE_ROLES, ElementRef, PageSnapshot
+from agentcloak.browser.state import (
+    INTERACTIVE_ROLES,
+    ElementRef,
+    FrameInfo,
+    PageSnapshot,
+    PendingDialog,
+)
 from agentcloak.core.errors import BackendError, BrowserTimeoutError
 from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 from agentcloak.core.types import StealthTier
@@ -187,6 +193,8 @@ class RemoteBridgeContext:
             "hover",
             "select",
             "press",
+            "keydown",
+            "keyup",
         }
         if kind not in valid_kinds:
             raise BackendError(
@@ -269,6 +277,17 @@ class RemoteBridgeContext:
             )
             await self._send("evaluate", {"js": js})
 
+        elif kind in ("keydown", "keyup"):
+            key = kw.get("key", "")
+            event_type = "keyDown" if kind == "keydown" else "keyUp"
+            await self._send(
+                "cdp",
+                {
+                    "method": "Input.dispatchKeyEvent",
+                    "params": {"type": event_type, "key": key},
+                },
+            )
+
         new_seq = self._seq_counter.increment_action()
         self._ring_buffer.append(
             SeqEvent(
@@ -319,6 +338,77 @@ class RemoteBridgeContext:
     ) -> Any:
         return await self.send_command(
             "cdp", {"method": method, "params": params or {}}
+        )
+
+    # ── Phase 5g Protocol stubs ──
+    # RemoteBridge does not have Playwright page objects, so these
+    # return minimal "not supported" responses rather than crashing.
+
+    async def dialog_status(self) -> PendingDialog | None:
+        return None
+
+    async def dialog_handle(
+        self, action_type: str, *, text: str | None = None
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "handled": False,
+            "message": "dialog handling not supported via remote bridge",
+        }
+
+    async def wait(
+        self,
+        *,
+        condition: str,
+        value: str = "",
+        timeout: int = 30000,
+        state: str = "visible",
+    ) -> dict[str, Any]:
+        if condition == "ms":
+            await asyncio.sleep(int(value) / 1000)
+            return {
+                "ok": True,
+                "action": "wait",
+                "condition": "ms",
+                "elapsed_ms": int(value),
+                "seq": self._seq_counter.value,
+            }
+        raise BackendError(
+            error="wait_not_supported",
+            hint="Remote bridge only supports 'ms' wait condition",
+            action="use 'ms' condition or switch to a local backend",
+        )
+
+    async def upload(
+        self, index: int, files: list[str]
+    ) -> dict[str, Any]:
+        raise BackendError(
+            error="upload_not_supported",
+            hint="File upload not supported via remote bridge",
+            action="use a local backend for file upload",
+        )
+
+    async def frame_list(self) -> list[FrameInfo]:
+        return [FrameInfo(name="(main)", url="", is_current=True)]
+
+    async def frame_focus(
+        self,
+        *,
+        name: str | None = None,
+        url: str | None = None,
+        main: bool = False,
+    ) -> dict[str, Any]:
+        if main:
+            return {
+                "ok": True,
+                "action": "frame_focus",
+                "frame": "(main)",
+                "url": "",
+            }
+        raise BackendError(
+            error="frame_not_supported",
+            hint="Frame switching not supported via remote bridge",
+            action="use a local backend for frame switching",
         )
 
     async def close(self) -> None:
