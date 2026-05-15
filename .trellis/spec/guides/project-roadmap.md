@@ -236,11 +236,16 @@ CLI / MCP 接口审查 (done)：
 - [x] readOnlyHint 确认已标注（所有 MCP 工具）
 - [x] `scripts/check_consistency.py` 自动化一致性校验（34 routes, 23 MCP tools, 18 CLI groups）集成 CI
 
-文档与发布（待做）：
-- [ ] README 拆分（README 保持轻量 quickstart，长内容迁到 `docs/`）
-- [ ] Skill 文件拆分（主文件精简，详细内容拆到 `references/` 按需加载）
+文档与发布：
+- [x] README 拆分（787→237 行，docs/en/ + docs/zh/ 双语 30 文件）
+- [x] Skill 文件拆分（主文件精简，详细内容拆到 `references/` 按需加载）
+- [x] SECURITY.md + CONTRIBUTING.md
+- [x] navigate --snapshot（observe-act loop 优化）
+- [x] 依赖简化（httpcloak + mcp 移入基础依赖，pip install 一步到位）
+- [x] headless 配置项（config.toml + env var）
+- [x] 本地存储文档（docs/reference/local-storage.md）
 - [ ] PyPI v0.2.0 发布 + GitHub Releases
-- [ ] SECURITY.md（简版，漏洞报告方式）
+- [ ] 日志文件写入（后台 daemon 模式日志持久化 + 轮转）
 
 推后项：
 - Demo 素材（GIF / asciinema）
