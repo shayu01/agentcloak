@@ -174,6 +174,18 @@ async def start(
 
     _write_pid(paths)
 
+    log_target = sys.stderr
+    if cfg.log_to_file:
+        from logging.handlers import RotatingFileHandler
+
+        log_path = paths.logs_dir / "daemon.log"
+        _fh = RotatingFileHandler(
+            log_path,
+            maxBytes=cfg.log_max_bytes,
+            backupCount=cfg.log_backup_count,
+        )
+        log_target = _fh.stream  # type: ignore[assignment]
+
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
         processors=[
@@ -181,7 +193,7 @@ async def start(
             structlog.stdlib.add_log_level,
             structlog.dev.ConsoleRenderer(),
         ],
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        logger_factory=structlog.PrintLoggerFactory(file=log_target),
     )
 
     idle_timeout = cfg.idle_timeout_min * 60

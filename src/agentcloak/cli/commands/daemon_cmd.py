@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 
@@ -79,11 +80,14 @@ def daemon_start(
             cmd.append("--humanize")
         elif resolved_humanize is False:
             cmd.append("--no-humanize")
+        env = os.environ.copy()
+        env.setdefault("AGENTCLOAK_LOG_TO_FILE", "true")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env=env,
         )
         from agentcloak.core.config import load_config, resolve_tier
 

@@ -61,6 +61,9 @@ class AgentcloakConfig:
     idle_timeout_min: int = 0
     stop_on_exit: bool = False
     log_level: str = "warning"
+    log_to_file: bool = False
+    log_max_bytes: int = 10_000_000  # 10 MB
+    log_backup_count: int = 3
     headless: bool = True
     humanize: bool = False
     action_timeout: int = 30000
@@ -126,6 +129,19 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         "yes",
     ) or browser.get("stop_on_exit", cfg.stop_on_exit)
     cfg.log_level = _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
+
+    log_to_file_env = _env("LOG_TO_FILE")
+    if log_to_file_env is not None:
+        cfg.log_to_file = log_to_file_env.lower() in ("true", "1", "yes")
+    else:
+        cfg.log_to_file = bool(browser.get("log_to_file", cfg.log_to_file))
+    cfg.log_max_bytes = int(
+        _env("LOG_MAX_BYTES") or browser.get("log_max_bytes", cfg.log_max_bytes)
+    )
+    cfg.log_backup_count = int(
+        _env("LOG_BACKUP_COUNT")
+        or browser.get("log_backup_count", cfg.log_backup_count)
+    )
 
     headless_env = _env("HEADLESS")
     if headless_env is not None:
