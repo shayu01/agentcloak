@@ -61,6 +61,7 @@ class AgentcloakConfig:
     idle_timeout_min: int = 0
     stop_on_exit: bool = False
     log_level: str = "warning"
+    headless: bool = True
     humanize: bool = False
     action_timeout: int = 30000
     batch_settle_timeout: int = 5000
@@ -125,6 +126,12 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         "yes",
     ) or browser.get("stop_on_exit", cfg.stop_on_exit)
     cfg.log_level = _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
+
+    headless_env = _env("HEADLESS")
+    if headless_env is not None:
+        cfg.headless = headless_env.lower() in ("true", "1", "yes")
+    else:
+        cfg.headless = bool(browser.get("headless", cfg.headless))
 
     cfg.action_timeout = int(
         _env("ACTION_TIMEOUT") or browser.get("action_timeout", cfg.action_timeout)

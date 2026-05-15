@@ -184,10 +184,19 @@ class DaemonClient:
     async def health(self) -> dict[str, Any]:
         return await self._request("GET", "/health")
 
-    async def navigate(self, url: str, *, timeout: float = 30.0) -> dict[str, Any]:
-        return await self._request(
-            "POST", "/navigate", json_body={"url": url, "timeout": timeout}
-        )
+    async def navigate(
+        self,
+        url: str,
+        *,
+        timeout: float = 30.0,
+        include_snapshot: bool = False,
+        snapshot_mode: str = "compact",
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"url": url, "timeout": timeout}
+        if include_snapshot:
+            body["include_snapshot"] = True
+            body["snapshot_mode"] = snapshot_mode
+        return await self._request("POST", "/navigate", json_body=body)
 
     async def screenshot(
         self,

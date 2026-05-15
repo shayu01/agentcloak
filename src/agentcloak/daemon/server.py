@@ -114,7 +114,7 @@ async def start(
     *,
     host: str | None = None,
     port: int | None = None,
-    headless: bool = True,
+    headless: bool | None = None,
     profile: str | None = None,
     stealth: bool = False,
     humanize: bool | None = None,
@@ -140,7 +140,7 @@ async def start(
 
     resolved = resolve_tier(cfg.default_tier)
     tier = StealthTier(resolved)
-    actual_headless = headless
+    actual_headless = headless if headless is not None else cfg.headless
     actual_humanize = humanize if humanize is not None else cfg.humanize
     extensions: list[str] | None = None
     xvfb_mgr: XvfbManager | None = None

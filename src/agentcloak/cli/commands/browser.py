@@ -27,10 +27,27 @@ def browser_navigate(
     timeout: float = typer.Option(
         30.0, "--timeout", help="Navigation timeout in seconds."
     ),
+    snapshot: bool = typer.Option(
+        False,
+        "--snapshot",
+        help="Attach compact snapshot to navigate result.",
+    ),
+    snapshot_mode: str = typer.Option(
+        "compact",
+        "--snapshot-mode",
+        help="Snapshot mode when --snapshot is used: compact, accessible.",
+    ),
 ) -> None:
     """Navigate to a URL."""
     client = DaemonClient()
-    result = _run(client.navigate(url, timeout=timeout))
+    result = _run(
+        client.navigate(
+            url,
+            timeout=timeout,
+            include_snapshot=snapshot,
+            snapshot_mode=snapshot_mode,
+        )
+    )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)

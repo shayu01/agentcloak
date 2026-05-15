@@ -26,9 +26,11 @@ _REQUIRED_PACKAGES = [
     "aiohttp",
     "cloakbrowser",
     "playwright",
+    "httpcloak",
+    "mcp",
 ]
 
-_STEALTH_PACKAGES = ["httpcloak"]
+_STEALTH_PACKAGES: list[str] = []
 
 _CHROMIUM_BINARIES = [
     "chromium-browser",

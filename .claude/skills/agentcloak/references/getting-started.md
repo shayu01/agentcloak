@@ -6,16 +6,19 @@
 pip install agentcloak
 ```
 
-This installs the `agentcloak` and `cloak` CLI commands plus the daemon.
+One command installs everything: CLI (`agentcloak` and `cloak`), MCP server (`agentcloak-mcp`), CloakBrowser stealth backend, and httpcloak TLS fingerprint proxy.
 
-### Browser Backend
+CloakBrowser downloads its patched Chromium binary automatically on first use (~200 MB, cached at `~/.cloakbrowser/`). No manual browser install needed.
 
-agentcloak uses CloakBrowser (57 C++ patches for stealth) by default. The browser binary downloads on first run.
+### System Dependencies (headless Linux only)
 
-For humanize (realistic mouse/keyboard timing):
+CloakBrowser runs in headed mode for anti-detection. On a server without a display, agentcloak auto-starts Xvfb:
+
 ```bash
-pip install agentcloak[stealth]
+sudo apt-get install -y xvfb
 ```
+
+Desktop Linux, macOS, and Windows need no extra dependencies.
 
 ### Verify Setup
 
@@ -23,7 +26,7 @@ pip install agentcloak[stealth]
 cloak doctor
 ```
 
-Checks: Python version, dependencies, browser binary, Xvfb (Linux headed mode).
+Checks: Python version, dependencies (cloakbrowser, httpcloak, mcp, playwright), browser binary, Xvfb, daemon connectivity.
 
 ## How It Works
 
@@ -118,4 +121,10 @@ agentcloak also works as an MCP server for non-CLI clients:
 agentcloak-mcp
 ```
 
-The CLI + Skill mode is recommended for Claude Code (300 tokens context vs 6000 for MCP).
+For Claude Code, add it with:
+
+```bash
+claude mcp add agentcloak -- agentcloak-mcp
+```
+
+The CLI + Skill mode is recommended for Claude Code (~300 tokens context vs ~6,000 for MCP).

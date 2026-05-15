@@ -15,8 +15,8 @@ First-time setup: read `references/getting-started.md`.
 
 Observe-then-act. Snapshot first because `[N]` refs are only valid for the current page state.
 
-1. **Navigate**: `cloak navigate "https://example.com"`
-2. **Observe**: `cloak snapshot` -- get a11y tree with `[N]` element refs
+1. **Navigate**: `cloak navigate "https://example.com" --snapshot` -- navigate and get snapshot in one step
+2. **Observe**: `cloak snapshot` -- get a11y tree with `[N]` element refs (or use `--snapshot` on navigate/action)
 3. **Act**: `cloak click --target 5` or `cloak fill --target 3 --text "query"`
 4. **Handle feedback**: check action return for `pending_requests`, `dialog`, `navigation`
 5. **Re-observe if needed**: when `caused_navigation: true` or `dom_changed: true`, snapshot again
@@ -52,7 +52,7 @@ Snapshot modes: `accessible` (default, full tree) | `compact` (interactive + con
 
 | Command | Purpose |
 |---------|---------|
-| `cloak navigate URL` | Navigate to URL |
+| `cloak navigate URL` | Navigate to URL (add `--snapshot` to get a11y tree in one step) |
 | `cloak snapshot` | Get a11y tree with `[N]` refs |
 | `cloak snapshot --mode compact` | Interactive elements + containers only |
 | `cloak snapshot --mode content` | Text extraction |
@@ -122,6 +122,7 @@ Every command returns JSON on stdout:
 
 These work automatically:
 - **Stale ref auto-retry**: `element_not_found` triggers one automatic re-snapshot + retry
+- **`--snapshot` on navigate**: `cloak navigate URL --snapshot` returns page + a11y tree in one call
 - **`--include-snapshot`**: add to any action to get a compact snapshot back, saving a round trip
 - **`$N.path` batch refs**: in `--calls-file` batch mode, reference prior results (e.g. `"$0.url"`)
 - **Tab group**: RemoteBridge auto-groups agent tabs under blue "agentcloak" Chrome tab group

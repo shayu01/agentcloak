@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -14,20 +14,34 @@ __all__ = ["register"]
 
 def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
     @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
-    async def agentcloak_navigate(url: str, timeout: float = 30.0) -> str:
+    async def agentcloak_navigate(
+        url: str,
+        timeout: float = 30.0,
+        include_snapshot: bool = False,
+        snapshot_mode: str = "compact",
+    ) -> str:
         """Navigate the browser to a URL. Changes page state.
 
         Args:
             url: Target URL (must start with http:// or https://)
             timeout: Max seconds to wait for page load
+            include_snapshot: If true, attach a compact snapshot to the
+                navigate result. Saves a round-trip when you need to see
+                the page right after navigating.
+            snapshot_mode: Snapshot mode when include_snapshot is true:
+                'compact' (default, interactive + containers) or
+                'accessible' (full a11y tree).
 
         Returns:
             JSON with page title, final URL, and seq number.
-            After navigating, use agentcloak_snapshot to see the page.
+            When include_snapshot=true, includes a 'snapshot' object with
+            tree_text, mode, total_nodes, and total_interactive.
         """
-        result = await bridge.request(
-            "POST", "/navigate", json_body={"url": url, "timeout": timeout}
-        )
+        body: dict[str, Any] = {"url": url, "timeout": timeout}
+        if include_snapshot:
+            body["include_snapshot"] = True
+            body["snapshot_mode"] = snapshot_mode
+        result = await bridge.request("POST", "/navigate", json_body=body)
         return bridge.format_result(result)
 
     @mcp.tool(annotations={"readOnlyHint": True})

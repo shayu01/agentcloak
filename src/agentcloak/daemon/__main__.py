@@ -10,7 +10,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
-    parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--headless", action="store_true", help="Force headless mode.")
+    parser.add_argument("--headed", action="store_true", help="Force headed mode.")
     parser.add_argument("--profile", default=None, help="Browser profile name.")
     parser.add_argument(
         "--stealth",
@@ -37,7 +38,7 @@ def main() -> None:
         start(
             host=args.host,
             port=args.port,
-            headless=not args.headed,
+            headless=True if args.headless else (False if args.headed else None),
             profile=args.profile,
             stealth=args.stealth,
             humanize=humanize,

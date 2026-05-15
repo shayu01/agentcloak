@@ -21,8 +21,8 @@ def daemon_start(
     background: bool = typer.Option(
         False, "--background", "-b", help="Run in background."
     ),
-    headless: bool = typer.Option(
-        True, "--headless/--headed", help="Browser headless mode."
+    headless: bool | None = typer.Option(
+        None, "--headless/--headed", help="Headless mode (default: config)."
     ),
     host: str | None = typer.Option(None, "--host", help="Bind host."),
     port: int | None = typer.Option(None, "--port", help="Bind port."),
@@ -69,7 +69,9 @@ def daemon_start(
             cmd.extend(["--host", host])
         if port:
             cmd.extend(["--port", str(port)])
-        if not headless:
+        if headless is True:
+            cmd.append("--headless")
+        elif headless is False:
             cmd.append("--headed")
         if profile:
             cmd.extend(["--profile", profile])

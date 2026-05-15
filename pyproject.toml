@@ -27,6 +27,8 @@ dependencies = [
     "aiohttp>=3.9",
     "cloakbrowser>=0.3",
     "httpx>=0.27",
+    "httpcloak>=1.6",
+    "mcp>=1.27.0,<2.0.0",
 ]
 
 [project.scripts]
@@ -35,14 +37,11 @@ cloak = "agentcloak.cli.app:main"
 agentcloak-mcp = "agentcloak.mcp.server:main"
 
 [project.optional-dependencies]
-stealth = [
-    "httpcloak>=1.6",
-]
+# kept for backward compat: pip install agentcloak[stealth] / [mcp] still works
+stealth = []
+mcp = []
 discovery = [
     "zeroconf>=0.131",
-]
-mcp = [
-    "mcp>=1.27.0,<2.0.0",
 ]
 dev = [
     "pytest>=8.0",

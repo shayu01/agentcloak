@@ -1,0 +1,177 @@
+# Browser backends
+
+agentcloak supports three browser backends. Each implements the same `BrowserContext` protocol, so all CLI commands and MCP tools work identically regardless of backend.
+
+## Overview
+
+| Backend | Stealth level | Browser | Use case |
+|---------|--------------|---------|----------|
+| **CloakBrowser** (default) | High | Patched Chromium (57 C++ patches) | Most sites, anti-bot bypass |
+| **Playwright** | None | Stock Chromium | Simple automation, debugging |
+| **RemoteBridge** | Real fingerprint | User's Chrome | Login sessions, extensions |
+
+## CloakBrowser (default)
+
+CloakBrowser ships a patched Chromium binary with 57 C++ modifications that defeat common fingerprinting and bot detection. It is the default backend -- no flags needed.
+
+```bash
+cloak navigate "https://example.com"
+```
+
+### What CloakBrowser patches
+
+- Browser fingerprint randomization (canvas, WebGL, audio, fonts)
+- `navigator.webdriver` flag removal at the C++ level
+- Automation indicator suppression (`--enable-automation` removed)
+- Platform spoofing (Linux servers report Windows fingerprints)
+- Proxy authentication support (including SOCKS5)
+
+### Humanize mode
+
+CloakBrowser can simulate human-like behavior: Bezier curve mouse movements, realistic typing cadence with occasional typos, and smooth scrolling with acceleration.
+
+Enable via config or environment:
+
+```toml
+# ~/.agentcloak/config.toml
+[browser]
+humanize = true
+```
+
+```bash
+# or via environment variable
+export AGENTCLOAK_HUMANIZE=true
+```
+
+### Headed vs headless
+
+CloakBrowser runs in headed mode by default because anti-bot systems detect headless browsers. On servers without a display, agentcloak automatically starts Xvfb (a virtual framebuffer).
+
+```bash
+# Install Xvfb on Debian/Ubuntu
+sudo apt-get install -y xvfb
+```
+
+On desktop environments (Linux with display, macOS, Windows), headed mode uses the real display.
+
+### Binary management
+
+CloakBrowser downloads its Chromium binary automatically on first use:
+
+- **Size**: ~200 MB
+- **Cache location**: `~/.cloakbrowser/`
+- **Updates**: Background check every hour, auto-downloads new versions
+
+Override the binary path with `CLOAKBROWSER_BINARY_PATH` if you need a custom Chromium build.
+
+## Playwright (fallback)
+
+Standard Playwright Chromium without stealth patches. Useful for sites that don't have bot detection, or for debugging automation logic.
+
+```bash
+export AGENTCLOAK_DEFAULT_TIER=playwright
+cloak navigate "https://example.com"
+```
+
+> [!WARNING]
+> Playwright Chromium has no stealth capabilities. Sites with bot detection will likely block it. Use CloakBrowser for production work.
+
+Playwright requires a separate browser binary download:
+
+```bash
+python -m playwright install chromium
+```
+
+## RemoteBridge (real Chrome)
+
+RemoteBridge connects to a real Chrome browser on another machine via a Chrome extension and WebSocket. The browser keeps its genuine fingerprint, login sessions, and extensions.
+
+```bash
+cloak navigate "https://example.com" --backend bridge
+```
+
+### When to use RemoteBridge
+
+- You need access to real login sessions (no cookie export needed)
+- The site checks for genuine browser profiles built over time
+- You want to use Chrome extensions during automation
+- You need the actual fingerprint of a real user browser
+
+### Setup
+
+1. **Install the extension.** Load the unpacked extension from `src/agentcloak/bridge/extension/` in Chrome (`chrome://extensions` > Developer mode > Load unpacked).
+
+2. **Configure the connection.** Click the extension icon and set the daemon host/port. The extension auto-connects.
+
+3. **Start using it.**
+
+```bash
+cloak navigate "https://example.com" --backend bridge
+```
+
+See the [Remote Bridge guide](./remote-bridge.md) for detailed setup instructions, multi-machine configuration, and troubleshooting.
+
+### Tab management with RemoteBridge
+
+RemoteBridge supports tab claiming and session lifecycle management:
+
+```bash
+# Claim an existing tab
+cloak bridge claim --url-pattern "dashboard"
+
+# End session: close agent tabs
+cloak bridge finalize --mode close
+
+# End session: leave tabs open for user
+cloak bridge finalize --mode handoff
+```
+
+## Switching backends
+
+### Via config file
+
+```toml
+# ~/.agentcloak/config.toml
+[browser]
+default_tier = "cloak"   # or "playwright", "remote_bridge"
+```
+
+### Via environment
+
+```bash
+export AGENTCLOAK_DEFAULT_TIER=cloak
+```
+
+### Via CLI flag
+
+Some commands accept `--backend`:
+
+```bash
+cloak navigate "https://example.com" --backend bridge
+```
+
+### Tier resolution
+
+The `auto` tier (default) resolves to `cloak`. The legacy value `patchright` is automatically mapped to `playwright`.
+
+| Setting | Resolves to |
+|---------|------------|
+| `auto` | `cloak` |
+| `cloak` | `cloak` |
+| `playwright` | `playwright` |
+| `patchright` | `playwright` (legacy) |
+| `remote_bridge` | `remote_bridge` |
+
+## Comparison
+
+| Feature | CloakBrowser | Playwright | RemoteBridge |
+|---------|-------------|------------|-------------|
+| Stealth patches | 57 C++ patches | None | N/A (real browser) |
+| Bot detection bypass | High | Low | Inherent |
+| Cloudflare bypass | Built-in (screenX patch) | No | Inherent |
+| Browser binary | Auto-download | Manual install | User's Chrome |
+| Headed mode | Default (Xvfb auto) | Optional | Always |
+| Humanize support | Yes | No | N/A |
+| Profile persistence | Yes | Yes | Inherent |
+| Proxy support | Full (incl. SOCKS5 auth) | Limited | N/A |
+| Setup complexity | Zero | One command | Extension install |

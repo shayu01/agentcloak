@@ -208,8 +208,8 @@ class TestProxyUrlIntegration:
         )
         assert ctx._proxy_url == "http://127.0.0.1:9999"
 
-    def test_doctor_extras_checks_include_httpcloak(self) -> None:
+    def test_doctor_required_checks_include_httpcloak(self) -> None:
         result = runner.invoke(app, ["doctor"])
         data = json.loads(result.stdout)
-        extras_names = [c["name"] for c in data["data"]["extras"]["checks"]]
-        assert "httpcloak" in extras_names
+        required_names = [c["name"] for c in data["data"]["checks"]]
+        assert "httpcloak" in required_names

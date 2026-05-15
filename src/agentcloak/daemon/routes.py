@@ -115,9 +115,24 @@ async def handle_navigate(request: Request) -> Response:
     body = await request.json()
     url: str = body["url"]
     timeout: float = body.get("timeout", 30.0)
+    include_snapshot: bool = body.get("include_snapshot", False)
+    snapshot_mode: str = body.get("snapshot_mode", "compact")
     ctx = _ctx(request)
     result = await ctx.navigate(url, timeout=timeout)
     await _update_resume(request, action_summary={"kind": "navigate", "url": url})
+
+    if include_snapshot:
+        try:
+            snap = await ctx.snapshot(mode=snapshot_mode)
+            result["snapshot"] = {
+                "tree_text": snap.tree_text,
+                "mode": snap.mode,
+                "total_nodes": snap.total_nodes,
+                "total_interactive": snap.total_interactive,
+            }
+        except Exception:
+            logger.debug("include_snapshot_failed", exc_info=True)
+
     return _ok(result, seq=ctx.seq)
 
 

@@ -9,7 +9,9 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "cloakbrowser" },
+    { name = "httpcloak" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "orjson" },
     { name = "structlog" },
     { name = "typer" },
@@ -25,20 +27,14 @@ dev = [
 discovery = [
     { name = "zeroconf" },
 ]
-mcp = [
-    { name = "mcp" },
-]
-stealth = [
-    { name = "httpcloak" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "cloakbrowser", specifier = ">=0.3" },
-    { name = "httpcloak", marker = "extra == 'stealth'", specifier = ">=1.6" },
+    { name = "httpcloak", specifier = ">=1.6" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.27.0,<2.0.0" },
+    { name = "mcp", specifier = ">=1.27.0,<2.0.0" },
     { name = "orjson", specifier = ">=3.10" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -48,7 +44,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.15" },
     { name = "zeroconf", marker = "extra == 'discovery'", specifier = ">=0.131" },
 ]
-provides-extras = ["stealth", "discovery", "mcp", "dev"]
+provides-extras = ["stealth", "mcp", "discovery", "dev"]
 
 [[package]]
 name = "aiohappyeyeballs"
