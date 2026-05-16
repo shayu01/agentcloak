@@ -648,12 +648,13 @@ async def handle_ext_ws(websocket: WebSocket) -> None:
                 await websocket.close(code=4001, reason="invalid bridge token")
                 return
 
-    # Mutex: reject second extension if one is already attached and alive.
-    # Token check above must come first so unauthenticated peers can't probe.
+    # /ext is exclusively used by the Chrome Extension. MV3 service workers
+    # restart frequently — new connection always replaces old (no reject).
     if _existing_remote_alive(websocket.app.state):
-        await websocket.close(code=4002, reason="remote_ctx_in_use")
-        logger.warning("ext_ws_rejected", reason="remote_ctx_in_use")
-        return
+        logger.info("ext_ws_replacing", remote=client.host if client else None)
+        old_ws = getattr(websocket.app.state, "ext_ws", None)
+        if old_ws and not getattr(old_ws, "closed", True):
+            old_ws.mark_closed()
 
     _cleanup_dead_remote(websocket.app.state)
 

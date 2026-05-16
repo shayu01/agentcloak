@@ -146,7 +146,9 @@ class RemoteBridgeContext(BrowserContextBase):
 
     async def _get_page_info(self) -> tuple[str, str]:
         result = await self._send("evaluate", {"js": "[document.URL, document.title]"})
-        raw: list[str] = result.get("result", ["", ""])
+        raw = result.get("result")
+        if not isinstance(raw, list):
+            return "", ""
         url = str(raw[0]) if len(raw) > 0 else ""
         title = str(raw[1]) if len(raw) > 1 else ""
         return url, title
