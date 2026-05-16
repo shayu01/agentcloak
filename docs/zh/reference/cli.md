@@ -99,7 +99,7 @@ cloak screenshot [--output FILE] [--full-page] [--format FORMAT] [--quality N]
 
 | 参数 | 默认值 | 说明 |
 |------|-------|------|
-| `--output` | 自动生成 `/tmp/` 路径 | 保存到文件；stdout 打印文件路径 |
+| `--output` | 自动放在系统临时目录（`tempfile.gettempdir()`） | 保存到文件；stdout 打印文件路径 |
 | `--full-page` | 关闭 | 捕获完整可滚动页面 |
 | `--format` | `jpeg` | `jpeg` 或 `png` |
 | `--quality` | `80` | JPEG 质量 0-100（PNG 时忽略） |

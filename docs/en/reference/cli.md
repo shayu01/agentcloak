@@ -99,7 +99,7 @@ cloak screenshot [--output FILE] [--full-page] [--format FORMAT] [--quality N]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--output` | auto-named in `/tmp/` | Save to file; stdout prints the path |
+| `--output` | auto-named in OS temp dir (`tempfile.gettempdir()`) | Save to file; stdout prints the path |
 | `--full-page` | off | Capture full scrollable page |
 | `--format` | `jpeg` | `jpeg` or `png` |
 | `--quality` | `80` | JPEG quality 0-100 (ignored for PNG) |

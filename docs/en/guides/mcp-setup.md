@@ -18,12 +18,17 @@ agentcloak offers two integration modes. For agents that can run shell commands 
 
 ## Skill + CLI setup (recommended)
 
-The Skill file teaches Claude Code how to use `cloak` commands. It auto-loads when the agent needs browser capabilities.
+The Skill bundle (`SKILL.md` + `references/`) teaches your agent how to use `cloak` commands. It auto-loads when the agent needs browser capabilities. See the full [Skill installation guide](../getting-started/installation.md#install-the-skill-bundle) for per-platform paths; the example below targets Claude Code (project-scoped):
 
 ```bash
-mkdir -p .claude/skills/agentcloak
-curl -o .claude/skills/agentcloak/SKILL.md \
-  https://raw.githubusercontent.com/shayuc137/agentcloak/main/.claude/skills/agentcloak/SKILL.md
+# 1. Install the CLI + daemon + stealth browser
+pip install agentcloak
+
+# 2. Install the Skill bundle (SKILL.md + references/)
+mkdir -p .claude/skills
+curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
+  | tar -xz --strip-components=2 -C .claude/skills \
+    agentcloak-main/skills/agentcloak
 ```
 
 After this, Claude Code automatically picks up the Skill when a task involves web pages. No further configuration needed.

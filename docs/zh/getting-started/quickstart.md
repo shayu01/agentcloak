@@ -149,7 +149,9 @@ cloak network requests --since last_action
 ```bash
 # 视口截图（JPEG，比 PNG 小约 75-85%）
 cloak screenshot
-# stdout 输出文件路径，如 /tmp/agentcloak-1715920000.png
+# stdout 输出位于系统临时目录下的文件路径，例如：
+#   Linux/macOS: /tmp/agentcloak-1715920000.jpg
+#   Windows:     C:\Users\you\AppData\Local\Temp\agentcloak-1715920000.jpg
 
 # 完整可滚动页面
 cloak screenshot --full-page

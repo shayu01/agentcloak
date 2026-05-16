@@ -113,13 +113,29 @@ See the full [Quick Start tutorial](docs/en/getting-started/quickstart.md) for l
 | **Context cost** | ~300 tokens (on-demand) | ~6,000 tokens (persistent) |
 | **Best for** | Claude Code, any Bash-capable agent | MCP-native clients without Bash |
 
-**Skill + CLI** -- install the Skill into your project:
+**Skill + CLI** -- two steps. (1) install the CLI, (2) drop the Skill bundle (`SKILL.md` + `references/`) into your agent's skills directory:
 
 ```bash
-mkdir -p .claude/skills/agentcloak
-curl -o .claude/skills/agentcloak/SKILL.md \
-  https://raw.githubusercontent.com/shayuc137/agentcloak/main/.claude/skills/agentcloak/SKILL.md
+# 1. Install agentcloak (CLI + daemon + stealth browser)
+pip install agentcloak
+
+# 2. Install the Skill bundle for your agent.
+#    Example below uses Claude Code (project-scoped); see the table for other platforms.
+mkdir -p .claude/skills
+curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
+  | tar -xz --strip-components=2 -C .claude/skills \
+    agentcloak-main/skills/agentcloak
 ```
+
+| Agent platform | Skill location |
+|---|---|
+| Claude Code (project / global) | `.claude/skills/agentcloak/` or `~/.claude/skills/agentcloak/` |
+| Codex | `~/.codex/skills/agentcloak/` |
+| Cursor | `.cursor/skills/agentcloak/` |
+| OpenCode | `.opencode/skills/agentcloak/` |
+| Other | Check your agent's docs for its skill directory |
+
+See the [Skill installation guide](docs/en/getting-started/installation.md#install-the-skill-bundle) for per-platform details and Windows PowerShell variants.
 
 **MCP Server** -- one-command setup for Claude Code:
 

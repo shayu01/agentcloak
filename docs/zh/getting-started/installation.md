@@ -32,6 +32,74 @@ agentcloak doctor --fix
 
 CloakBrowser 在首次使用时自动下载补丁版 Chromium 二进制文件（约 200 MB，缓存在 `~/.cloakbrowser/`）。提前运行 `doctor --fix` 可以避免下载发生在你第一次 navigate 时。
 
+## 安装 Skill 安装包
+
+`pip install agentcloak` 装好的是 CLI 和 MCP server。如果你的 AI agent 支持 **Skills**，还需要额外安装 Skill 安装包（`SKILL.md` + `references/` 目录），这样 agent 在需要时才按需加载 `cloak` 知识（约 300 tokens，比 MCP 工具定义的 6,000 tokens 节省 20 倍）。
+
+> **推荐：只装 Skill + CLI。** MCP server 是给没有 bash 能力的 agent 准备的可选方案。如果两个都装，MCP 工具定义会在每次对话中消耗约 6,000 tokens（即使没用到）。二选一即可：
+> - **Skill + CLI**（推荐）：agent 按需加载 skill，通过 bash 调用 `cloak` 命令
+> - **仅 MCP**：适用于没有 bash 能力的 agent（如纯聊天界面）
+
+### 各平台 Skill 目录
+
+每个 agent 平台从各自的目录读取 Skill：
+
+| Agent 平台 | 项目级 | 用户全局 |
+|---|---|---|
+| Claude Code | `.claude/skills/agentcloak/` | `~/.claude/skills/agentcloak/` |
+| Codex | `.codex/skills/agentcloak/` | `~/.codex/skills/agentcloak/` |
+| Cursor | `.cursor/skills/agentcloak/` | （无 — 仅项目级） |
+| OpenCode | `.opencode/skills/agentcloak/` | （无 — 仅项目级） |
+| 其他 | 查阅对应 agent 文档 | 查阅对应 agent 文档 |
+
+项目级只在该仓库内生效；用户全局对所有项目生效。按需选择。
+
+### 使用 curl + tar 安装（Linux / macOS / WSL）
+
+Skill 安装包位于仓库的 [`skills/agentcloak/`](https://github.com/shayuc137/agentcloak/tree/main/skills/agentcloak)。下面的命令从 GitHub tarball 中只抽取该目录：
+
+```bash
+# 从上表中选择目标目录。示例：项目级 Claude Code。
+DEST=".claude/skills"
+
+mkdir -p "$DEST"
+curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
+  | tar -xz --strip-components=2 -C "$DEST" \
+    agentcloak-main/skills/agentcloak
+```
+
+执行后 `$DEST/agentcloak/SKILL.md` 和 `$DEST/agentcloak/references/` 都应该存在。
+
+### 使用 PowerShell 安装（Windows）
+
+```powershell
+# 项目级 Claude Code 示例。请按上表调整 $Dest。
+$Dest = ".claude\skills"
+New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+
+$tmp = New-TemporaryFile
+Invoke-WebRequest "https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz" -OutFile "$tmp.tgz"
+tar -xz -C $Dest --strip-components=2 -f "$tmp.tgz" agentcloak-main/skills/agentcloak
+Remove-Item "$tmp.tgz"
+```
+
+（Windows 10 1803+ 自带 `tar` 和 `curl.exe`。）
+
+### 从 git clone 安装（开发者）
+
+如果你已经 clone 了仓库，直接复制或软链接即可：
+
+```bash
+# 从仓库根目录
+cp -r skills/agentcloak ~/.claude/skills/         # 全局安装
+# 或
+ln -s "$PWD/skills/agentcloak" ~/.claude/skills/  # 可实时编辑的软链接
+```
+
+### 更新 Skill
+
+重新执行相同的 `curl | tar`（或 `cp -r`）命令。Skill 都是纯 markdown，没有迁移步骤。
+
 ## 可选扩展
 
 | 扩展 | 功能 | 使用场景 |

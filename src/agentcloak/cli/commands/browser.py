@@ -63,7 +63,7 @@ def browser_screenshot(
         None,
         "--output",
         "-o",
-        help="Save to a specific file. Default: /tmp/agentcloak-<ts>.<ext>.",
+        help="Save to a specific file. Default: <system-temp>/agentcloak-<ts>.<ext>.",
     ),
     full_page: bool = typer.Option(
         False, "--full-page", help="Capture full scrollable page."
@@ -80,7 +80,7 @@ def browser_screenshot(
         ),
     ),
 ) -> None:
-    """Take a screenshot. Default mode saves to /tmp and prints the path."""
+    """Take a screenshot. Defaults to a file in the system temp dir; prints the path."""
     client = DaemonClient()
     # Always pull the JSON envelope so we get the base64 payload — text mode
     # would only give us a metadata line.

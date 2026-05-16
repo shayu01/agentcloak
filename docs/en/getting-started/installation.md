@@ -32,6 +32,74 @@ Everything is included in the one `pip install`:
 
 CloakBrowser downloads its patched Chromium binary automatically on first use (~200 MB, cached at `~/.cloakbrowser/`). Running `doctor --fix` upfront avoids that wait happening during your first navigate.
 
+## Install the Skill bundle
+
+`pip install agentcloak` gives you the CLI and the MCP server. If your AI agent supports **Skills**, install the Skill bundle (`SKILL.md` + the `references/` directory) so the agent can lazy-load `cloak` knowledge on demand (~300 tokens, vs ~6,000 for MCP tool definitions).
+
+> **Recommended: install Skill + CLI only.** The MCP server is an optional alternative for agents that don't have bash access. If you install both, the MCP tool definitions consume ~6,000 tokens in every conversation even when unused. Pick one:
+> - **Skill + CLI** (recommended): agent loads skill on demand, calls `cloak` via bash
+> - **MCP only**: for agents without bash capability (e.g., some chat-only interfaces)
+
+### Where to put it
+
+Each agent platform reads skills from its own directory:
+
+| Agent platform | Project-scoped | User-global |
+|---|---|---|
+| Claude Code | `.claude/skills/agentcloak/` | `~/.claude/skills/agentcloak/` |
+| Codex | `.codex/skills/agentcloak/` | `~/.codex/skills/agentcloak/` |
+| Cursor | `.cursor/skills/agentcloak/` | (n/a — project-scoped) |
+| OpenCode | `.opencode/skills/agentcloak/` | (n/a — project-scoped) |
+| Other | Consult your agent's docs | Consult your agent's docs |
+
+Project-scoped installs only apply to that repo; user-global installs apply everywhere. Pick whichever fits your workflow.
+
+### Install with curl + tar (Linux / macOS / WSL)
+
+The Skill bundle lives at [`skills/agentcloak/`](https://github.com/shayuc137/agentcloak/tree/main/skills/agentcloak) in the repo. The snippet below pulls just that directory out of the GitHub tarball:
+
+```bash
+# Pick your destination from the table above. Example: project-scoped Claude Code.
+DEST=".claude/skills"
+
+mkdir -p "$DEST"
+curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
+  | tar -xz --strip-components=2 -C "$DEST" \
+    agentcloak-main/skills/agentcloak
+```
+
+After the command, `$DEST/agentcloak/SKILL.md` and `$DEST/agentcloak/references/` should exist.
+
+### Install with PowerShell (Windows)
+
+```powershell
+# Project-scoped Claude Code example. Adjust $Dest per the table above.
+$Dest = ".claude\skills"
+New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+
+$tmp = New-TemporaryFile
+Invoke-WebRequest "https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz" -OutFile "$tmp.tgz"
+tar -xz -C $Dest --strip-components=2 -f "$tmp.tgz" agentcloak-main/skills/agentcloak
+Remove-Item "$tmp.tgz"
+```
+
+(Windows 10 1803+ ships `tar`/`curl.exe` out of the box.)
+
+### Install from a git clone (developers)
+
+If you already cloned the repo, just copy or symlink the directory:
+
+```bash
+# From the repo root
+cp -r skills/agentcloak ~/.claude/skills/         # global install
+# or
+ln -s "$PWD/skills/agentcloak" ~/.claude/skills/  # live-edit symlink
+```
+
+### Updating the Skill
+
+Re-run the same `curl | tar` (or `cp -r`) command. The Skill is plain markdown; there's no migration step.
+
 ## Optional extras
 
 | Extra | What it adds | When you need it |

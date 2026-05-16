@@ -149,7 +149,9 @@ cloak network requests --since last_action
 ```bash
 # Viewport screenshot (JPEG, ~75-85% smaller than PNG)
 cloak screenshot
-# stdout = file path, e.g. /tmp/agentcloak-1715920000.png
+# stdout = file path in the OS temp dir, e.g.
+#   Linux/macOS: /tmp/agentcloak-1715920000.jpg
+#   Windows:     C:\Users\you\AppData\Local\Temp\agentcloak-1715920000.jpg
 
 # Full scrollable page
 cloak screenshot --full-page
