@@ -69,12 +69,12 @@ The daemon starts automatically on the first command.
 cloak navigate "https://example.com" --snapshot
 
 # Output includes an accessibility tree with [N] element refs:
-#   [1] <link> About
-#   [2] <button> Settings
-#   [3] <combobox> Search
+#   [1] link "About" href="https://example.com/about"
+#   [2] button "Settings"
+#   [3] combobox "Search" value="" focused
 
-# Interact using [N] refs -- action returns a fresh snapshot
-cloak fill --target 3 --text "search query" --snapshot
+# Interact using [N] refs -- add --include-snapshot to get a fresh snapshot back
+cloak fill --target 3 --text "search query" --include-snapshot
 cloak press --key Enter --target 3
 
 # Take a screenshot

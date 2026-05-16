@@ -69,12 +69,12 @@ daemon 在首次命令时自动启动。
 cloak navigate "https://example.com" --snapshot
 
 # 输出包含带 [N] 元素引用的无障碍树：
-#   [1] <link> About
-#   [2] <button> Settings
-#   [3] <combobox> Search
+#   [1] link "About" href="https://example.com/about"
+#   [2] button "Settings"
+#   [3] combobox "Search" value="" focused
 
-# 通过 [N] 引用进行交互 -- action 命令可附带返回新 snapshot
-cloak fill --target 3 --text "search query" --snapshot
+# 通过 [N] 引用进行交互 -- 加 --include-snapshot 可附带返回新 snapshot
+cloak fill --target 3 --text "search query" --include-snapshot
 cloak press --key Enter --target 3
 
 # 截图
@@ -166,7 +166,7 @@ graph TD
     end
 
     subgraph Engine["Engine"]
-        Daemon["Daemon<br/>aiohttp + seq counter"]
+        Daemon["Daemon<br/>FastAPI + uvicorn + seq counter"]
     end
 
     subgraph Backends["Browser Backends"]
@@ -182,7 +182,7 @@ graph TD
     Daemon --> Bridge
 ```
 
-所有后端实现统一的 `BrowserContext` 协议。层级隔离严格执行：CLI 不能导入 browser 内部模块，daemon 不能导入 CLI，后端两者都不导入。
+所有后端继承统一的 `BrowserContextBase` ABC。基类包含约 900 行共享行为（action dispatch、batch、dialog、自恢复）；子类只实现 29 个原子 `_xxx_impl` 操作。层级隔离严格执行：CLI 不能导入 browser 内部模块，daemon 不能导入 CLI，后端两者都不导入。
 
 详情参见[架构文档](docs/zh/explanation/architecture.md)。
 
