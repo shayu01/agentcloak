@@ -1,5 +1,8 @@
 """Management tools — launch, status, profile, spell, doctor, resume."""
 
+# pyright: reportUnusedFunction=false
+# Tools register via @mcp.tool decorator side-effect.
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
@@ -78,11 +81,9 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
                     hint="cookies_json is required for import",
                     action="pass cookies as JSON array string",
                 )
-            cookies = (
-                orjson.loads(cookies_json)
-                if isinstance(cookies_json, str)
-                else cookies_json
-            )
+            # ``cookies_json`` is typed as ``str``; decode it once so the
+            # daemon client always receives a list of dicts.
+            cookies = orjson.loads(cookies_json)
             return await format_call(client.cookies_import(cookies=cookies))
 
         return _error_envelope(

@@ -56,7 +56,7 @@ The daemon (`src/agentcloak/daemon/`) is a long-running FastAPI application serv
 
 **Responsibilities:**
 - Browser launch, shutdown, and health monitoring
-- Routing HTTP requests to the active `BrowserContext`
+- Routing HTTP requests to the active `BrowserContextBase` instance
 - Tracking state changes with a monotonic `seq` counter
 - Storing recent events in a ring buffer for resume and network history
 - Caching snapshots for progressive loading (focus, offset, diff)

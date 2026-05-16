@@ -55,7 +55,7 @@ def screenshot_to_base64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def _find_free_port() -> int:
+def find_free_port() -> int:
     """Bind to port 0 and return the OS-assigned free port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -242,7 +242,7 @@ class PlaywrightContext(BrowserContextBase):
         try:
             from datetime import datetime
 
-            from agentcloak.core.capture import _is_recordable_content, truncate_body
+            from agentcloak.core.capture import is_recordable_content, truncate_body
 
             req_headers: dict[str, str] = {}
             try:
@@ -270,7 +270,7 @@ class PlaywrightContext(BrowserContextBase):
                 pass
 
             resp_body: str | None = None
-            if _is_recordable_content(content_type):
+            if is_recordable_content(content_type):
                 try:
                     raw = await response.body()
                     resp_body = truncate_body(raw.decode("utf-8", errors="replace"))
@@ -1157,7 +1157,7 @@ async def launch_playwright(
     pw = await async_playwright().start()
     executable = _find_chromium()
 
-    cdp_port = _find_free_port()
+    cdp_port = find_free_port()
     chrome_args = ["--no-sandbox", f"--remote-debugging-port={cdp_port}"]
 
     if profile_dir is not None:

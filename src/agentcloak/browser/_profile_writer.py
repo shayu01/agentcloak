@@ -13,13 +13,17 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
+from typing import Any, cast
 
 
 async def _run(
     profile_dir: str, cookies_json: str, executable_path: str | None
 ) -> None:
-    cookies: list[dict] = json.loads(cookies_json)
+    cookies: list[dict[str, Any]] = json.loads(cookies_json)
 
+    # Playwright types cookies as a TypedDict (``SetCookieParam``) whose import
+    # path lives in a private module, so we cast at the boundary instead of
+    # depending on Playwright's internal layout.
     from playwright.async_api import async_playwright
 
     pw = await async_playwright().start()
@@ -30,7 +34,7 @@ async def _run(
             headless=True,
             executable_path=exec_path,
         )
-        await ctx.add_cookies(cookies)
+        await ctx.add_cookies(cast("Any", cookies))
         await ctx.close()
     finally:
         await pw.stop()

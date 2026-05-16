@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["CaptureEntry", "CaptureStore", "truncate_body"]
+__all__ = ["CaptureEntry", "CaptureStore", "is_recordable_content", "truncate_body"]
 
 MAX_BODY_SIZE = 100_000
 
@@ -84,7 +84,7 @@ def truncate_body(body: str | None) -> str | None:
     return body
 
 
-def _is_recordable_content(content_type: str) -> bool:
+def is_recordable_content(content_type: str) -> bool:
     ct = content_type.split(";", 1)[0].strip().lower()
     return ct in _RECORDABLE_CONTENT_TYPES
 
@@ -140,7 +140,7 @@ class CaptureStore:
         return [
             e
             for e in self._entries
-            if _is_recordable_content(e.content_type) and e.status > 0
+            if is_recordable_content(e.content_type) and e.status > 0
         ]
 
     def find_latest(self, url: str, method: str = "GET") -> CaptureEntry | None:

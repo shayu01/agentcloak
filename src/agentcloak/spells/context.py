@@ -5,11 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agentcloak.browser.protocol import (
-        ActionResult,
-        BrowserContext,
-        NetworkRequest,
-    )
+    from agentcloak.browser.base import BrowserContextBase
     from agentcloak.browser.state import PageSnapshot
     from agentcloak.spells.types import SpellMeta
 
@@ -17,14 +13,14 @@ __all__ = ["SpellContext"]
 
 
 class SpellContext:
-    """Wraps BrowserContext + parsed args for spell execution."""
+    """Wraps a browser context + parsed args for spell execution."""
 
     def __init__(
         self,
         *,
         meta: SpellMeta,
         args: dict[str, Any],
-        browser: BrowserContext | None = None,
+        browser: BrowserContextBase | None = None,
     ) -> None:
         self._meta = meta
         self._args = args
@@ -39,7 +35,7 @@ class SpellContext:
         return self._args
 
     @property
-    def browser(self) -> BrowserContext:
+    def browser(self) -> BrowserContextBase:
         if self._browser is None:
             msg = "browser context not available for this spell"
             raise RuntimeError(msg)
@@ -49,17 +45,19 @@ class SpellContext:
     def has_browser(self) -> bool:
         return self._browser is not None
 
-    # -- Convenience proxies to BrowserContext --
+    # -- Convenience proxies to BrowserContextBase --
 
-    async def navigate(self, url: str, *, timeout: float | None = None) -> ActionResult:
-        # ``timeout=None`` lets the BrowserContext fall back to its configured
+    async def navigate(
+        self, url: str, *, timeout: float | None = None
+    ) -> dict[str, Any]:
+        # ``timeout=None`` lets the browser context fall back to its configured
         # navigation_timeout — keeps the spell DSL free of hard-coded numbers.
         return await self.browser.navigate(url, timeout=timeout)
 
     async def snapshot(self, *, mode: str = "accessible") -> PageSnapshot:
         return await self.browser.snapshot(mode=mode)
 
-    async def action(self, kind: str, target: str, **kw: Any) -> ActionResult:
+    async def action(self, kind: str, target: str, **kw: Any) -> dict[str, Any]:
         return await self.browser.action(kind, target, **kw)
 
     async def evaluate(self, js: str) -> Any:
@@ -67,7 +65,7 @@ class SpellContext:
 
     async def network(
         self, *, since: int | str = "last_action"
-    ) -> list[NetworkRequest]:
+    ) -> list[dict[str, Any]]:
         return await self.browser.network(since=since)
 
     async def screenshot(self, *, full_page: bool = False) -> bytes:

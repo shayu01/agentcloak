@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agentcloak.browser.base import BrowserContextBase
-from agentcloak.browser.protocol import BrowserContext
 from agentcloak.browser.state import BrowserState, ElementRef, PageSnapshot, TabInfo
 from agentcloak.core.types import StealthTier
 
@@ -13,7 +12,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
-    "BrowserContext",
     "BrowserContextBase",
     "BrowserState",
     "ElementRef",

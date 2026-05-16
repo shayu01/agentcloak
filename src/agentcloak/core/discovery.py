@@ -1,4 +1,14 @@
-"""mDNS service discovery for daemon ↔ bridge auto-connect."""
+"""mDNS service discovery for daemon ↔ bridge auto-connect.
+
+``zeroconf`` is an optional dependency with no type stubs of its own. The
+file-level pyright suppressions cover the resulting "unknown" diagnostics so
+we don't have to spray ``# pyright: ignore`` over every line that touches a
+zeroconf object.
+"""
+
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false
+# pyright: reportUnknownParameterType=false, reportUnknownArgumentType=false
+# pyright: reportUnusedImport=false
 
 from __future__ import annotations
 

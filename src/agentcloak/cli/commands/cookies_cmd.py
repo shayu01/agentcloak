@@ -45,7 +45,11 @@ def cookies_import(
         ...,
         "--cookies",
         "-c",
-        help='JSON array of cookie objects, e.g. \'[{"name":"k","value":"v","domain":".example.com","path":"/"}]\'.',
+        help=(
+            "JSON array of cookie objects, e.g. "
+            '\'[{"name":"k","value":"v",'
+            '"domain":".example.com","path":"/"}]\'.'
+        ),
     ),
 ) -> None:
     """Import cookies into the browser (supports httpOnly)."""

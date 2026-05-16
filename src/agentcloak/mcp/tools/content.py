@@ -1,9 +1,12 @@
 """Content tools — evaluate JS, fetch with cookies."""
 
+# pyright: reportUnusedFunction=false
+# Tools register via @mcp.tool decorator side-effect.
+
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import orjson
 from mcp.types import ToolAnnotations
@@ -56,7 +59,11 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
         except AgentBrowserError as exc:
             return error_json(exc)
 
-        data = envelope.get("data", envelope)
+        # Daemon envelopes are untyped JSON; cast to ``dict[str, Any]`` once
+        # so pyright stops widening every ``.get`` into ``Unknown | None``.
+        data: dict[str, Any] = cast(
+            "dict[str, Any]", envelope.get("data", envelope) or {}
+        )
         # Design decision (audit #10): MCP-specific auto-unwrap. The CLI
         # surface returns the raw daemon payload verbatim, but agents on the
         # MCP side often pass JSON.stringify(...) at the end of their snippet
@@ -66,7 +73,7 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
         # round-trip through their reasoning loop. The CLI does NOT do this —
         # CLI callers either consume JSON via ``jq`` (where escaping is fine)
         # or pipe through their own parser.
-        actual = data.get("result") if isinstance(data, dict) else None
+        actual = data.get("result")
         if isinstance(actual, str) and len(actual) > 1 and actual[0] in ("{", "["):
             with contextlib.suppress(orjson.JSONDecodeError, ValueError):
                 parsed = orjson.loads(actual)
@@ -98,10 +105,10 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
         """
         headers: dict[str, Any] | None = None
         if headers_json is not None:
-            if isinstance(headers_json, str):
-                headers = orjson.loads(headers_json)
-            else:
-                headers = headers_json
+            # ``headers_json`` is typed as ``str | None``; we already filtered
+            # ``None`` above. ``orjson.loads`` handles malformed JSON via the
+            # surrounding try/except in ``format_call``.
+            headers = orjson.loads(headers_json)
         return await format_call(
             client.fetch(
                 url,

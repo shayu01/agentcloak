@@ -14,7 +14,6 @@ specifics — when something goes wrong they either raise
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import orjson
@@ -115,7 +114,6 @@ logger = structlog.get_logger()
 __all__ = [
     "register_routers",
     "router",
-    "setup_routes",
 ]
 
 router = APIRouter()
@@ -1013,25 +1011,10 @@ def register_routers(app: Any) -> None:
     app.include_router(router)
 
 
-def setup_routes(app: Any) -> None:  # pragma: no cover - shim
-    """Backward-compatible alias for :func:`register_routers`.
-
-    Older tests imported ``setup_routes`` from this module. The FastAPI
-    rewrite renamed it but this shim keeps the legacy import working.
-    """
-    if hasattr(app, "include_router"):
-        register_routers(app)
-        return
-    logging.getLogger(__name__).warning(
-        "setup_routes called on non-FastAPI app; routes are FastAPI-only now"
-    )
-
-
-# --- Compatibility re-exports for tests -------------------------------------
-# Legacy tests import ``_batch_has_refs``, ``_resolve_action_refs``, ``_traverse``
-# from this module. The implementations live in ``ActionService`` now, but we
-# re-export the same callables here so tests that hand-build the helpers keep
-# working without modification.
+# --- Test-facing helper re-exports ------------------------------------------
+# These three callables live on ``ActionService`` and are re-exported here so
+# the route-level unit tests can exercise the parsing logic without going
+# through the full daemon stack.
 
 _batch_has_refs = ActionService.has_refs
 _resolve_action_refs = ActionService.resolve_refs

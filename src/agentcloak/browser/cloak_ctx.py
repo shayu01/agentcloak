@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agentcloak.browser.playwright_ctx import PlaywrightContext, _find_free_port
+from agentcloak.browser.playwright_ctx import PlaywrightContext, find_free_port
 from agentcloak.core.errors import BackendError
 from agentcloak.core.seq import RingBuffer, SeqCounter
 from agentcloak.core.types import StealthTier
@@ -63,7 +63,7 @@ async def launch_cloak(
     ext_args = _build_extension_args(extensions)
 
     # Allocate a free port for CDP; Chrome 90+ supports pipe+port coexistence.
-    cdp_port = _find_free_port()
+    cdp_port = find_free_port()
     all_args = [*ext_args, f"--remote-debugging-port={cdp_port}"]
 
     seq_counter = SeqCounter()

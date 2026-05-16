@@ -1,5 +1,8 @@
 """Dialog tool — handle browser dialogs (alert, confirm, prompt)."""
 
+# pyright: reportUnusedFunction=false
+# Tools register via @mcp.tool decorator side-effect.
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal

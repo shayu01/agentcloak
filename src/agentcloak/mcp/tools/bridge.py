@@ -1,5 +1,10 @@
 """Bridge UX tools -- tab claiming and session lifecycle."""
 
+# pyright: reportUnusedFunction=false
+# Each ``agentcloak_*`` async def below is registered with FastMCP via the
+# ``@mcp.tool`` decorator's side-effect; pyright's strict mode flags them as
+# unused because no other code calls them by name.
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal

@@ -1,5 +1,8 @@
 """Capture tools — traffic recording (write) and querying (read)."""
 
+# pyright: reportUnusedFunction=false
+# Tools register via @mcp.tool decorator side-effect.
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
