@@ -24,6 +24,11 @@ let currentService = null; // "agentcloak-daemon" or "agentcloak-bridge"
 let isReconnecting = false;
 let agentTabGroupId = null; // Chrome tab group for agent-managed tabs
 let managedTabIds = new Set(); // tabs created or claimed by agent
+// activeTabId is the implicit target for every command that doesn't carry
+// an explicit tabId. Updated by navigate (when it creates a tab), claim,
+// tab_new, tab_switch. Persisted to chrome.storage so the service worker
+// can restore it after the MV3 worker terminates and respawns.
+let activeTabId = null;
 
 // --- Badge ---
 // Four states map onto traffic-light semantics that match the badge skill:
@@ -105,6 +110,7 @@ async function restoreAttachedTabs() {
     "_attached_tabs",
     "_agent_tab_group_id",
     "_managed_tab_ids",
+    "_active_tab_id",
   ]);
   if (data._attached_tabs) {
     for (const [tabId, val] of data._attached_tabs) {
@@ -136,6 +142,17 @@ async function restoreAttachedTabs() {
       } catch {
         // tab no longer exists
       }
+    }
+  }
+  // Restore activeTabId — verify the tab still exists. If it's gone we'll
+  // get null back and the next command requiring an active tab will fail
+  // cleanly with "no active tab" instead of trying to drive a dead tabId.
+  if (data._active_tab_id != null) {
+    try {
+      await chrome.tabs.get(data._active_tab_id);
+      activeTabId = data._active_tab_id;
+    } catch {
+      activeTabId = null;
     }
   }
 }
@@ -359,7 +376,7 @@ async function connect() {
     ws.send(JSON.stringify({ id: msg.id, ...result }));
   };
 
-  ws.onclose = (event) => {
+  ws.onclose = async (event) => {
     console.log(
       `[agentcloak] disconnected (code=${event.code}, reason=${event.reason})`
     );
@@ -370,6 +387,32 @@ async function connect() {
     currentHost = null;
     currentPort = null;
     currentService = null;
+
+    // Drop agent state on disconnect. The agent owns these tabs only as
+    // long as the WS is live; once the channel breaks we hand them back
+    // to the user (ungroup + detach) so they're not stuck in an orphan
+    // blue group with no way to be controlled. State will be re-built
+    // when the agent reconnects and reclaims.
+    if (managedTabIds.size > 0) {
+      const tids = Array.from(managedTabIds);
+      for (const tid of tids) {
+        try {
+          await chrome.tabs.ungroup(tid);
+        } catch {
+          // tab may already be ungrouped / closed
+        }
+        try {
+          await detachTab(tid);
+        } catch {
+          // ignore
+        }
+      }
+      managedTabIds.clear();
+      agentTabGroupId = null;
+      await setActiveTabId(null);
+      await saveTabGroupState();
+      await removeAllCspRules();
+    }
 
     // Auth / mutual-exclusion failures are user-actionable, so we flag
     // them as "err" (red badge) and persist the close code+reason for
@@ -497,6 +540,8 @@ async function handleCommand(msg) {
         return await cmdScreenshot(msg);
       case "evaluate":
         return await cmdEvaluate(msg);
+      case "page_info":
+        return await cmdPageInfo(msg);
       case "cookies":
         return await cmdCookies(msg);
       case "tabs":
@@ -643,12 +688,28 @@ async function detachTab(tabId) {
 }
 
 function resolveTabId(msg) {
-  return msg.tabId || msg.params?.tabId;
+  // Order: explicit param > top-level field > module-level activeTabId.
+  // We deliberately do NOT fall back to chrome.tabs.query({active:true})
+  // here — that would hijack whatever tab the user happens to be looking
+  // at, which is the exact behaviour the dogfood report flagged as wrong
+  // for first-time navigate.
+  return (
+    msg.params?.tabId ||
+    msg.params?.tab_id ||
+    msg.tabId ||
+    msg.tab_id ||
+    activeTabId ||
+    null
+  );
 }
 
-async function getActiveTabId() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id;
+async function setActiveTabId(tabId) {
+  activeTabId = tabId;
+  try {
+    await chrome.storage.local.set({ _active_tab_id: tabId });
+  } catch {
+    // best-effort persistence
+  }
 }
 
 // --- Navigate with CDP event wait (replaces setTimeout) ---
@@ -672,13 +733,41 @@ function waitForDebuggerEvent(tabId, eventName, timeoutMs) {
 }
 
 async function cmdNavigate(msg) {
-  const tabId = resolveTabId(msg) || (await getActiveTabId());
-  if (!tabId) return { ok: false, error: "no active tab" };
-
-  const url = msg.params?.url;
+  const url = msg.params?.url || msg.url;
   if (!url) return { ok: false, error: "url required" };
 
   const waitUntil = msg.params?.waitUntil || "load";
+  let tabId = resolveTabId(msg);
+
+  // No active tab yet → create one rather than hijacking the user's tab.
+  // This matches the dogfood expectation: first navigate after switching
+  // to remote_bridge should open a fresh tab in the agentcloak group,
+  // not redirect whatever page the user is currently reading.
+  if (!tabId) {
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab.id;
+    await setActiveTabId(tabId);
+    await ensureAttached(tabId);
+
+    // Wait for the new tab to finish loading. chrome.tabs.create resolves
+    // before the navigation finishes, so we listen for the same CDP event
+    // as the in-place path below.
+    const eventName =
+      waitUntil === "domcontentloaded"
+        ? "Page.domContentEventFired"
+        : "Page.loadEventFired";
+    await waitForDebuggerEvent(tabId, eventName, 30000);
+
+    const finalTab = await chrome.tabs.get(tabId);
+    return {
+      ok: true,
+      data: {
+        url: finalTab.url || url,
+        title: finalTab.title || "",
+        frameId: null,
+      },
+    };
+  }
 
   await ensureAttached(tabId);
 
@@ -708,7 +797,7 @@ async function cmdNavigate(msg) {
 }
 
 async function cmdScreenshot(msg) {
-  const tabId = resolveTabId(msg) || (await getActiveTabId());
+  const tabId = resolveTabId(msg);
   if (!tabId) return { ok: false, error: "no active tab" };
 
   await ensureAttached(tabId);
@@ -721,83 +810,90 @@ async function cmdScreenshot(msg) {
   return { ok: true, data: { base64: result.data } };
 }
 
-// --- Dual execution path: scripting API first, CDP fallback ---
-
-// Hints that mark Path A failure as CSP-related, where falling back to CDP
-// (which can bypass CSP because we strip the headers for attached tabs) is
-// the right call. For other errors (SyntaxError, ReferenceError, code bugs)
-// we just surface them so the caller sees the real problem.
-const CSP_ERROR_HINTS = [
-  "content security policy",
-  "violates the following content security policy",
-  "refused to execute inline script",
-  "refused to evaluate",
-  "blocked by csp",
-  "csp directive",
-  "unsafe-eval",
-  "unsafe-inline",
-  "executescript",
-];
-
-function isCspError(err) {
-  const msg = (err && (err.message || String(err))) || "";
-  const lower = msg.toLowerCase();
-  return CSP_ERROR_HINTS.some((hint) => lower.includes(hint));
+// page_info — return current url/title/tabId without touching evaluate.
+// snapshot() needs this for every call, so going through Runtime.evaluate
+// is both slower and a single point of failure (the evaluate bug from A1
+// dragged down snapshot too). chrome.tabs.get is the canonical source and
+// always works, even when the page is mid-navigation or blank.
+async function cmdPageInfo(msg) {
+  const tabId = resolveTabId(msg);
+  if (!tabId) return { ok: false, error: "no active tab" };
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return {
+      ok: true,
+      data: { url: tab.url || "", title: tab.title || "", tab_id: tab.id },
+    };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || "page_info failed" };
+  }
 }
 
+// --- evaluate via CDP Runtime.evaluate ---
+//
+// Old design used chrome.scripting.executeScript first (Path A) and fell back
+// to CDP only on CSP errors. That path had two fatal bugs:
+//   1. executeScript wraps in `new Function("return " + code)()` so an async
+//      expression returns a Promise object instead of its resolved value.
+//   2. The structured-clone boundary between content script and service worker
+//      silently drops non-cloneable values, producing `undefined`.
+// CDP Runtime.evaluate with awaitPromise:true + returnByValue:true gives us
+// resolved values for both sync and async expressions, and surfaces real
+// errors via exceptionDetails. CSP isn't a concern because we strip CSP
+// headers via declarativeNetRequest for every attached tab (see ensureAttached).
+
 async function cmdEvaluate(msg) {
-  const tabId = resolveTabId(msg) || (await getActiveTabId());
+  const tabId = resolveTabId(msg);
   if (!tabId) return { ok: false, error: "no active tab" };
 
-  const js = msg.params?.js || msg.params?.expression;
+  const js = msg.params?.js || msg.params?.expression || msg.js;
   if (!js) return { ok: false, error: "js expression required" };
 
-  // Path A: chrome.scripting.executeScript (fast, no debugger bar)
-  let pathAError = null;
-  try {
-    const wrapped = `(async () => { ${js} })()`;
-    const [frame] = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: (code) => {
-        return new Function("return " + code)();
-      },
-      args: [wrapped],
-    });
-    return { ok: true, data: { result: frame.result } };
-  } catch (e) {
-    pathAError = e;
-    // Only fall through to Path B for CSP-related failures. For real script
-    // errors (syntax, reference, runtime exceptions) we want the caller to
-    // see them — double-executing via CDP would either re-throw or mask them.
-    if (!isCspError(e)) {
-      return {
-        ok: false,
-        error: (e && e.message) || "evaluation error",
-      };
-    }
-  }
-
-  // Path B: CDP fallback (only reached when Path A hit CSP)
   await ensureAttached(tabId);
-  const result = await chrome.debugger.sendCommand(
-    { tabId },
-    "Runtime.evaluate",
-    {
-      expression: js,
-      returnByValue: true,
-      awaitPromise: true,
+
+  const timeoutMs = msg.params?.timeout || 30000;
+
+  try {
+    const result = await chrome.debugger.sendCommand(
+      { tabId },
+      "Runtime.evaluate",
+      {
+        expression: js,
+        awaitPromise: true,
+        returnByValue: true,
+        timeout: timeoutMs,
+      }
+    );
+
+    if (result.exceptionDetails) {
+      const exc = result.exceptionDetails;
+      const errMsg =
+        exc.text ||
+        exc.exception?.description ||
+        exc.exception?.value ||
+        "evaluation error";
+      return { ok: false, error: errMsg };
     }
-  );
 
-  if (result.exceptionDetails) {
-    return {
-      ok: false,
-      error: result.exceptionDetails.text || "evaluation error",
-    };
+    // Runtime.evaluate returns the result wrapped in a RemoteObject. With
+    // returnByValue we get the actual value in .value; without it (e.g. for
+    // non-serializable objects) we get a description in .description.
+    const remote = result.result;
+    let value;
+    if (remote && Object.prototype.hasOwnProperty.call(remote, "value")) {
+      value = remote.value;
+    } else if (remote && remote.type === "undefined") {
+      value = null;
+    } else if (remote && remote.description) {
+      value = remote.description;
+    } else {
+      value = null;
+    }
+
+    return { ok: true, data: { result: value } };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || "evaluation error" };
   }
-
-  return { ok: true, data: { result: result.result?.value } };
 }
 
 async function cmdCookies(msg) {
@@ -806,7 +902,7 @@ async function cmdCookies(msg) {
   if (url) {
     cookies = await chrome.cookies.getAll({ url });
   } else {
-    const tabId = resolveTabId(msg) || (await getActiveTabId());
+    const tabId = resolveTabId(msg);
     if (tabId) {
       const tab = await chrome.tabs.get(tabId);
       cookies = await chrome.cookies.getAll({ url: tab.url });
@@ -846,6 +942,10 @@ async function cmdTabNew(msg) {
       `[agentcloak] tab_new attach failed for tab ${tab.id}: ${e.message}`
     );
   }
+  // A freshly created tab is now the implicit target for subsequent
+  // commands. Without this the agent has to do an explicit tab_switch
+  // before snapshot/click, which was a recurring papercut in the dogfood.
+  await setActiveTabId(tab.id);
   return {
     ok: true,
     data: {
@@ -871,6 +971,11 @@ async function cmdTabClose(msg) {
     return { ok: false, error: e.message };
   }
   managedTabIds.delete(tabId);
+  if (activeTabId === tabId) {
+    // Active tab vanished — clear activeTabId so the next command either
+    // creates a fresh tab (navigate) or fails with a clean "no active tab".
+    await setActiveTabId(null);
+  }
   await saveTabGroupState();
   return { ok: true, data: { closed: true, tab_id: tabId } };
 }
@@ -882,6 +987,7 @@ async function cmdTabSwitch(msg) {
   }
   try {
     const tab = await chrome.tabs.update(tabId, { active: true });
+    await setActiveTabId(tab.id);
     return {
       ok: true,
       data: {
@@ -900,7 +1006,7 @@ async function cmdFetch(msg) {
   // Run fetch inside the active tab's page context so we inherit its
   // cookies + origin headers — this is what callers expect when they fetch
   // via a logged-in remote browser.
-  const tabId = resolveTabId(msg) || (await getActiveTabId());
+  const tabId = resolveTabId(msg);
   if (!tabId) return { ok: false, error: "no active tab" };
 
   const url = msg.params?.url;
@@ -961,7 +1067,7 @@ async function cmdFetch(msg) {
 }
 
 async function cmdCDP(msg) {
-  const tabId = resolveTabId(msg) || (await getActiveTabId());
+  const tabId = resolveTabId(msg);
   if (!tabId) return { ok: false, error: "no active tab" };
 
   const method = msg.params?.method || msg.method;
@@ -987,11 +1093,19 @@ async function cmdBatch(msg) {
   return { ok: true, data: { results, completed: results.length } };
 }
 
-// --- Tab Claiming (R6.1) ---
+// --- Tab Claiming ---
+//
+// Two scenarios:
+//   1. First claim — tab isn't in managedTabIds. ensureAttached adds it to
+//      the blue "agentcloak" group (creating the group if needed).
+//   2. Hand-back — the tab is in managedTabIds but we're in handoff state
+//      (group recolored green by cmdFinalize). Restore the group label so
+//      the user sees the agent has retaken control. ensureAttached still
+//      runs to re-establish the debugger session.
 
 async function cmdClaim(msg) {
-  const tabId = msg.params?.tabId;
-  const urlPattern = msg.params?.urlPattern;
+  const tabId = msg.params?.tabId || msg.params?.tab_id;
+  const urlPattern = msg.params?.urlPattern || msg.params?.url_pattern;
 
   if (!tabId && !urlPattern) {
     return { ok: false, error: "tabId or urlPattern required" };
@@ -1008,9 +1122,7 @@ async function cmdClaim(msg) {
   } else {
     // Find first tab matching URL substring
     const allTabs = await chrome.tabs.query({});
-    targetTab = allTabs.find(
-      (t) => t.url && t.url.includes(urlPattern)
-    );
+    targetTab = allTabs.find((t) => t.url && t.url.includes(urlPattern));
     if (!targetTab) {
       return {
         ok: false,
@@ -1019,8 +1131,33 @@ async function cmdClaim(msg) {
     }
   }
 
-  // Attach debugger to the claimed tab
+  const isHandBack = managedTabIds.has(targetTab.id);
+
+  // Attach debugger to the claimed tab (also adds it to the agent group
+  // via ensureTabGroup).
   await ensureAttached(targetTab.id);
+
+  // Hand-back: restore the group to the active blue label. ensureTabGroup
+  // re-adds the tab but doesn't relabel an existing group, so we have to
+  // explicitly flip it back from the green "handing off..." state.
+  if (isHandBack && agentTabGroupId != null) {
+    try {
+      await chrome.tabGroups.update(agentTabGroupId, {
+        title: "agentcloak",
+        color: "blue",
+        collapsed: false,
+      });
+    } catch (e) {
+      console.log(
+        `[agentcloak] claim group restore failed: ${e.message}`
+      );
+    }
+  }
+
+  // Claiming sets the implicit active tab. Without this the agent has to
+  // do an explicit tab_switch right after claim, which was a sharp edge
+  // surfaced in the dogfood report.
+  await setActiveTabId(targetTab.id);
 
   return {
     ok: true,
@@ -1029,28 +1166,43 @@ async function cmdClaim(msg) {
       url: targetTab.url,
       title: targetTab.title,
       claimed: true,
+      handBack: isHandBack,
     },
   };
 }
 
-// --- Session Finalize (R6.3) ---
+// --- Session Finalize ---
+//
+// Two modes only — the old "deliverable" variant was redundant once we
+// landed on the "blue group = agent has permission to take over" mental
+// model. `deliverable` is kept as a deprecated alias for `close` so older
+// scripts don't break, but it just routes to the close path.
+//
+//   close   — agent fully releases the session: close every tab it touched,
+//             delete the group, drop all state.
+//   handoff — agent steps back but the tabs stay open for the user. The
+//             group is kept (just recolored green/"handing off...") so the
+//             agent can re-claim those tabs later via cmdClaim, which
+//             restores them to blue/"agentcloak" automatically.
 
 async function cmdFinalize(msg) {
-  const mode = msg.params?.mode || "close";
-  const validModes = ["close", "handoff", "deliverable"];
+  let mode = msg.params?.mode || "close";
+  // Deprecated alias: `deliverable` collapses into `close`. Kept for
+  // backwards compatibility with the v0.2.0 RemoteBridge surface.
+  if (mode === "deliverable") mode = "close";
 
+  const validModes = ["close", "handoff"];
   if (!validModes.includes(mode)) {
     return {
       ok: false,
-      error: `invalid mode: ${mode}. Use: ${validModes.join(", ")}`,
+      error: `invalid mode: ${mode}. Use: close, handoff (deliverable → close)`,
     };
   }
 
   const tabIds = Array.from(managedTabIds);
-  let result = { mode, tabsAffected: 0 };
+  const result = { mode, tabsAffected: 0 };
 
   if (mode === "close") {
-    // Close all tabs in the agent group, reset group tracking
     let closed = 0;
     for (const tid of tabIds) {
       try {
@@ -1063,34 +1215,25 @@ async function cmdFinalize(msg) {
     }
     managedTabIds.clear();
     agentTabGroupId = null;
+    await setActiveTabId(null);
     result.tabsAffected = closed;
-  } else if (mode === "handoff") {
-    // Ungroup tabs (remove from group but keep open for user)
-    for (const tid of tabIds) {
-      try {
-        await detachTab(tid);
-        await chrome.tabs.ungroup(tid);
-      } catch {
-        // ignore errors for already-ungrouped tabs
-      }
-    }
-    result.tabsAffected = tabIds.length;
-    managedTabIds.clear();
-    agentTabGroupId = null;
-  } else if (mode === "deliverable") {
-    // Rename group to "agentcloak results", change color to green
+  } else {
+    // handoff: detach debugger, KEEP group (recolored green), KEEP tabs.
+    // Crucially we do NOT call chrome.tabs.ungroup and we do NOT clear
+    // managedTabIds — that's what makes hand-back via cmdClaim work.
     if (agentTabGroupId != null) {
       try {
         await chrome.tabGroups.update(agentTabGroupId, {
-          title: "agentcloak results",
+          title: "handing off...",
           color: "green",
           collapsed: false,
         });
-      } catch {
-        // group may have been removed
+      } catch (e) {
+        console.log(
+          `[agentcloak] handoff group update failed: ${e.message}`
+        );
       }
     }
-    // Detach debugger but keep tabs in group
     for (const tid of tabIds) {
       try {
         await detachTab(tid);
@@ -1098,9 +1241,10 @@ async function cmdFinalize(msg) {
         // ignore
       }
     }
+    // Drop active focus so subsequent commands fail loudly rather than
+    // silently driving a tab the agent is supposed to have released.
+    await setActiveTabId(null);
     result.tabsAffected = tabIds.length;
-    managedTabIds.clear();
-    agentTabGroupId = null;
   }
 
   // After finalize there should be no per-tab CSP rules left.
@@ -1110,13 +1254,51 @@ async function cmdFinalize(msg) {
   return { ok: true, data: result };
 }
 
-// Clean up debugger attachments and managed tabs when tabs close
+// Clean up debugger attachments and managed tabs when tabs close.
+// Also forward the event upstream so the daemon can clear its own
+// active_tab_id if the gone tab was the one it was driving.
 chrome.tabs.onRemoved.addListener((tabId) => {
   attachedTabs.delete(tabId);
   managedTabIds.delete(tabId);
+  if (activeTabId === tabId) {
+    activeTabId = null;
+    chrome.storage.local.set({ _active_tab_id: null }).catch(() => {});
+  }
   removeCspRuleForTab(tabId);
   saveAttachedTabs();
   saveTabGroupState();
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: "tab_event", event: "removed", tabId }));
+    } catch {
+      // best-effort notification
+    }
+  }
+});
+
+// Notify the daemon when the user (or the page itself) navigates a
+// managed tab — the daemon may want to refresh cached page info or, in
+// future, surface a "user took control" signal to the agent. We only
+// fire on URL changes, not loading/status flips, to avoid drowning the
+// daemon in noise from every page lifecycle event.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo.url) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!managedTabIds.has(tabId)) return; // only forward for tabs we manage
+  try {
+    ws.send(
+      JSON.stringify({
+        type: "tab_event",
+        event: "updated",
+        tabId,
+        url: changeInfo.url,
+        title: tab?.title || "",
+      })
+    );
+  } catch {
+    // best-effort notification
+  }
 });
 
 // On install, ensure any leftover global CSP rule (from older extension

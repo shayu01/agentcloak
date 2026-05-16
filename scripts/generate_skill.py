@@ -76,7 +76,7 @@ GROUPS: list[tuple[str, list[str]]] = [
         ],
     ),
     ("Spells", ["/spell/list", "/spell/run"]),
-    ("Bridge", ["/bridge/claim", "/bridge/finalize"]),
+    ("Bridge", ["/bridge/claim", "/bridge/finalize", "/bridge/token/reset"]),
 ]
 
 # Route → CLI command mapping. The CLI command tree uses typer groups
@@ -124,6 +124,7 @@ ROUTE_TO_CLI: dict[str, str] = {
     "/spell/run": "cloak spell run NAME",
     "/bridge/claim": "cloak bridge claim",
     "/bridge/finalize": "cloak bridge finalize",
+    "/bridge/token/reset": "cloak bridge token --reset",
 }
 
 # Route → MCP tool. Several routes share a single tool that branches on an
@@ -172,6 +173,7 @@ ROUTE_TO_MCP: dict[str, str] = {
     "/spell/run": "agentcloak_spell_run",
     "/bridge/claim": "agentcloak_bridge (action=claim)",
     "/bridge/finalize": "agentcloak_bridge (action=finalize)",
+    "/bridge/token/reset": "agentcloak_bridge (action=token_reset)",
     "/resume": "agentcloak_resume",
     "/shutdown": "(daemon lifecycle — not exposed)",
     "/launch": "agentcloak_launch",

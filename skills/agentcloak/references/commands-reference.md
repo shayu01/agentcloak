@@ -312,6 +312,11 @@ Read this file when you need full parameter detail. For the common path, the qui
 - Body:
   - `mode` (string, default: "close")
 
+### `POST /bridge/token/reset`
+
+- CLI: `cloak bridge token --reset`
+- MCP: `agentcloak_bridge (action=token_reset)`
+
 ## Other
 
 ### `POST /launch`

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +18,21 @@ def _make_client() -> TestClient:
     store = CaptureStore()
     type(ctx).capture_store = PropertyMock(return_value=store)
     type(ctx).seq = PropertyMock(return_value=0)
+    # capture_start/stop became async on BrowserContextBase so backends can
+    # run setup hooks (e.g. CDP Network.enable for RemoteBridge). The route
+    # now awaits them, so the mock has to be an AsyncMock or TestClient
+    # blows up trying to await a MagicMock. We mirror the base impl's
+    # contract: start the store and return the recording state dict.
+    def _start() -> dict[str, Any]:
+        store.start()
+        return {"recording": True}
+
+    def _stop() -> dict[str, Any]:
+        store.stop()
+        return {"recording": False, "entries": len(store)}
+
+    ctx.capture_start = AsyncMock(side_effect=_start)
+    ctx.capture_stop = AsyncMock(side_effect=_stop)
     app.state.browser_ctx = ctx
     return TestClient(app)
 

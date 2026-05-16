@@ -15,7 +15,7 @@ import contextlib
 import json
 import time
 import uuid
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import structlog
 
@@ -26,6 +26,11 @@ from agentcloak.browser.state import (
     PageSnapshot,
     PendingDialog,
     TabInfo,
+)
+from agentcloak.core.capture import (
+    CaptureEntry,
+    is_recordable_content,
+    truncate_body,
 )
 from agentcloak.core.errors import BackendError, BrowserTimeoutError
 from agentcloak.core.types import StealthTier
@@ -62,6 +67,14 @@ class RemoteBridgeContext(BrowserContextBase):
         # _active_frame is set to a frameId string (or None for main) on this
         # backend. The base class declares the slot but stores Any.
         self._active_frame_id: str | None = None
+        # Network capture state — populated from CDP ``Network.*`` events the
+        # Extension forwards after ``Network.enable`` is sent. The dict keys
+        # by CDP requestId so requestWillBeSent / responseReceived /
+        # loadingFinished can stitch a single entry together. ``_capture_tasks``
+        # tracks the background tasks fetching response bodies so they aren't
+        # garbage-collected mid-flight.
+        self._pending_captures: dict[str, dict[str, Any]] = {}
+        self._capture_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def stealth_tier(self) -> StealthTier:
@@ -131,6 +144,28 @@ class RemoteBridgeContext(BrowserContextBase):
             params = msg.get("params", {})
             if method == "Page.javascriptDialogOpening":
                 self._handle_dialog_event(params)
+            elif method.startswith("Network.") and self._capture_store.recording:
+                # Only build capture entries while recording — dropping events
+                # otherwise saves memory on busy pages.
+                self._handle_network_event(method, params)
+            return
+
+        if msg.get("type") == "tab_event":
+            # The extension fires these so we don't have to poll. Right now
+            # the only state we care about is informational logging — the
+            # extension already owns activeTabId tracking; the daemon side
+            # mostly needs to know "the user reclaimed control" eventually,
+            # which is out of scope for this phase.
+            event = msg.get("event")
+            tab_id = msg.get("tabId")
+            if event == "removed":
+                logger.debug("ext_tab_removed", tab_id=tab_id)
+            elif event == "updated":
+                logger.debug(
+                    "ext_tab_updated",
+                    tab_id=tab_id,
+                    url=msg.get("url"),
+                )
             return
 
         msg_id = msg.get("id")
@@ -145,13 +180,19 @@ class RemoteBridgeContext(BrowserContextBase):
         return await self._send("navigate", {"url": url})
 
     async def _get_page_info(self) -> tuple[str, str]:
-        result = await self._send("evaluate", {"js": "[document.URL, document.title]"})
-        raw = result.get("result")
-        if not isinstance(raw, list):
+        # Use the dedicated page_info bridge command instead of evaluate.
+        # snapshot() calls this on every invocation, so making it depend
+        # on evaluate (and thus on CSP, on async-promise plumbing, on
+        # structured-clone serialization, etc.) was the single largest
+        # source of "snapshot has no URL" bugs in the v0.2.0 dogfood.
+        # chrome.tabs.get on the extension side is the canonical source
+        # and works even while the page is mid-navigation.
+        try:
+            result = await self._send("page_info", {})
+        except BackendError:
+            # Extension hasn't been updated yet — degrade rather than crash.
             return "", ""
-        url = str(raw[0]) if len(raw) > 0 else ""
-        title = str(raw[1]) if len(raw) > 1 else ""
-        return url, title
+        return str(result.get("url", "")), str(result.get("title", ""))
 
     # ------------------------------------------------------------------
     # Atomic: AX tree + DOM/content snapshots
@@ -813,10 +854,35 @@ class RemoteBridgeContext(BrowserContextBase):
     # ------------------------------------------------------------------
 
     async def _tab_list_impl(self) -> list[TabInfo]:
-        # Remote bridge currently exposes one logical tab; if it grows multi-tab,
-        # this should query the bridge for the list.
-        url, title = await self._get_page_info()
-        return [TabInfo(tab_id=0, url=url, title=title, active=True)]
+        # The extension's "tabs" command already filters out chrome:// URLs
+        # and returns the full set of user tabs. The TabInfo dataclass we
+        # return here is what the daemon serializes to CLI/MCP, so it has to
+        # match the Playwright adapter's shape exactly (tab_id is int, etc).
+        try:
+            raw = await self._send("tabs", {})
+        except BackendError:
+            return []
+        # _send is annotated dict[str, Any] but cmdTabs sets `data` to a
+        # plain list, which _send returns directly. Cast straight to the
+        # documented runtime shape — pyright can't prove it, the extension
+        # contract does.
+        entries: list[dict[str, Any]] = cast(
+            "list[dict[str, Any]]", raw if isinstance(raw, list) else []
+        )
+        out: list[TabInfo] = []
+        for entry in entries:
+            tab_id_val = entry.get("id")
+            if not isinstance(tab_id_val, int):
+                continue
+            out.append(
+                TabInfo(
+                    tab_id=tab_id_val,
+                    url=str(entry.get("url", "")),
+                    title=str(entry.get("title", "")),
+                    active=bool(entry.get("active", False)),
+                )
+            )
+        return out
 
     async def _tab_new_impl(self, url: str | None) -> dict[str, Any]:
         result = await self._send("tab_new", {"url": url} if url else {})
@@ -939,6 +1005,181 @@ class RemoteBridgeContext(BrowserContextBase):
         return await self.send_command(
             "cdp", {"method": method, "params": params or {}}
         )
+
+    # ------------------------------------------------------------------
+    # Capture (CDP Network domain)
+    # ------------------------------------------------------------------
+    # PlaywrightAdapter records via Page event listeners wired at launch
+    # time. RemoteBridge has no equivalent — we drive ``Network.enable``
+    # over the existing CDP channel and reconstruct entries from the events
+    # the Extension forwards back through ``feed_message``.
+
+    async def _capture_setup_impl(self) -> None:
+        try:
+            await self._send(
+                "cdp",
+                {"method": "Network.enable", "params": {}},
+            )
+        except Exception:
+            logger.warning("network_enable_failed", exc_info=True)
+
+    async def _capture_teardown_impl(self) -> None:
+        try:
+            await self._send(
+                "cdp",
+                {"method": "Network.disable", "params": {}},
+            )
+        except Exception:
+            logger.warning("network_disable_failed", exc_info=True)
+        # Drop any in-flight entries that never reached ``loadingFinished``
+        # — they would otherwise leak across capture sessions.
+        self._pending_captures.clear()
+
+    def _handle_network_event(
+        self, method: str, params: dict[str, Any]
+    ) -> None:
+        """Stitch CDP ``Network.*`` events into :class:`CaptureEntry` records.
+
+        Each requestId moves through three states:
+        requestWillBeSent → responseReceived → loadingFinished. The first
+        two mutate the pending entry; the last triggers an async
+        ``Network.getResponseBody`` and pushes the finalised entry into
+        the shared :class:`CaptureStore`.
+        """
+        request_id = str(params.get("requestId", ""))
+        if not request_id:
+            return
+
+        if method == "Network.requestWillBeSent":
+            request_obj = cast("dict[str, Any]", params.get("request") or {})
+            req_headers = cast(
+                "dict[str, Any]", request_obj.get("headers") or {}
+            )
+            self._pending_captures[request_id] = {
+                "request_id": request_id,
+                "url": str(request_obj.get("url", "")),
+                "method": str(request_obj.get("method", "GET")),
+                "request_headers": self._stringify_headers(req_headers),
+                "request_body": request_obj.get("postData"),
+                # CDP uses lowercase resource type strings ("xhr", "fetch",
+                # "stylesheet", ...). Default to "other" for safety.
+                "resource_type": str(params.get("type", "other")).lower(),
+                "wall_time": float(params.get("wallTime", 0) or 0),
+                "request_seq": self._seq_counter.value,
+                "status": 0,
+                "content_type": "",
+                "response_headers": {},
+            }
+            return
+
+        if method == "Network.responseReceived":
+            entry = self._pending_captures.get(request_id)
+            if entry is None:
+                return
+            response_obj = cast(
+                "dict[str, Any]", params.get("response") or {}
+            )
+            resp_headers = cast(
+                "dict[str, Any]", response_obj.get("headers") or {}
+            )
+            entry["status"] = int(response_obj.get("status", 0) or 0)
+            entry["response_headers"] = self._stringify_headers(resp_headers)
+            entry["content_type"] = str(
+                response_obj.get("mimeType", "") or ""
+            )
+            return
+
+        if method == "Network.loadingFinished":
+            entry = self._pending_captures.pop(request_id, None)
+            if entry is None:
+                return
+            task = asyncio.ensure_future(self._finalize_capture(entry))
+            self._capture_tasks.add(task)
+            task.add_done_callback(self._capture_tasks.discard)
+            return
+
+        if method == "Network.loadingFailed":
+            # Request died before producing a body — keep the partial entry
+            # if we at least saw a status, but skip getResponseBody since
+            # it would just 404.
+            entry = self._pending_captures.pop(request_id, None)
+            if entry is None or entry.get("status", 0) == 0:
+                return
+            task = asyncio.ensure_future(
+                self._finalize_capture(entry, fetch_body=False)
+            )
+            self._capture_tasks.add(task)
+            task.add_done_callback(self._capture_tasks.discard)
+
+    async def _finalize_capture(
+        self, entry: dict[str, Any], *, fetch_body: bool = True
+    ) -> None:
+        """Fetch the response body if recordable, then push to the store."""
+        from datetime import UTC, datetime
+
+        resp_body: str | None = None
+        content_type = str(entry.get("content_type", ""))
+        if fetch_body and is_recordable_content(content_type):
+            try:
+                body_result = await self._send(
+                    "cdp",
+                    {
+                        "method": "Network.getResponseBody",
+                        "params": {"requestId": entry["request_id"]},
+                    },
+                )
+                raw_body = str(body_result.get("body", ""))
+                if body_result.get("base64Encoded"):
+                    try:
+                        raw_body = base64.b64decode(raw_body).decode(
+                            "utf-8", errors="replace"
+                        )
+                    except Exception:
+                        raw_body = ""
+                resp_body = truncate_body(raw_body)
+            except Exception:
+                logger.debug(
+                    "get_response_body_failed",
+                    request_id=entry.get("request_id"),
+                    exc_info=True,
+                )
+
+        wall_time = float(entry.get("wall_time", 0) or 0)
+        if wall_time > 0:
+            timestamp = datetime.fromtimestamp(wall_time, tz=UTC).isoformat()
+        else:
+            timestamp = datetime.now(UTC).isoformat()
+
+        capture_entry = CaptureEntry(
+            seq=int(entry.get("request_seq", self._seq_counter.value)),
+            timestamp=timestamp,
+            method=str(entry.get("method", "GET")),
+            url=str(entry.get("url", "")),
+            status=int(entry.get("status", 0)),
+            resource_type=str(entry.get("resource_type", "other")),
+            request_headers=dict(entry.get("request_headers", {})),
+            response_headers=dict(entry.get("response_headers", {})),
+            request_body=entry.get("request_body"),
+            response_body=resp_body,
+            content_type=content_type,
+            duration_ms=0.0,
+        )
+        # ``add()`` enforces its own resource-type / extension skip filter,
+        # so we don't double-filter here — matches Playwright's behaviour.
+        self._capture_store.add(capture_entry)
+
+    @staticmethod
+    def _stringify_headers(raw: dict[str, Any]) -> dict[str, str]:
+        """CDP header values arrive as strings or lists — flatten to ``str``."""
+        result: dict[str, str] = {}
+        for k, v in raw.items():
+            if isinstance(v, list):
+                # Each header line gets concatenated with ", " to mirror the
+                # representation Playwright uses in its own capture entries.
+                result[str(k)] = ", ".join(str(item) for item in v)  # type: ignore[arg-type]
+            else:
+                result[str(k)] = str(v)
+        return result
 
     async def _close_impl(self) -> None:
         if not self._ws.closed:

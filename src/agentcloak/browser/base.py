@@ -730,6 +730,41 @@ class BrowserContextBase(ABC):
         return await self._raw_cdp_impl(method, params)
 
     # ------------------------------------------------------------------
+    # Capture (network traffic recording)
+    # ------------------------------------------------------------------
+    # The Playwright backend captures via Page event listeners wired at launch
+    # time, so it needs no extra setup here. The RemoteBridge backend relies
+    # on CDP ``Network.*`` events from the Chrome Extension; ``_capture_*_impl``
+    # hooks give it a place to send ``Network.enable``/``Network.disable``
+    # without forcing the route layer to know which backend is active.
+
+    async def capture_start(self) -> dict[str, Any]:
+        """Start recording network traffic. Subclasses may extend via hooks."""
+        self._capture_store.start()
+        try:
+            await self._capture_setup_impl()
+        except Exception:
+            logger.debug("capture_setup_failed", exc_info=True)
+        return {"recording": True}
+
+    async def capture_stop(self) -> dict[str, Any]:
+        """Stop recording network traffic. Subclasses may extend via hooks."""
+        try:
+            await self._capture_teardown_impl()
+        except Exception:
+            logger.debug("capture_teardown_failed", exc_info=True)
+        self._capture_store.stop()
+        return {"recording": False, "entries": len(self._capture_store)}
+
+    async def _capture_setup_impl(self) -> None:
+        """Hook for backend-specific capture setup. Default no-op."""
+        return None
+
+    async def _capture_teardown_impl(self) -> None:
+        """Hook for backend-specific capture teardown. Default no-op."""
+        return None
+
+    # ------------------------------------------------------------------
     # Element resolution (shared helpers — subclasses can override
     # _click_impl etc. and look up the element themselves)
     # ------------------------------------------------------------------

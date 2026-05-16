@@ -55,6 +55,7 @@ from agentcloak.daemon.models import (
     BridgeClaimRequest,
     BridgeFinalizeRequest,
     BridgeOpResponse,
+    BridgeTokenResetResponse,
     CaptureAnalyzeResponse,
     CaptureClearResponse,
     CaptureExportResponse,
@@ -707,6 +708,29 @@ async def handle_bridge_finalize(
     return _ok(result, seq=0)
 
 
+@router.post(
+    "/bridge/token/reset",
+    response_model=OkEnvelope[BridgeTokenResetResponse],
+)
+async def handle_bridge_token_reset(request: Request) -> dict[str, Any]:
+    """Rotate the persistent bridge auth token and hot-update the daemon.
+
+    Persists the new token to ``~/.agentcloak/config.toml`` *and* replaces
+    ``app.state.bridge_token`` so the previous value becomes invalid
+    immediately — already-paired extensions will be rejected on their next
+    reconnect (close code 4001). CLI ``agentcloak bridge token --reset``
+    delegates here when a daemon is running so users don't need to restart
+    just to rotate the credential.
+    """
+    from agentcloak.core.config import load_config, regenerate_bridge_token
+
+    paths, cfg = load_config()
+    new_token = regenerate_bridge_token(paths, cfg)
+    request.app.state.bridge_token = new_token
+    logger.info("bridge_token_rotated", token_suffix=new_token[-4:])
+    return _ok({"token": new_token, "rotated": True}, seq=0)
+
+
 # --- Cookies ----------------------------------------------------------------
 
 
@@ -776,14 +800,17 @@ async def handle_cookies_import(
 
 @router.post("/capture/start", response_model=OkEnvelope[CaptureStatusResponse])
 async def handle_capture_start(ctx: BrowserCtxDep) -> dict[str, Any]:
-    service = CaptureService(ctx.capture_store)
-    return _ok(service.start(), seq=ctx.seq)
+    # ctx.capture_start() runs the backend's ``_capture_setup_impl`` hook
+    # (no-op for Playwright, ``Network.enable`` for RemoteBridge) so capture
+    # works uniformly across both backends.
+    result = await ctx.capture_start()
+    return _ok(result, seq=ctx.seq)
 
 
 @router.post("/capture/stop", response_model=OkEnvelope[CaptureStatusResponse])
 async def handle_capture_stop(ctx: BrowserCtxDep) -> dict[str, Any]:
-    service = CaptureService(ctx.capture_store)
-    return _ok(service.stop(), seq=ctx.seq)
+    result = await ctx.capture_stop()
+    return _ok(result, seq=ctx.seq)
 
 
 @router.get("/capture/status", response_model=OkEnvelope[CaptureStatusResponse])

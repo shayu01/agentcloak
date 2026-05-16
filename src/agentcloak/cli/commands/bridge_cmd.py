@@ -169,26 +169,59 @@ def bridge_token(
     extension's WebSocket connection.
 
     ``--reset`` rotates the token; any already-paired extensions will
-    have to be re-configured.
+    have to be re-configured. If a daemon is running we route the rotation
+    through it so the in-memory token is replaced atomically, otherwise we
+    fall back to writing the new value into ``config.toml`` and the next
+    daemon start will pick it up.
     """
+    from agentcloak.client import DaemonClient
     from agentcloak.core.config import (
         ensure_bridge_token,
         load_config,
         regenerate_bridge_token,
     )
+    from agentcloak.core.errors import AgentBrowserError, DaemonConnectionError
 
     paths, cfg = load_config()
-    if reset:
-        token = regenerate_bridge_token(paths, cfg)
-        action = "reset"
-    else:
-        token = ensure_bridge_token(paths, cfg)
-        action = "show"
 
+    if reset:
+        # Prefer the daemon-side reset so any already-connected extension is
+        # severed on its next reconnect (close code 4001). Auto-start is off
+        # because the user explicitly asked for a rotate — silently spawning
+        # a daemon to do it would be surprising.
+        client = DaemonClient(auto_start=False)
+        hot_updated = False
+        new_token = ""
+        try:
+            result = client.bridge_token_reset_sync()
+            data = result.get("data", result)
+            new_token = str(data.get("token", "") or "")
+            hot_updated = bool(new_token)
+        except (DaemonConnectionError, AgentBrowserError):
+            # Daemon not running (or returned an error) — fall back to the
+            # offline path. The next ``daemon start`` reads the new token.
+            new_token = ""
+
+        if not new_token:
+            new_token = regenerate_bridge_token(paths, cfg)
+
+        output_json(
+            {
+                "token": new_token,
+                "action": "reset",
+                "hot_updated": hot_updated,
+                "config_file": str(paths.config_file),
+            },
+            seq=0,
+        )
+        return
+
+    token = ensure_bridge_token(paths, cfg)
     output_json(
         {
             "token": token,
-            "action": action,
+            "action": "show",
+            "hot_updated": False,
             "config_file": str(paths.config_file),
         },
         seq=0,

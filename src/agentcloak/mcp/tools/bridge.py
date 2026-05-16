@@ -30,32 +30,38 @@ def _error_envelope(error: str, hint: str, action: str) -> str:
 def register(mcp: FastMCP, client: DaemonClient) -> None:
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_bridge(
-        action: Literal["claim", "finalize"] = "claim",
+        action: Literal["claim", "finalize", "token_reset"] = "claim",
         tab_id: int = -1,
         url_pattern: str = "",
         mode: str = "close",
     ) -> str:
-        """Manage remote browser tabs via the Chrome Extension bridge.
+        """Manage remote browser sessions via the Chrome Extension bridge.
 
         Actions:
-          claim    -- take control of a user-opened tab (attach debugger,
-                      add to agentcloak tab group). Provide tab_id or url_pattern.
-          finalize -- end the agent session. Modes:
-                        close       -- close all agent-managed tabs (default)
-                        handoff     -- ungroup tabs, leave open for user
-                        deliverable -- rename group to 'agentcloak results' (green)
+          claim       -- take control of a user-opened tab (attach debugger,
+                         add to agentcloak tab group). Provide tab_id or
+                         url_pattern.
+          finalize    -- end the agent session. Modes:
+                           close       -- close all agent-managed tabs (default)
+                           handoff     -- ungroup tabs, leave open for user
+                           deliverable -- rename group to 'agentcloak results'
+          token_reset -- rotate the persistent bridge auth token and refresh
+                         the daemon's in-memory copy. Any already-paired
+                         extensions are dropped on next reconnect.
 
-        Requires: Chrome Extension connected via bridge or daemon /ext.
+        Requires: Chrome Extension connected via bridge or daemon /ext (claim
+        and finalize only; token_reset works against any running daemon).
 
         Args:
-            action: 'claim' to take over a tab, 'finalize' to end session
+            action: 'claim', 'finalize', or 'token_reset'
             tab_id: Chrome tab ID to claim (only for claim action)
             url_pattern: URL substring to match for claiming (only for claim)
-            mode: Finalize mode -- close, handoff, or deliverable (only for finalize)
+            mode: Finalize mode -- close, handoff, or deliverable
 
         Returns:
-            claim: {tabId, url, title, claimed}.
-            finalize: {mode, tabsAffected}.
+            claim:       {tabId, url, title, claimed}.
+            finalize:    {mode, tabsAffected}.
+            token_reset: {token, rotated}.
         """
         if action == "claim":
             if tab_id < 0 and not url_pattern:
@@ -81,8 +87,11 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
                 )
             return await format_call(client.bridge_finalize(mode=mode))
 
+        if action == "token_reset":
+            return await format_call(client.bridge_token_reset())
+
         return _error_envelope(
             error="unknown_action",
             hint=f"Unknown bridge action: {action}",
-            action="use claim or finalize",
+            action="use claim, finalize, or token_reset",
         )

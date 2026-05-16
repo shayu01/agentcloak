@@ -968,6 +968,10 @@ class DaemonClient:
     def bridge_finalize_sync(self, *, mode: str = "close") -> dict[str, Any]:
         return self._send_sync("POST", "/bridge/finalize", json_body={"mode": mode})
 
+    def bridge_token_reset_sync(self) -> dict[str, Any]:
+        """Hot-rotate the persistent bridge token via the running daemon."""
+        return self._send_sync("POST", "/bridge/token/reset")
+
     # --- Spell ---
 
     def spell_list_sync(self) -> dict[str, Any]:
@@ -1308,6 +1312,10 @@ class DaemonClient:
         return await self._send_async(
             "POST", "/bridge/finalize", json_body={"mode": mode}
         )
+
+    async def bridge_token_reset(self) -> dict[str, Any]:
+        """Hot-rotate the persistent bridge token via the running daemon."""
+        return await self._send_async("POST", "/bridge/token/reset")
 
     # --- Spell (async) ---
 

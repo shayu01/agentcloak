@@ -529,6 +529,19 @@ class BridgeOpResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class BridgeTokenResetResponse(BaseModel):
+    """Result of rotating the persistent bridge auth token.
+
+    The new token is returned so the caller can hand it to the extension
+    immediately, and ``rotated=true`` confirms the in-memory state on the
+    daemon side has been refreshed (so any already-connected extensions
+    will be rejected on their next reconnect).
+    """
+
+    token: str
+    rotated: bool = True
+
+
 # --- Launch ---
 
 
