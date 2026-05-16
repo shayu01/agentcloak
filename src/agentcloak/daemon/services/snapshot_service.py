@@ -24,6 +24,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from agentcloak.browser._snapshot_builder import (
+    count_diff,
     diff_snapshots,
     render_diff_tree,
     truncate_diff_lines,
@@ -69,8 +70,12 @@ class SnapshotService:
         cur_cache = getattr(ctx, "_cached_lines", None)
 
         diff_applied = False
+        diff_counts_payload: dict[str, int] | None = None
         if diff and prev_cached_lines is not None and cur_cache is not None:
             diff_lines = diff_snapshots(prev_cached_lines, cur_cache)
+            # Count before truncation so totals stay accurate even when the
+            # tree was clipped by max_nodes.
+            counts = count_diff(diff_lines)
             # build_snapshot already truncated snap.tree_text, but the diff
             # overlay is rendered from the full cached lines and would blow
             # past that limit. Re-apply the same node-level cap here so
@@ -89,6 +94,11 @@ class SnapshotService:
                 truncated_at=new_truncated_at,
             )
             diff_applied = True
+            diff_counts_payload = {
+                "added": counts.added,
+                "changed": counts.changed,
+                "removed": counts.removed,
+            }
 
         data: dict[str, Any] = {
             "url": snap.url,
@@ -102,6 +112,8 @@ class SnapshotService:
         }
         if diff:
             data["diff"] = diff_applied
+            if diff_counts_payload is not None:
+                data["diff_counts"] = diff_counts_payload
         if snap.truncated_at > 0:
             data["truncated_at"] = snap.truncated_at
         if include_selector_map:

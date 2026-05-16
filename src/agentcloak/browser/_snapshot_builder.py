@@ -21,9 +21,11 @@ from agentcloak.browser.state import (
 )
 
 __all__ = [
+    "DiffCounts",
     "FrameData",
     "SnapshotResult",
     "build_snapshot",
+    "count_diff",
     "diff_snapshots",
     "render_diff_tree",
     "truncate_diff_lines",
@@ -88,6 +90,25 @@ class SnapshotResult:
     selector_map: dict[int, ElementRef]
     backend_node_map: dict[int, int]
     cached_lines: list[tuple[int, str, int | None]]
+
+
+@dataclass
+class DiffCounts:
+    """Counts of added/changed/removed lines from a :func:`diff_snapshots` call.
+
+    The header renderer surfaces this as ``| diff: +A ~C -R`` so agents see at
+    a glance how much changed without having to scan the tree. Zero counts
+    across the board signal "no changes" so the header can collapse to
+    ``| (no changes)``.
+    """
+
+    added: int = 0
+    changed: int = 0
+    removed: int = 0
+
+    @property
+    def is_empty(self) -> bool:
+        return self.added == 0 and self.changed == 0 and self.removed == 0
 
 
 def _clean_text(text: str) -> str:
@@ -564,6 +585,26 @@ def diff_snapshots(
         result.append((0, f"# removed: {refs_str}", None, None))
 
     return result
+
+
+def count_diff(diff_lines: list[DiffLine]) -> DiffCounts:
+    """Count added (``+``), changed (``~``), and removed lines in a diff.
+
+    The "# removed: [N] [M]" trailing summary line emitted by
+    :func:`diff_snapshots` is detected by its prefix so the removed total
+    survives a downstream truncation that may have dropped the summary's
+    detail tail.
+    """
+    counts = DiffCounts()
+    for _depth, text, _ref, marker in diff_lines:
+        if marker == "+":
+            counts.added += 1
+        elif marker == "~":
+            counts.changed += 1
+        elif marker is None and text.startswith("# removed:"):
+            # Each `[N]` token in the summary corresponds to one removed ref.
+            counts.removed += text.count("[")
+    return counts
 
 
 def render_diff_tree(diff_lines: list[DiffLine]) -> str:

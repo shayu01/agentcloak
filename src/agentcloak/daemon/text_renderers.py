@@ -212,7 +212,10 @@ def render_snapshot_text(data: dict[str, Any]) -> str:
 
     When the daemon truncated the tree, the renderer appends a trailing
     ``--- shown N of total. Continue with --offset N ---`` so the agent
-    knows how to page forward.
+    knows how to page forward — but only when ``build_snapshot`` didn't
+    already emit its own ``--- not shown: ... ---`` summary inside the tree
+    (which it does whenever ``max_nodes`` truncation hits). Otherwise we'd
+    print two adjacent truncation lines that say the same thing.
     """
     title = _clip_title(str(data.get("title", "") or ""))
     url = str(data.get("url", "") or "")
@@ -221,9 +224,19 @@ def render_snapshot_text(data: dict[str, Any]) -> str:
     seq = int(data.get("seq", 0) or 0)
     diff_info = ""
     if data.get("diff"):
-        # SnapshotService doesn't currently expose +/-/~ counts inline; emit
-        # the bare marker so callers know diff mode was active.
-        diff_info = " | diff"
+        raw_counts = data.get("diff_counts")
+        counts = _as_dict(raw_counts) if isinstance(raw_counts, dict) else {}
+        added = int(counts.get("added", 0) or 0)
+        changed = int(counts.get("changed", 0) or 0)
+        removed = int(counts.get("removed", 0) or 0)
+        if counts and (added or changed or removed):
+            diff_info = f" | diff: +{added} ~{changed} -{removed}"
+        elif counts:
+            # Counts dict present but all zero → diff ran and found nothing.
+            diff_info = " | (no changes)"
+        else:
+            # Backward compat: route omitted counts → just mark diff active.
+            diff_info = " | diff"
     truncated_at = data.get("truncated_at")
     showing = ""
     if truncated_at:
@@ -235,12 +248,36 @@ def render_snapshot_text(data: dict[str, Any]) -> str:
     )
     tree = str(data.get("tree_text", "") or "")
     body = f"{header}\n{tree}".rstrip("\n")
-    if truncated_at:
+    if truncated_at and not _tree_has_inline_truncation(tree):
         body += (
             f"\n--- {int(truncated_at)}/{total_nodes} nodes shown. "
             f"Continue with --offset {int(truncated_at)} ---"
         )
     return body
+
+
+def _tree_has_inline_truncation(tree: str) -> bool:
+    """Return True when ``tree_text`` already ends with a ``--- not shown ---`` summary.
+
+    ``build_snapshot``/``truncate_diff_lines`` append their own summary line
+    when a node-level cap clipped the output. The header-level
+    ``--- N/total shown ---`` is a fallback meant for the JSON-only cases
+    where the inline summary isn't emitted (e.g. char-level truncation that
+    only sets ``truncated_at`` without a summary line). Detecting either
+    inline marker prevents the double-summary regression.
+    """
+    if not tree:
+        return False
+    # Iterate the last few non-blank lines; the summary line is always at the
+    # tail but a trailing newline may push it off the strict last position.
+    for line in reversed(tree.splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        return stripped.startswith("--- not shown") or stripped.startswith(
+            "--- truncated"
+        )
+    return False
 
 
 def render_screenshot_text(data: dict[str, Any]) -> str:

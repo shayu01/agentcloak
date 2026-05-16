@@ -88,6 +88,66 @@ class TestRemoteBridgeContext:
         ctx = RemoteBridgeContext(bridge_ws=ws)
         ctx.feed_message(json.dumps({"id": "unknown", "ok": True}))
 
+    def test_feed_message_stores_prompt_dialog_as_pending(self) -> None:
+        """confirm/prompt dialogs must surface as ``_pending_dialog``.
+
+        ``Page.javascriptDialogOpening`` for alert + beforeunload auto-accepts
+        (covered separately because the auto-accept path schedules an async
+        task that needs a running loop). confirm/prompt block on agent input
+        and *must* live in ``_pending_dialog`` so the dialog status route
+        returns the right state.
+        """
+        ws = MagicMock()
+        ws.closed = False
+        ctx = RemoteBridgeContext(bridge_ws=ws)
+        assert ctx._pending_dialog is None
+
+        ctx.feed_message(
+            json.dumps(
+                {
+                    "type": "cdp_event",
+                    "method": "Page.javascriptDialogOpening",
+                    "params": {
+                        "type": "prompt",
+                        "message": "Enter your name",
+                        "defaultPrompt": "Anonymous",
+                        "url": "https://example.com/",
+                    },
+                }
+            )
+        )
+
+        pending = ctx._pending_dialog
+        assert pending is not None
+        assert pending.dialog_type == "prompt"
+        assert pending.message == "Enter your name"
+        assert pending.default_value == "Anonymous"
+
+    def test_feed_message_stores_confirm_dialog_as_pending(self) -> None:
+        """Confirm dialogs also need to block until the agent decides."""
+        ws = MagicMock()
+        ws.closed = False
+        ctx = RemoteBridgeContext(bridge_ws=ws)
+
+        ctx.feed_message(
+            json.dumps(
+                {
+                    "type": "cdp_event",
+                    "method": "Page.javascriptDialogOpening",
+                    "params": {
+                        "type": "confirm",
+                        "message": "Delete this item?",
+                        "url": "https://example.com/",
+                    },
+                }
+            )
+        )
+
+        pending = ctx._pending_dialog
+        assert pending is not None
+        assert pending.dialog_type == "confirm"
+        assert pending.message == "Delete this item?"
+
     @pytest.mark.asyncio
     async def test_send_raises_when_disconnected(self) -> None:
         from agentcloak.core.errors import BackendError

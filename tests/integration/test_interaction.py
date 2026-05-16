@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 import pytest
@@ -33,11 +34,27 @@ async def test_fill_and_submit_form(browser_context: Any, local_server: str) -> 
     assert fill_result["filled"]
 
     click_result = await browser_context.action("click", str(submit_index))
-    # CloakBrowser humanize delays may cause navigation to not be
-    # detected within the action return window. If navigation
-    # happened, verify the new URL; otherwise verify click succeeded.
-    if click_result.get("caused_navigation"):
-        assert "result.html" in click_result.get("new_url", "")
+    # CloakBrowser humanize delays may push navigation past the action return
+    # window, so the click can come back before the page swap completes.
+    # Wait briefly for the navigation to settle and re-check the URL before
+    # asserting; that removes the flakiness without forcing a hard sleep.
+    if not click_result.get("caused_navigation"):
+        # Best-effort wait — if the page never navigates we still want to
+        # assert the click succeeded rather than hang the suite. 3000ms is
+        # the upper bound we're willing to spend on humanize-induced lag.
+        with contextlib.suppress(Exception):
+            await browser_context.wait(
+                condition="url",
+                value="result.html",
+                timeout=3000,
+            )
+    current_url = ""
+    with contextlib.suppress(Exception):
+        snap_after = await browser_context.snapshot(mode="compact")
+        current_url = snap_after.url
+    if click_result.get("caused_navigation") or "result.html" in current_url:
+        target_url = click_result.get("new_url", "") or current_url
+        assert "result.html" in target_url
     else:
         assert click_result.get("clicked") or click_result.get("ok")
 

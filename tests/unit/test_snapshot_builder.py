@@ -6,6 +6,7 @@ from agentcloak.browser._snapshot_builder import (
     FrameData,
     SnapshotResult,
     build_snapshot,
+    count_diff,
     diff_snapshots,
     render_diff_tree,
     truncate_diff_lines,
@@ -346,6 +347,37 @@ class TestDiffSnapshots:
         result = diff_snapshots(previous, current)
         # "Welcome" gone, "Goodbye" new
         assert result[0][3] == "+"
+
+
+class TestCountDiff:
+    """count_diff feeds the ``| diff: +A ~C -R`` header summary in text mode."""
+
+    def test_all_zero_when_identical(self) -> None:
+        lines = [
+            (0, '[1] button "A"', 1),
+        ]
+        counts = count_diff(diff_snapshots(lines, lines))
+        assert counts.added == 0
+        assert counts.changed == 0
+        assert counts.removed == 0
+        assert counts.is_empty
+
+    def test_counts_added_changed_removed(self) -> None:
+        previous = [
+            (0, '[1] button "Submit"', 1),
+            (0, '[2] link "More"', 2),
+            (0, '[3] checkbox "Agree"', 3),
+        ]
+        current = [
+            (0, '[1] button "Submit" disabled', 1),  # changed
+            (0, '[4] link "Brand new"', 4),  # added
+        ]
+        counts = count_diff(diff_snapshots(previous, current))
+        assert counts.added == 1
+        assert counts.changed == 1
+        # [2] and [3] both removed
+        assert counts.removed == 2
+        assert not counts.is_empty
 
     def test_mixed_scenario(self) -> None:
         """Full mixed scenario: unchanged, added, changed, removed."""
