@@ -20,7 +20,7 @@ pip install agentcloak
 - `agentcloak-mcp` MCP server（23 个工具）
 - CloakBrowser 隐身浏览器后端（默认）
 - httpcloak TLS 指纹代理（用于 `cloak fetch`）
-- 后台 daemon（aiohttp）
+- 后台 daemon（FastAPI + uvicorn，OpenAPI 规范在 `http://127.0.0.1:18765/openapi.json`）
 
 CloakBrowser 在首次使用时自动下载补丁版 Chromium 二进制文件（约 200 MB，缓存在 `~/.cloakbrowser/`）。无需手动安装浏览器。
 

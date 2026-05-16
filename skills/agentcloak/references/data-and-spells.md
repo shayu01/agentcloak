@@ -32,7 +32,7 @@ cloak navigate "https://api-heavy-site.com"
 cloak capture stop
 cloak capture export --format har -o traffic.har
 cloak capture analyze    # pattern detection: endpoint clustering, auth detection
-cloak capture replay --url "https://api.example.com/data"  # replay a captured request
+cloak capture replay "https://api.example.com/data"  # replay a captured request (URL is positional, --method GET default)
 cloak capture clear      # clear recorded data
 ```
 

@@ -166,7 +166,7 @@ graph TD
     end
 
     subgraph Engine["Engine"]
-        Daemon["Daemon<br/>aiohttp + seq counter"]
+        Daemon["Daemon<br/>FastAPI + uvicorn + seq counter"]
     end
 
     subgraph Backends["Browser Backends"]
@@ -182,7 +182,7 @@ graph TD
     Daemon --> Bridge
 ```
 
-All backends implement a unified `BrowserContext` protocol. Layer isolation is enforced: CLI cannot import browser internals, daemon cannot import CLI, backends import neither.
+All backends extend a unified `BrowserContextBase` ABC. The base owns ~900 lines of shared behaviour (action dispatch, batch, dialog, self-healing); subclasses only implement 29 atomic `_xxx_impl` operations. Layer isolation is enforced: CLI cannot import browser internals, daemon cannot import CLI, backends import neither.
 
 See the [architecture docs](docs/en/explanation/architecture.md) for a deeper walkthrough.
 

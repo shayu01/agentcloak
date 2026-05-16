@@ -1,6 +1,6 @@
 # Browser backends
 
-agentcloak supports three browser backends. Each implements the same `BrowserContext` protocol, so all CLI commands and MCP tools work identically regardless of backend.
+agentcloak supports three browser backends. Each extends the `BrowserContextBase` ABC, so all CLI commands and MCP tools work identically regardless of backend.
 
 ## Overview
 

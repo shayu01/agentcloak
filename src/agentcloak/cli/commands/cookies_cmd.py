@@ -1,4 +1,4 @@
-"""Cookie commands — export cookies from remote Chrome."""
+"""Cookie commands — export and import browser cookies."""
 
 from __future__ import annotations
 
@@ -37,3 +37,22 @@ def cookies_export(
         )
     else:
         output_json(data, seq=seq)
+
+
+@app.command("import")
+def cookies_import(
+    cookies_json: str = typer.Option(
+        ...,
+        "--cookies",
+        "-c",
+        help='JSON array of cookie objects, e.g. \'[{"name":"k","value":"v","domain":".example.com","path":"/"}]\'.',
+    ),
+) -> None:
+    """Import cookies into the browser (supports httpOnly)."""
+    import orjson
+
+    cookies = orjson.loads(cookies_json)
+    client = DaemonClient()
+    result = client.cookies_import_sync(cookies=cookies)
+    data = result.get("data", result)
+    output_json(data, seq=result.get("seq", 0))

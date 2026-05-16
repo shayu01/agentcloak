@@ -1,6 +1,6 @@
 # 浏览器后端
 
-agentcloak 支持三种浏览器后端。每个后端都实现了相同的 `BrowserContext` 协议，所有 CLI 命令和 MCP 工具在不同后端下表现一致。
+agentcloak 支持三种浏览器后端。每个后端都继承 `BrowserContextBase` ABC 抽象基类，所有 CLI 命令和 MCP 工具在不同后端下表现一致。
 
 ## 概览
 

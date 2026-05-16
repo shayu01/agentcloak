@@ -20,7 +20,7 @@ Everything is included in one install:
 - `agentcloak-mcp` MCP server (23 tools)
 - CloakBrowser stealth browser backend (default)
 - httpcloak TLS fingerprint proxy for `cloak fetch`
-- The background daemon (aiohttp)
+- The background daemon (FastAPI + uvicorn, OpenAPI at `http://127.0.0.1:18765/openapi.json`)
 
 CloakBrowser downloads its patched Chromium binary automatically on first use (~200 MB, cached at `~/.cloakbrowser/`). No manual browser install step is needed.
 

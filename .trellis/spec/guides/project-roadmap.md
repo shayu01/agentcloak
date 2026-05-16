@@ -257,14 +257,36 @@ CLI / MCP 接口审查 (done)：
 - Deliverable: **clean API surface, CI, consistency checks, ready for v0.2.0 release**
 - Ref: `research/neo-analyzer-wireshark.md`（Wireshark-MCP installer 模式）
 
-#### Phase 6: 架构优化 + 生态扩展
+#### Phase 5j: v0.2.0 架构重构（done）
 
-CLI / MCP 自动生成（从 Phase 5i 决策 D7 推出）：
-- [ ] 共享接口定义层（daemon route 元数据或独立定义文件）
-- [ ] CLI 命令从定义自动生成（替代手写 typer）
-- [ ] MCP 工具从定义自动生成（替代手写 FastMCP）
-- [ ] 新增功能只写一次定义，三层自动对齐
-- 依据：Phase 5i 审查发现 CLI/MCP/daemon 三层各自手写易出不一致，校验脚本是止损方案，自动生成是根本解决
+dogfood v0.2.0-pre 暴露系统性重复，brainstorm 出 D1-D5 决策，9 个 task T1-T9 落地。任务目录：`.trellis/tasks/05-15-quality-hardening/`。
+
+- [x] **D1: aiohttp → FastAPI + uvicorn** — 37 个 route handler 全部带 Pydantic request/response model，`/openapi.json` 自动暴露给半自动生成消费
+- [x] **D2: 统一 httpx client** — 合并 `cli/client.py` + `mcp/client.py` 为 `agentcloak.client.DaemonClient`，sync/async 双方法对，消除 15 份 `asyncio.run()`，五种 httpx 异常一对一映射到结构化 error code
+- [x] **D3: BrowserContext Protocol → ABC** — `BrowserContextBase` 拿走 ~900 行共享行为（action dispatch、batch、wait、upload、dialog、self-healing），子类只实现 29 个 `_xxx_impl` 原子操作
+- [x] **D4: 半自动生成** — `scripts/generate_skill.py --check` 校验 Skill 命令段落和 OpenAPI spec 同步，`scripts/check_surface_count.py` 校验 daemon route 数 = CLI command 数 = MCP tool 数
+- [x] **D5: bridge 迁移** — `aiohttp.web` → Starlette + `websockets` 库（uvicorn 底层已有的依赖）
+- [x] **Service 层提取** — `daemon/services/` 拿走 stale-ref retry、snapshot diff、profile CRUD、capture export、doctor 检查；route handler 变薄 HTTP 壳
+- [x] **配置统一** — 25+ 处硬编码 magic number 全部走 `AgentcloakConfig`，FastAPI `Depends(get_config)` 注入
+- [x] **错误信封统一** — 所有路径走 `register_exception_handlers()`，profile CRUD 不再绕过 `_ok()`
+- [x] **遗留清理** — `--stealth` flag、patchright compat mapping、stale "Adapter" 术语全部清除
+- [x] **浏览器自恢复** — `_check_browser_alive()` + `_looks_like_browser_closed()` heuristic，下次请求拿结构化 `browser_closed` 错误而非 raw Playwright exception
+- [x] **snapshot link href** — `_snapshot_builder` 提取 link URL 输出到 a11y tree
+- [x] **CI consistency check** — `scripts/check_surface_count.py` 集成 CI
+
+Deliverable: **v0.2.0 ready — 系统性重复消除，OpenAPI 单一事实来源，新增能力只写一处定义**
+
+依据: dogfood 报告（`.trellis/workspace/shayu/dogfood-v0.2.0-pre-release.md`），架构审计（`.trellis/tasks/05-15-quality-hardening/research/architecture-audit.md` 13 个结构性问题）。
+spec 更新：`browser/browser-backend-contract.md`（Protocol → ABC）、`deps/fastapi.md`（新增）、`deps/httpx.md`（新增）。
+
+#### Phase 6: 生态扩展
+
+> Phase 5j 已经把 CLI/MCP 自动生成的核心基础设施做完（OpenAPI 单一事实来源 + `check_surface_count` CI），原 Phase 6 「自动生成消除手写不一致」目标提前落地。剩余 Phase 6 围绕**生态扩展**展开。
+
+CLI / MCP 全自动生成（在 5j 半自动基础上推进）：
+- [ ] CLI typer 命令从 OpenAPI 完全自动生成（当前是手写薄适配）
+- [ ] MCP FastMCP 工具从 OpenAPI 完全自动生成（当前是手写薄适配）
+- [ ] 评估甜蜜点：表面特有逻辑（`--pretty` flag、screenshot base64、Skill 叙述）能否无副作用拆出
 
 jshook 松耦合（从 Phase 5h 推出）：
 - [ ] 拆除旧 6 patch 插件注入模式
@@ -277,7 +299,7 @@ jshook 松耦合（从 Phase 5h 推出）：
 - [ ] Camoufox Firefox 后端
 - [ ] network route 拦截（`page.route()`）
 - [ ] drag & drop、剪贴板
-- Deliverable: **自动生成消除手写不一致，jshook 协作稳定，生态开放**
+- Deliverable: **自动生成完全消除手写适配，jshook 协作稳定，生态开放**
 
 ---
 

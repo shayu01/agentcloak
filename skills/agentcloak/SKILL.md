@@ -92,7 +92,7 @@ All actions use `--target N` from the most recent snapshot.
 | `cloak js evaluate "expression"` | Execute JS in page |
 | `cloak fetch URL` | HTTP GET with browser cookies |
 | `cloak fetch URL --method POST --body '{...}'` | HTTP POST with cookies |
-| `cloak network requests` | Recent network requests |
+| `cloak network --since N` | Recent network requests (filter by seq after `--since N`) |
 | `cloak capture start` / `stop` / `export` | Record and export network traffic |
 
 ### Management
@@ -102,7 +102,7 @@ All actions use `--target N` from the most recent snapshot.
 | `cloak profile list` / `create` / `launch` / `delete` | Browser profile management |
 | `cloak tab list` / `new` / `close` / `switch` | Tab management |
 | `cloak spell list` / `info` / `run NAME` / `scaffold` | Spells (reusable site automation) |
-| `cloak cookies export` / `import` | Cookie management |
+| `cloak cookies export` | Export cookies from real Chrome via bridge (use daemon `/cookies/import` or MCP tool to import) |
 | `cloak cdp endpoint` | Get CDP WebSocket URL (for jshookmcp) |
 | `cloak doctor` | Self-check diagnostics |
 | `cloak bridge start` / `claim` / `finalize` | RemoteBridge (real browser) |

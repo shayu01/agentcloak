@@ -85,5 +85,7 @@ Export cookies from the real browser for use in scripts:
 ```bash
 cloak cookies export                    # export all cookies as JSON
 cloak cookies export --url "github.com" # export for specific domain
-cloak cookies import --cookies-json '[...]'  # import cookies
+
+# Import currently has no CLI wrapper — use the MCP tool agentcloak_cookies
+# with action=import, or POST to daemon /cookies/import directly.
 ```
