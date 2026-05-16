@@ -2,9 +2,9 @@
 
 # agentcloak
 
-AI agent 隐身浏览器 -- 57 个 C++ 补丁，300 token 上下文，零配置。
+Agent 原生隐身浏览器 -- 看见、交互、自动化。
 
-你的 agent 需要浏览器，这个不会被识别。
+你需要浏览器，你的 agent 也一样。
 
 [![PyPI](https://img.shields.io/pypi/v/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![Python](https://img.shields.io/pypi/pyversions/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
@@ -160,10 +160,10 @@ claude mcp add agentcloak -- agentcloak-mcp
 
 | | agentcloak | Playwright / Puppeteer | Selenium | browser-use |
 |---|---|---|---|---|
-| **反检测隐身** | 57 个 C++ 补丁 + Cloudflare 绕过 | 无（会被检测） | 无（会被检测） | 部分（Python 层补丁） |
+| **反检测隐身** | CloakBrowser 后端（C++ 补丁 Chromium） | 无（会被检测） | 无（会被检测） | 部分（Python 层补丁） |
 | **Agent 上下文开销** | ~300 tokens（按需加载） | 不适用（库，非 agent 工具） | 不适用 | ~8,000 tokens |
-| **页面寻址方式** | `[N]` 无障碍索引 | CSS 选择器 | CSS / XPath | 视觉 + 坐标 |
-| **零配置 daemon** | 自动启动，seq 状态追踪 | 手动配置 | 手动配置 + 驱动管理 | 手动配置 |
+| **页面寻址方式** | `[N]` 无障碍树索引 | CSS 选择器 | CSS / XPath | 视觉 + 坐标 |
+| **配置成本** | 零配置 daemon，自动启动 | 手动配置 | 手动配置 + 驱动管理 | 手动配置 |
 | **登录态复用** | Profile + RemoteBridge | 手动管理 cookies | 手动管理 cookies | 无 |
 
 ## 架构

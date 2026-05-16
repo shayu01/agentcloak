@@ -2,9 +2,9 @@
 
 # agentcloak
 
-Stealth browser for AI agents -- 57 C++ patches, 300-token context, zero config.
+Agent-native stealth browser -- see, interact, and automate the web.
 
-Your agents need a browser. This one won't get caught.
+You need a browser. Your agents do too.
 
 [![PyPI](https://img.shields.io/pypi/v/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![Python](https://img.shields.io/pypi/pyversions/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
@@ -160,10 +160,10 @@ See the [backends guide](docs/en/guides/backends.md) for configuration details a
 
 | | agentcloak | Playwright / Puppeteer | Selenium | browser-use |
 |---|---|---|---|---|
-| **Anti-bot stealth** | 57 C++ patches + Cloudflare bypass | None (detected) | None (detected) | Partial (Python patches) |
+| **Anti-bot stealth** | CloakBrowser backend (C++ patched Chromium) | None (detected) | None (detected) | Partial (Python patches) |
 | **Agent context cost** | ~300 tokens (Skill on-demand) | N/A (library, not agent tool) | N/A | ~8,000 tokens |
-| **Page addressing** | `[N]` a11y index | CSS selectors | CSS / XPath | Vision + coordinates |
-| **Zero-config daemon** | Auto-starts, seq tracking | Manual setup | Manual setup + driver | Manual setup |
+| **Page addressing** | `[N]` a11y tree index | CSS selectors | CSS / XPath | Vision + coordinates |
+| **Setup** | Zero-config daemon, auto-starts | Manual setup | Manual setup + driver mgmt | Manual setup |
 | **Login reuse** | Profiles + RemoteBridge | Manual cookies | Manual cookies | No |
 
 ## Architecture
