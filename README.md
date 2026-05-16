@@ -209,7 +209,17 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for developmen
 
 ## Acknowledgments
 
-Built on [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) (stealth Chromium) and [httpcloak](https://github.com/sardanioss/httpcloak) (TLS fingerprint proxy). Design informed by [bb-browser](https://github.com/epiral/bb-browser), [browser-use](https://github.com/browser-use/browser-use), [OpenCLI](https://github.com/jackwener/OpenCLI), [GenericAgent](https://github.com/lsdefine/GenericAgent), [pinchtab](https://github.com/pinchtab/pinchtab), [open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use), and [Scrapling](https://github.com/D4Vinci/Scrapling).
+Built on [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) (stealth Chromium)
+and [httpcloak](https://github.com/sardanioss/httpcloak) (TLS fingerprint proxy).
+
+Design informed by
+[bb-browser](https://github.com/epiral/bb-browser),
+[browser-use](https://github.com/browser-use/browser-use),
+[OpenCLI](https://github.com/jackwener/OpenCLI),
+[GenericAgent](https://github.com/lsdefine/GenericAgent),
+[pinchtab](https://github.com/pinchtab/pinchtab),
+[open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use),
+and [Scrapling](https://github.com/D4Vinci/Scrapling).
 
 ## License
 

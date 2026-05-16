@@ -209,7 +209,17 @@ graph TD
 
 ## 致谢
 
-基于 [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)（隐身 Chromium）和 [httpcloak](https://github.com/sardanioss/httpcloak)（TLS 指纹代理）构建。设计参考了 [bb-browser](https://github.com/epiral/bb-browser)、[browser-use](https://github.com/browser-use/browser-use)、[OpenCLI](https://github.com/jackwener/OpenCLI)、[GenericAgent](https://github.com/lsdefine/GenericAgent)、[pinchtab](https://github.com/pinchtab/pinchtab)、[open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use) 和 [Scrapling](https://github.com/D4Vinci/Scrapling)。
+基于 [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)（隐身 Chromium）
+和 [httpcloak](https://github.com/sardanioss/httpcloak)（TLS 指纹代理）构建。
+
+设计参考了
+[bb-browser](https://github.com/epiral/bb-browser)、
+[browser-use](https://github.com/browser-use/browser-use)、
+[OpenCLI](https://github.com/jackwener/OpenCLI)、
+[GenericAgent](https://github.com/lsdefine/GenericAgent)、
+[pinchtab](https://github.com/pinchtab/pinchtab)、
+[open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use)
+和 [Scrapling](https://github.com/D4Vinci/Scrapling)。
 
 ## 许可证
 
