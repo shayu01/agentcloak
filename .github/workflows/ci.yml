@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint & Type Check
+    name: Preflight Quality Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,18 +21,16 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[dev]"
-      - name: Ruff lint
-        run: ruff check src/ tests/
+      # ``ruff format --check`` isn't wrapped by preflight (style-only,
+      # rarely fires) so we keep it as a discrete step for fast feedback.
       - name: Ruff format
         run: ruff format --check src/ tests/
-      - name: Pyright
-        run: pyright
-      - name: Daemon route ↔ DaemonClient drift check
-        run: python scripts/generate_client.py --check
-      - name: SKILL command reference is in sync with OpenAPI spec
-        run: python scripts/generate_skill.py --check
-      - name: CLI / MCP / daemon surface count consistency
-        run: python scripts/check_surface_count.py
+      # Preflight wraps lint, pyright, surface-count, client drift, SKILL
+      # sync, config-docs sync, version consistency, and the typer-group
+      # smoke test in one shot. ``--skip tests`` lets the matrix job below
+      # own pytest so we don't pay for it twice in CI.
+      - name: Preflight (lint + types + drift + config + version + smoke)
+        run: python scripts/preflight.py --skip tests
 
   unit-tests:
     name: Unit Tests / Python ${{ matrix.python-version }}
