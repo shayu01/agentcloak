@@ -4,16 +4,26 @@ Today there are three separate places that run "is this thing healthy?"
 checks: CLI ``doctor`` command, MCP ``doctor`` tool, and various ad-hoc
 ``/health`` calls. This service collects all of them so each surface can call
 the same code and produce consistent output.
+
+The ``doctor`` API also exposes a fix-mode that auto-installs what the running
+process can fix on its own (Python deps, CloakBrowser binary download) and
+emits a single combined shell command for the rest (system packages, Xvfb,
+Playwright libs). When ``execute_sudo=True`` and the caller is a root/sudo
+session, the command is actually run instead of just printed.
 """
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
+import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
+
+from agentcloak.core.config import load_config
 
 __all__ = ["DiagnosticService"]
 
@@ -40,6 +50,70 @@ _CHROMIUM_BINARIES = (
 )
 
 
+# Distro → (display name, package manager argv, xvfb package name).
+# Used by the fix-mode command synthesis so we hand the user a one-liner that
+# matches their actual OS instead of always saying ``apt-get``.
+_DISTRO_PROFILES: dict[str, tuple[str, list[str], str]] = {
+    "debian": ("Debian/Ubuntu", ["apt-get", "install", "-y"], "xvfb"),
+    "ubuntu": ("Debian/Ubuntu", ["apt-get", "install", "-y"], "xvfb"),
+    "linuxmint": ("Linux Mint", ["apt-get", "install", "-y"], "xvfb"),
+    "pop": ("Pop!_OS", ["apt-get", "install", "-y"], "xvfb"),
+    "fedora": ("Fedora", ["dnf", "install", "-y"], "xorg-x11-server-Xvfb"),
+    "rhel": ("RHEL", ["dnf", "install", "-y"], "xorg-x11-server-Xvfb"),
+    "centos": ("CentOS", ["dnf", "install", "-y"], "xorg-x11-server-Xvfb"),
+    "rocky": ("Rocky Linux", ["dnf", "install", "-y"], "xorg-x11-server-Xvfb"),
+    "almalinux": ("AlmaLinux", ["dnf", "install", "-y"], "xorg-x11-server-Xvfb"),
+    "arch": ("Arch", ["pacman", "-S", "--noconfirm"], "xorg-server-xvfb"),
+    "manjaro": ("Manjaro", ["pacman", "-S", "--noconfirm"], "xorg-server-xvfb"),
+    "alpine": ("Alpine", ["apk", "add"], "xvfb"),
+    "opensuse": ("openSUSE", ["zypper", "install", "-y"], "xorg-x11-server"),
+    "opensuse-leap": ("openSUSE Leap", ["zypper", "install", "-y"], "xorg-x11-server"),
+    "opensuse-tumbleweed": (
+        "openSUSE Tumbleweed",
+        ["zypper", "install", "-y"],
+        "xorg-x11-server",
+    ),
+}
+
+
+def _detect_linux_distro() -> tuple[str, list[str], str]:
+    """Return ``(display_name, package_manager_argv, xvfb_package)`` for Linux.
+
+    Reads ``/etc/os-release`` (systemd-standardised on all modern distros). On
+    failure or unrecognised distro we fall back to the Debian profile —
+    Debian-likes are the most common server target and giving the user a
+    wrong-but-recognisable command is better than crashing the doctor.
+    """
+    os_release = Path("/etc/os-release")
+    if not os_release.is_file():
+        return _DISTRO_PROFILES["debian"]
+
+    fields: dict[str, str] = {}
+    try:
+        for raw_line in os_release.read_text().splitlines():
+            if "=" not in raw_line:
+                continue
+            key, _, val = raw_line.partition("=")
+            fields[key.strip()] = val.strip().strip('"').strip("'")
+    except OSError:
+        return _DISTRO_PROFILES["debian"]
+
+    # Prefer ID, then ID_LIKE (handles e.g. ``ID=linuxmint`` whose ID_LIKE
+    # claims ``ubuntu debian``). Lowercased so user-facing ``ID=Fedora`` still
+    # routes correctly.
+    candidates: list[str] = []
+    if "ID" in fields:
+        candidates.append(fields["ID"].lower())
+    if "ID_LIKE" in fields:
+        candidates.extend(tok.lower() for tok in fields["ID_LIKE"].split())
+
+    for cand in candidates:
+        if cand in _DISTRO_PROFILES:
+            return _DISTRO_PROFILES[cand]
+
+    return _DISTRO_PROFILES["debian"]
+
+
 class DiagnosticService:
     """Diagnostics shared by CLI / MCP / daemon."""
 
@@ -50,23 +124,231 @@ class DiagnosticService:
     def doctor(self, *, data_dir: Path) -> dict[str, Any]:
         checks: list[dict[str, Any]] = []
         checks.append(self._check_python())
+        checks.append(self._check_path_entry())
         for pkg in _REQUIRED_PACKAGES:
             checks.append(self._check_package(pkg))
         checks.append(self._check_chromium())
         checks.append(self._check_cloakbrowser_binary())
         checks.append(self._check_data_dir(data_dir))
+        checks.append(self._check_playwright_libs())
 
-        extras: list[dict[str, Any]] = [self._check_xvfb()]
+        # Xvfb is only relevant on Linux when there's no display and the user
+        # actually plans to run the browser headed. Headless mode bypasses the
+        # whole virtual framebuffer dance, so reporting "Xvfb missing" on
+        # ``headless=true`` would be a false negative.
+        extras: list[dict[str, Any]] = []
+        if self._xvfb_relevant():
+            extras.append(self._check_xvfb())
 
         all_ok = all(c["ok"] for c in checks)
         return {
             "healthy": all_ok,
             "checks": checks,
             "extras": {
-                "available": all(c["ok"] for c in extras),
+                "available": all(c["ok"] for c in extras) if extras else True,
                 "checks": extras,
             },
         }
+
+    # ------------------------------------------------------------------
+    # Doctor (fix mode) — auto-fix what we can, synthesise a command for
+    # the rest, optionally execute it under sudo.
+    # ------------------------------------------------------------------
+
+    def doctor_fix(
+        self,
+        *,
+        data_dir: Path,
+        execute_sudo: bool = False,
+    ) -> dict[str, Any]:
+        """Diagnose with side effects.
+
+        Steps:
+        1. Run a normal :meth:`doctor` pass to know what's broken.
+        2. For each fixable check, attempt an in-process repair (download the
+           CloakBrowser binary, create the data dir).
+        3. Run :meth:`doctor` again so the response reflects the post-fix
+           state and lists only the remaining issues.
+        4. Build a single shell command covering whatever still needs
+           system-level intervention. When ``execute_sudo=True`` and we have
+           sudo/root, run that command via ``subprocess.run`` and re-check.
+        """
+        before = self.doctor(data_dir=data_dir)
+        fix_actions: list[dict[str, Any]] = []
+
+        # ---- in-process fixes ----
+        # CloakBrowser binary download. We use ensure_binary so the user
+        # doesn't need to remember a separate CLI.
+        cb_check = next(
+            (c for c in before["checks"] if c["name"] == "cloakbrowser_binary"),
+            None,
+        )
+        if cb_check is not None and not cb_check["ok"]:
+            outcome = self._fix_cloakbrowser_binary()
+            fix_actions.append(outcome)
+
+        # Data directory creation (cheap, idempotent).
+        data_check = next(
+            (c for c in before["checks"] if c["name"] == "data_directory"),
+            None,
+        )
+        if data_check is not None and not Path(data_check["detail"]).exists():
+            outcome = self._fix_data_dir(data_dir)
+            fix_actions.append(outcome)
+
+        # ---- after in-process fixes, re-run checks ----
+        after = self.doctor(data_dir=data_dir)
+        command = self._synthesise_fix_command(after)
+
+        executed: dict[str, Any] | None = None
+        if execute_sudo and command:
+            executed = self._execute_fix_command(command)
+            # Re-check one more time so the response is authoritative.
+            after = self.doctor(data_dir=data_dir)
+
+        return {
+            "healthy": after["healthy"],
+            "checks": after["checks"],
+            "extras": after["extras"],
+            "fix": {
+                "before_ok": before["healthy"],
+                "actions": fix_actions,
+                "command": command,
+                "executed": executed,
+            },
+        }
+
+    # ------------------------------------------------------------------
+    # Fix helpers (in-process)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fix_cloakbrowser_binary() -> dict[str, Any]:
+        try:
+            import cloakbrowser  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
+
+            binary = str(cloakbrowser.ensure_binary())  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+            return {
+                "name": "cloakbrowser_binary",
+                "fixed": True,
+                "detail": binary,
+                "message": "downloaded patched Chromium binary",
+            }
+        except ImportError:
+            return {
+                "name": "cloakbrowser_binary",
+                "fixed": False,
+                "detail": "cloakbrowser not installed",
+                "message": "install agentcloak before running doctor --fix",
+            }
+        except Exception as exc:
+            return {
+                "name": "cloakbrowser_binary",
+                "fixed": False,
+                "detail": str(exc),
+                "message": "binary download failed; check network and retry",
+            }
+
+    @staticmethod
+    def _fix_data_dir(data_dir: Path) -> dict[str, Any]:
+        try:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            (data_dir / "profiles").mkdir(exist_ok=True)
+            (data_dir / "logs").mkdir(exist_ok=True)
+            return {
+                "name": "data_directory",
+                "fixed": True,
+                "detail": str(data_dir),
+                "message": "created data directory tree",
+            }
+        except OSError as exc:
+            return {
+                "name": "data_directory",
+                "fixed": False,
+                "detail": str(data_dir),
+                "message": f"could not create data dir: {exc}",
+            }
+
+    # ------------------------------------------------------------------
+    # Fix command synthesis
+    # ------------------------------------------------------------------
+
+    def _synthesise_fix_command(self, report: dict[str, Any]) -> str:
+        """Build a single ``&&``-chained command for outstanding issues."""
+        segments: list[str] = []
+
+        # Playwright libs: only ask for system libs if the user didn't already
+        # install them, so doctor doesn't nag on macOS/Windows where the cmd
+        # is irrelevant.
+        pw_check = next(
+            (c for c in report["checks"] if c["name"] == "playwright_libs"),
+            None,
+        )
+        if pw_check is not None and not pw_check["ok"]:
+            segments.append("sudo playwright install-deps chromium")
+
+        # Xvfb (only present in ``extras`` when relevant).
+        xvfb_check = next(
+            (c for c in report["extras"].get("checks", []) if c["name"] == "xvfb"),
+            None,
+        )
+        if xvfb_check is not None and not xvfb_check["ok"]:
+            _, mgr_argv, pkg = _detect_linux_distro()
+            segments.append("sudo " + " ".join([*mgr_argv, pkg]))
+
+        return " && ".join(segments)
+
+    @staticmethod
+    def _execute_fix_command(command: str) -> dict[str, Any]:
+        """Run the synthesised fix command.
+
+        ``execute_sudo=True`` only makes sense when the current user can
+        actually invoke sudo — we don't try to do anything fancy like
+        prompt-passing. If sudo is missing we report the gap instead of
+        silently doing nothing.
+        """
+        if os.geteuid() != 0 and shutil.which("sudo") is None:
+            return {
+                "ran": False,
+                "command": command,
+                "reason": "no sudo binary and not running as root",
+            }
+        try:
+            # We pipe stderr to stdout so the caller sees the package-manager
+            # output in one place — pacman/apt-get like to mix progress and
+            # errors freely.
+            proc = subprocess.run(
+                command,
+                shell=True,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=600,
+            )
+            return {
+                "ran": True,
+                "command": command,
+                "exit_code": proc.returncode,
+                "output": proc.stdout[-4000:],  # cap for envelope size
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                "ran": True,
+                "command": command,
+                "exit_code": None,
+                "output": "command exceeded 600s timeout",
+            }
+        except OSError as exc:
+            return {
+                "ran": False,
+                "command": command,
+                "reason": str(exc),
+            }
+
+    # ------------------------------------------------------------------
+    # Individual checks
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _check_python() -> dict[str, Any]:
@@ -77,6 +359,28 @@ class DiagnosticService:
             "ok": ok,
             "detail": platform.python_version(),
             "hint": "Python >= 3.12 required" if not ok else "",
+        }
+
+    @staticmethod
+    def _check_path_entry() -> dict[str, Any]:
+        """Warn when ``agentcloak`` isn't reachable through ``$PATH``.
+
+        ``pip install --user`` is a common foot-gun on Windows and freshly
+        installed Pythons because the user-scripts dir often isn't on PATH.
+        Doctor catches that early so the user doesn't hit ``command not found``
+        immediately after install.
+        """
+        path = shutil.which("agentcloak") or shutil.which("cloak")
+        if path:
+            return {"name": "path_entry", "ok": True, "detail": path, "hint": ""}
+        return {
+            "name": "path_entry",
+            "ok": False,
+            "detail": "agentcloak/cloak not on PATH",
+            "hint": (
+                "ensure the install scripts dir is on PATH (Windows: "
+                "%APPDATA%\\Python\\PythonXY\\Scripts; *nix: ~/.local/bin)"
+            ),
         }
 
     @staticmethod
@@ -121,38 +425,122 @@ class DiagnosticService:
         }
 
     @staticmethod
+    def _check_playwright_libs() -> dict[str, Any]:
+        """Probe for the dynamic libs Playwright/Chromium drags in on Linux.
+
+        Only Linux needs this check — macOS and Windows ship Chromium-ready
+        runtimes by default. We sample three well-known dependencies that
+        ``playwright install-deps chromium`` typically supplies; if any are
+        missing we suggest the standard install-deps command.
+        """
+        if platform.system() != "Linux":
+            return {
+                "name": "playwright_libs",
+                "ok": True,
+                "detail": "not required on this OS",
+                "hint": "",
+            }
+
+        # ldconfig prints "<libname> (...) => <path>"; matching by name is
+        # robust across distros without depending on ldd against the chromium
+        # binary itself (which may not be downloaded yet).
+        ldconfig = shutil.which("ldconfig")
+        if ldconfig is None:
+            return {
+                "name": "playwright_libs",
+                "ok": True,
+                "detail": "ldconfig unavailable, skipping deep check",
+                "hint": "run 'playwright install-deps chromium' if Chromium fails",
+            }
+        try:
+            output = subprocess.run(
+                [ldconfig, "-p"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return {
+                "name": "playwright_libs",
+                "ok": True,
+                "detail": "ldconfig probe failed, skipping deep check",
+                "hint": "",
+            }
+
+        required = ("libnss3.so", "libnssutil3.so", "libgbm.so", "libasound.so")
+        missing = [lib for lib in required if lib not in output]
+        if not missing:
+            return {
+                "name": "playwright_libs",
+                "ok": True,
+                "detail": "core libs present",
+                "hint": "",
+            }
+        return {
+            "name": "playwright_libs",
+            "ok": False,
+            "detail": "missing: " + ", ".join(missing),
+            "hint": "sudo playwright install-deps chromium",
+        }
+
+    @staticmethod
+    def _xvfb_relevant() -> bool:
+        """Return ``True`` when Xvfb is needed for the current configuration.
+
+        Xvfb is only meaningful when (a) we're on Linux, (b) there's no
+        X/Wayland display already available, and (c) the user actually plans to
+        run the browser headed. ``headless=true`` makes Xvfb irrelevant
+        regardless of the display state.
+        """
+        if platform.system() != "Linux":
+            return False
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            return False
+        try:
+            _, cfg = load_config()
+        except Exception:
+            # Config-load problems are surfaced via other checks; assume Xvfb
+            # might be needed if we can't tell.
+            return True
+        return not cfg.headless
+
+    @staticmethod
     def _check_xvfb() -> dict[str, Any]:
         path = shutil.which("Xvfb")
         if path:
             return {"name": "xvfb", "ok": True, "detail": path, "hint": ""}
+        _, mgr_argv, pkg = _detect_linux_distro()
         return {
             "name": "xvfb",
             "ok": False,
             "detail": "not found",
             "hint": (
-                "sudo apt-get install -y xvfb"
-                " (required for headed mode on headless Linux)"
+                f"install with: sudo {' '.join(mgr_argv)} {pkg} "
+                "(needed for headed mode on a Linux box without a display)"
             ),
         }
 
     @staticmethod
     def _check_cloakbrowser_binary() -> dict[str, Any]:
         try:
-            import cloakbrowser.download  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
+            import cloakbrowser  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
 
-            binary = str(cloakbrowser.download.ensure_binary())  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
-            if Path(binary).is_file():
+            info: dict[str, Any] = cloakbrowser.binary_info()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+            installed = bool(info.get("installed"))
+            detail = str(info.get("binary_path", "")) or "not downloaded"
+            if installed:
                 return {
                     "name": "cloakbrowser_binary",
                     "ok": True,
-                    "detail": binary,
+                    "detail": detail,
                     "hint": "",
                 }
             return {
                 "name": "cloakbrowser_binary",
                 "ok": False,
-                "detail": "not downloaded",
-                "hint": "run 'cloakbrowser install' to download",
+                "detail": detail,
+                "hint": "run 'agentcloak doctor --fix' to download (~200MB)",
             }
         except ImportError:
             return {
@@ -161,12 +549,12 @@ class DiagnosticService:
                 "detail": "cloakbrowser not installed",
                 "hint": "pip install agentcloak",
             }
-        except Exception:
+        except Exception as exc:
             return {
                 "name": "cloakbrowser_binary",
                 "ok": False,
-                "detail": "binary check failed",
-                "hint": "run 'cloakbrowser install' to download",
+                "detail": f"binary check failed: {exc}",
+                "hint": "run 'agentcloak doctor --fix' to download",
             }
 
     # ------------------------------------------------------------------

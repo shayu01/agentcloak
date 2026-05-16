@@ -326,7 +326,10 @@ class DaemonClient:
             raise DaemonConnectionError(
                 error="daemon_unreachable",
                 hint=f"Cannot connect to daemon at {self._host}:{self._port}",
-                action="run 'agentcloak daemon start' first",
+                action=(
+                    "run 'agentcloak daemon start -b' to launch, or "
+                    "'agentcloak doctor --fix' if the install looks broken"
+                ),
             ) from exc
         if self._auto_started:
             # We've already spawned a daemon in this client's lifetime — a
@@ -336,7 +339,10 @@ class DaemonClient:
                 hint=(
                     f"Daemon started but still unreachable at {self._host}:{self._port}"
                 ),
-                action="check daemon logs for startup errors",
+                action=(
+                    "check daemon logs (~/.agentcloak/logs/daemon.log) and "
+                    "run 'agentcloak doctor --fix' to diagnose"
+                ),
             ) from exc
 
         started = self._ensure_daemon_sync()
@@ -345,9 +351,13 @@ class DaemonClient:
                 error="daemon_auto_start_failed",
                 hint=(
                     f"Cannot connect to daemon at {self._host}:{self._port} "
-                    "and auto-start failed"
+                    "and auto-start failed within the startup budget"
                 ),
-                action="start daemon manually: agentcloak daemon start -b",
+                action=(
+                    "run 'agentcloak doctor --fix' (or 'uvx agentcloak "
+                    "doctor --fix') to diagnose, then 'agentcloak daemon "
+                    "start -b' to launch manually"
+                ),
             ) from exc
         try:
             return self._do_request_sync(
@@ -359,7 +369,10 @@ class DaemonClient:
                 hint=(
                     f"Daemon started but still unreachable at {self._host}:{self._port}"
                 ),
-                action="check daemon logs for startup errors",
+                action=(
+                    "check daemon logs (~/.agentcloak/logs/daemon.log) and "
+                    "run 'agentcloak doctor --fix' to diagnose"
+                ),
             ) from retry_exc
 
     async def _handle_connect_error_async(
@@ -375,7 +388,10 @@ class DaemonClient:
             raise DaemonConnectionError(
                 error="daemon_unreachable",
                 hint=f"Cannot connect to daemon at {self._host}:{self._port}",
-                action="run 'agentcloak daemon start' first",
+                action=(
+                    "run 'agentcloak daemon start -b' to launch, or "
+                    "'agentcloak doctor --fix' if the install looks broken"
+                ),
             ) from exc
         if self._auto_started:
             raise DaemonConnectionError(
@@ -383,7 +399,10 @@ class DaemonClient:
                 hint=(
                     f"Daemon started but still unreachable at {self._host}:{self._port}"
                 ),
-                action="check daemon logs for startup errors",
+                action=(
+                    "check daemon logs (~/.agentcloak/logs/daemon.log) and "
+                    "run 'agentcloak doctor --fix' to diagnose"
+                ),
             ) from exc
 
         started = await self._ensure_daemon_async()
@@ -392,9 +411,13 @@ class DaemonClient:
                 error="daemon_auto_start_failed",
                 hint=(
                     f"Cannot connect to daemon at {self._host}:{self._port} "
-                    "and auto-start failed"
+                    "and auto-start failed within the startup budget"
                 ),
-                action="start daemon manually: agentcloak daemon start -b",
+                action=(
+                    "run 'agentcloak doctor --fix' (or 'uvx agentcloak "
+                    "doctor --fix') to diagnose, then 'agentcloak daemon "
+                    "start -b' to launch manually"
+                ),
             ) from exc
         try:
             return await self._do_request_async(
@@ -406,7 +429,10 @@ class DaemonClient:
                 hint=(
                     f"Daemon started but still unreachable at {self._host}:{self._port}"
                 ),
-                action="check daemon logs for startup errors",
+                action=(
+                    "check daemon logs (~/.agentcloak/logs/daemon.log) and "
+                    "run 'agentcloak doctor --fix' to diagnose"
+                ),
             ) from retry_exc
 
     def _build_daemon_argv(

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from pathlib import Path
 
 import structlog
 import typer
@@ -20,6 +22,35 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+
+def _maybe_emit_first_run_banner() -> None:
+    """Nudge new users toward ``doctor`` on the very first invocation.
+
+    The data directory (``~/.agentcloak``) is created on first daemon launch.
+    Its absence is therefore a reliable "this is run #1" signal — we don't
+    want to add a separate state file just for the banner, and we can't gate
+    on the daemon being up because the user might be running ``--version`` or
+    ``--help``. The banner only prints to stderr (stdout stays a clean JSON
+    envelope for scripts) and never blocks execution.
+
+    Suppress with ``AGENTCLOAK_SKIP_FIRST_RUN_BANNER=1`` for CI / scripted
+    environments.
+    """
+    if os.environ.get("AGENTCLOAK_SKIP_FIRST_RUN_BANNER", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+    data_dir = Path.home() / ".agentcloak"
+    if data_dir.exists():
+        return
+    sys.stderr.write(
+        "agentcloak: first-run detected — verify your environment with "
+        "'agentcloak doctor --fix' (one-time; suppress with "
+        "AGENTCLOAK_SKIP_FIRST_RUN_BANNER=1).\n"
+    )
 
 
 def _configure_logging(*, verbosity: int) -> None:
@@ -200,6 +231,7 @@ _register_shortcuts()
 def main() -> None:
     from agentcloak.cli.output import output_error
 
+    _maybe_emit_first_run_banner()
     try:
         app()
     except AgentBrowserError as exc:

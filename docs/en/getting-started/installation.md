@@ -14,7 +14,15 @@ This guide covers installing agentcloak and its dependencies on all supported pl
 pip install agentcloak
 ```
 
-Everything is included in one install:
+Then verify and fix the environment in one step:
+
+```bash
+agentcloak doctor --fix
+```
+
+`doctor --fix` does the in-process work itself (downloads the CloakBrowser binary, creates the data dir) and prints a single shell command for anything that needs system-level intervention (Xvfb on Linux servers, Playwright libs). Pass `--sudo` if you want it to run that command for you.
+
+Everything is included in the one `pip install`:
 
 - `agentcloak` and `cloak` CLI commands
 - `agentcloak-mcp` MCP server (23 tools)
@@ -22,7 +30,7 @@ Everything is included in one install:
 - httpcloak TLS fingerprint proxy for `cloak fetch`
 - The background daemon (FastAPI + uvicorn, OpenAPI at `http://127.0.0.1:18765/openapi.json`)
 
-CloakBrowser downloads its patched Chromium binary automatically on first use (~200 MB, cached at `~/.cloakbrowser/`). No manual browser install step is needed.
+CloakBrowser downloads its patched Chromium binary automatically on first use (~200 MB, cached at `~/.cloakbrowser/`). Running `doctor --fix` upfront avoids that wait happening during your first navigate.
 
 ## Optional extras
 
@@ -34,68 +42,118 @@ CloakBrowser downloads its patched Chromium binary automatically on first use (~
 pip install agentcloak[discovery]
 ```
 
-## Verify the installation
+## Run without installing — uv / uvx
 
-Run the built-in diagnostics:
-
-```bash
-cloak doctor
-```
-
-This checks:
-
-- Python version
-- CloakBrowser availability and binary status
-- Daemon connectivity
-- Configuration
-
-Expected output for a fresh install:
-
-```json
-{"ok": true, "data": {"checks": [
-  {"name": "python_version", "ok": true, "value": "3.12.x"},
-  {"name": "cloakbrowser", "ok": true, "hint": "CloakBrowser available -- default backend"},
-  {"name": "default_tier", "value": "auto -> cloak"}
-]}}
-```
-
-## System dependencies
-
-### Xvfb (Linux servers only)
-
-CloakBrowser runs in headed mode because anti-bot systems detect headless browsers. On Linux servers without a display, agentcloak automatically starts Xvfb (a virtual framebuffer). Install it with:
+[uv](https://github.com/astral-sh/uv) is an ultra-fast package manager that can run agentcloak in a one-shot virtual environment:
 
 ```bash
-# Debian / Ubuntu
-sudo apt-get install -y xvfb
+# One-time environment check (no install)
+uvx agentcloak doctor --fix
 
-# RHEL / Fedora
-sudo dnf install -y xorg-x11-server-Xvfb
+# Same for the MCP server — add this to your MCP client config:
+{
+  "command": "uvx",
+  "args": ["agentcloak-mcp"]
+}
 ```
 
-On desktop Linux, macOS, and Windows, no extra system dependencies are needed.
-
-### Playwright system libraries
-
-CloakBrowser uses Playwright under the hood. If you see missing shared library errors, install Playwright's system dependencies:
-
-```bash
-python -m playwright install-deps chromium
-```
-
-## Installing with uv
-
-If you prefer [uv](https://github.com/astral-sh/uv):
+Or install permanently via uv:
 
 ```bash
 uv pip install agentcloak
 ```
 
-Or run without installing:
+## Verify the installation
 
 ```bash
-uvx agentcloak doctor
+agentcloak doctor
 ```
+
+This checks:
+
+- Python version (3.12+)
+- PATH (so the `agentcloak` / `cloak` commands are reachable)
+- Required packages (typer, fastapi, cloakbrowser, playwright, httpcloak, mcp, ...)
+- CloakBrowser binary status
+- Playwright system libraries (Linux only)
+- Data directory
+- Xvfb (only when needed — Linux without a display and `headless=false`)
+- Daemon liveness
+
+A healthy install prints `"healthy": true`. If something's missing, `agentcloak doctor --fix` is the next step.
+
+## Platform-specific notes
+
+### Linux server (no display)
+
+The default headless flag in v0.2.0 is `true`, so headless mode "just works" with no system dependencies. If you opt into headed mode (better stealth on some sites) on a server without a display, agentcloak auto-starts Xvfb and the doctor will tell you to install it:
+
+| Distro | Install |
+|--------|---------|
+| Debian / Ubuntu / Mint | `sudo apt-get install -y xvfb` |
+| Fedora / RHEL / CentOS / Rocky / AlmaLinux | `sudo dnf install -y xorg-x11-server-Xvfb` |
+| Arch / Manjaro | `sudo pacman -S xorg-server-xvfb` |
+| Alpine | `sudo apk add xvfb` |
+| openSUSE | `sudo zypper install -y xorg-x11-server` |
+
+If you don't want Xvfb at all, keep `headless = true` in `~/.agentcloak/config.toml` (or set `AGENTCLOAK_HEADLESS=true`). The doctor only nags about Xvfb when headed mode is configured.
+
+Playwright/Chromium runtime libs (`libnss3`, `libgbm`, `libasound`, ...) are usually already present on a desktop install. On minimal server images you may need:
+
+```bash
+sudo playwright install-deps chromium
+```
+
+`agentcloak doctor --fix --sudo` handles both Xvfb and Playwright libs in a single command tailored to your distro.
+
+### macOS
+
+- **No Xvfb needed** — macOS always has a display.
+- **Gatekeeper warning on first run** — macOS may quarantine the downloaded Chromium binary the first time you launch it. If you see "cannot be opened because the developer cannot be verified", clear the attribute:
+
+  ```bash
+  xattr -d com.apple.quarantine ~/.cloakbrowser/chromium-*/chrome
+  ```
+
+- **Use Homebrew Python** for the smoothest experience (`brew install python@3.12`). The bundled `/usr/bin/python3` works too but the Homebrew version has a friendlier pip story.
+
+### Windows
+
+- **No Xvfb needed** — Windows always has a display.
+- **PATH after `pip install --user`** — when you install with `pip install --user agentcloak`, the entry-point scripts land in `%APPDATA%\Python\Python312\Scripts` (adjust for your Python version). Add that directory to `PATH` if running `agentcloak` complains it's not found:
+  1. Open *System Properties → Environment Variables*
+  2. Edit `Path` for your user
+  3. Add `%APPDATA%\Python\Python312\Scripts`
+  4. Restart your shell so the change takes effect
+
+  Or run the doctor through Python to confirm it's installed even if PATH is broken:
+
+  ```cmd
+  py -m agentcloak.cli.app doctor
+  ```
+
+- **WSL2** users get the Linux experience — install Xvfb in the WSL distro if you want headed mode.
+
+## System dependencies (Linux only)
+
+### Playwright system libraries
+
+CloakBrowser uses Playwright under the hood. If you see errors about missing shared libraries (`libnss3.so`, `libgbm.so`, ...), let Playwright install them:
+
+```bash
+sudo playwright install-deps chromium
+```
+
+`agentcloak doctor` probes for the four most common libs and tells you exactly which command to run.
+
+### Xvfb (headed mode on a server)
+
+Only relevant when:
+
+1. You're on Linux without `$DISPLAY` or `$WAYLAND_DISPLAY`, **and**
+2. You've set `headless = false` (or `AGENTCLOAK_HEADLESS=false`)
+
+In that combo agentcloak auto-starts Xvfb. The doctor and the install table above cover the per-distro install commands.
 
 ## Installing for development
 
@@ -112,6 +170,17 @@ pip install -e ".[dev,mcp,stealth]"
 After installing, agentcloak works with zero configuration. The daemon starts automatically on the first command.
 
 To customize behavior, see the [configuration reference](../reference/config.md).
+
+## Troubleshooting first-run issues
+
+| Symptom | Fix |
+|---------|-----|
+| `command not found: agentcloak` | PATH not configured (Windows: add `%APPDATA%\Python\Python3X\Scripts`; *nix: `pip install` puts it in `~/.local/bin`). Or run `py -m agentcloak.cli.app doctor` / `python -m agentcloak.cli.app doctor`. |
+| `cloakbrowser_binary: not downloaded` | `agentcloak doctor --fix` |
+| `xvfb: not found` on a Linux server | Either set `headless = true` in `~/.agentcloak/config.toml`, or `agentcloak doctor --fix --sudo` |
+| `playwright_libs: missing: ...` | `sudo playwright install-deps chromium` (or `agentcloak doctor --fix --sudo`) |
+| `daemon_unreachable` after install | `agentcloak doctor --fix` will tell you what broke; if nothing, `agentcloak daemon start -b` to launch manually and watch the logs at `~/.agentcloak/logs/daemon.log` |
+| Gatekeeper blocks Chromium (macOS) | `xattr -d com.apple.quarantine ~/.cloakbrowser/chromium-*/chrome` |
 
 ## Next steps
 

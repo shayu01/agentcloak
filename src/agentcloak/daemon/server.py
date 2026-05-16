@@ -158,6 +158,86 @@ def _check_stale_pid(paths: Paths) -> bool:
     return False
 
 
+def _diagnose_launch_failure(
+    exc: BaseException, *, tier: StealthTier, headless: bool
+) -> None:
+    """Emit a structured warning that maps Playwright errors to fix hints.
+
+    We can't change the exception type (the caller re-raises), but we can
+    log a friendly diagnosis to the daemon log so when the user runs
+    ``tail ~/.agentcloak/logs/daemon.log`` they get an answer instead of a
+    raw Python traceback. The CLI ``daemon start -b`` path benefits the
+    most — it backgrounds the daemon and the user never sees stderr.
+    """
+    message = str(exc).lower()
+
+    if "xvfb" in message or "cannot open display" in message or "display :" in message:
+        logger.error(
+            "browser_launch_failed",
+            cause="missing_display",
+            tier=tier.value,
+            hint=(
+                "no X/Wayland display and Xvfb is not running; install Xvfb "
+                "(see 'agentcloak doctor --fix') or set headless=true"
+            ),
+        )
+        return
+
+    if (
+        "libnss" in message
+        or "libgbm" in message
+        or "shared object" in message
+        or "error while loading" in message
+    ):
+        logger.error(
+            "browser_launch_failed",
+            cause="missing_system_libs",
+            tier=tier.value,
+            hint=(
+                "Chromium's runtime libs are missing; run "
+                "'sudo playwright install-deps chromium' "
+                "(or 'agentcloak doctor --fix --sudo')"
+            ),
+        )
+        return
+
+    if "no such file" in message and ("chrome" in message or "chromium" in message):
+        logger.error(
+            "browser_launch_failed",
+            cause="missing_browser_binary",
+            tier=tier.value,
+            hint=(
+                "CloakBrowser binary not downloaded; run "
+                "'agentcloak doctor --fix' to fetch the ~200MB bundle"
+            ),
+        )
+        return
+
+    if "permission denied" in message:
+        logger.error(
+            "browser_launch_failed",
+            cause="permission_denied",
+            tier=tier.value,
+            hint=(
+                "filesystem permission error launching the browser binary; "
+                "check ~/.cloakbrowser/ ownership and SELinux/AppArmor policy"
+            ),
+        )
+        return
+
+    logger.error(
+        "browser_launch_failed",
+        cause="unknown",
+        tier=tier.value,
+        headless=headless,
+        error=str(exc),
+        hint=(
+            "run 'agentcloak doctor --fix' to verify dependencies; "
+            "check ~/.agentcloak/logs/daemon.log for the traceback"
+        ),
+    )
+
+
 async def _try_bind_port(
     *,
     config: uvicorn.Config,
@@ -295,16 +375,34 @@ async def start(
         humanize=actual_humanize,
         profile=profile,
     )
-    raw_ctx = await create_context(
-        tier=tier,
-        headless=actual_headless,
-        viewport_width=cfg.viewport_width,
-        viewport_height=cfg.viewport_height,
-        profile_dir=profile_dir,
-        humanize=actual_humanize,
-        extensions=extensions,
-        proxy_url=proxy_url,
-    )
+    try:
+        raw_ctx = await create_context(
+            tier=tier,
+            headless=actual_headless,
+            viewport_width=cfg.viewport_width,
+            viewport_height=cfg.viewport_height,
+            profile_dir=profile_dir,
+            humanize=actual_humanize,
+            extensions=extensions,
+            proxy_url=proxy_url,
+        )
+    except Exception as exc:
+        # Browser launch failures are the most common first-run problem.
+        # Surface the underlying cause with an actionable hint instead of a
+        # raw Python exception. We pattern-match on the error text rather
+        # than the exception class because Playwright wraps everything in
+        # generic ``Error`` subclasses without stable error codes.
+        _diagnose_launch_failure(exc, tier=tier, headless=actual_headless)
+        # Tear down the partially-initialised side state so the next start
+        # attempt doesn't trip the "already running" guard.
+        if local_proxy is not None:
+            with contextlib.suppress(Exception):
+                local_proxy.close()  # pyright: ignore[reportUnknownMemberType]
+        if xvfb_mgr is not None:
+            xvfb_mgr.cleanup()
+        _clear_pid(paths)
+        _clear_session(paths)
+        raise
 
     from agentcloak.browser.secure_ctx import SecureBrowserContext
 

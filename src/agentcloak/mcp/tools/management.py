@@ -263,7 +263,7 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
         )
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-    async def agentcloak_doctor() -> str:
+    async def agentcloak_doctor(fix: bool = False) -> str:
         """Run diagnostic checks on agentcloak installation.
 
         Runs the same probes the CLI ``doctor`` command runs (Python version,
@@ -271,19 +271,46 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
         surfaces stay in sync. The shared logic lives in
         :class:`DiagnosticService`.
 
+        The diagnostic runs in-process so it works even when the daemon is
+        down — agents can call ``agentcloak_doctor`` to find out *why* the
+        daemon won't start instead of getting a generic ``daemon_unreachable``
+        error. We do still try the daemon probe (with ``auto_start=False`` so
+        we don't accidentally launch one mid-diagnosis) and report what we
+        find.
+
+        Args:
+            fix: When True, attempt in-process repairs (download CloakBrowser
+                 binary, create data dir) and include a shell command for any
+                 remaining system-level work. The shell command is *not*
+                 executed — MCP doesn't have a way to escalate to sudo, so
+                 the user runs it themselves.
+
         Returns:
-            JSON with diagnostic checks array.
+            JSON with diagnostic checks array and optional ``fix`` section.
         """
+        from agentcloak.client import DaemonClient
         from agentcloak.core.config import load_config
         from agentcloak.daemon.services import DiagnosticService
 
         paths, cfg = load_config()
         diagnostic = DiagnosticService()
-        report = diagnostic.doctor(data_dir=paths.root)
 
-        # MCP-specific addition: probe the daemon via the shared client.
+        # Run the local checks directly — no HTTP round-trip, so this still
+        # works when the daemon is down. Fix mode never executes the system
+        # command from MCP because we can't elevate.
+        if fix:
+            report = diagnostic.doctor_fix(data_dir=paths.root, execute_sudo=False)
+        else:
+            report = diagnostic.doctor(data_dir=paths.root)
+
+        # Daemon probe via a non-auto-start client. Using the shared
+        # ``client`` instance would happily spawn a daemon mid-diagnosis,
+        # masking the very problem the user asked about.
+        probe = DaemonClient(
+            host=cfg.daemon_host, port=cfg.daemon_port, auto_start=False
+        )
         try:
-            await client.health()
+            await probe.health()
             report["checks"].append(
                 {
                     "name": "daemon",
@@ -298,7 +325,10 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
                     "name": "daemon",
                     "ok": False,
                     "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
-                    "hint": "run 'agentcloak daemon start' to launch",
+                    "hint": (
+                        "run 'agentcloak doctor --fix' (sudo if Linux) or "
+                        "'agentcloak daemon start -b' to launch"
+                    ),
                 }
             )
         report["healthy"] = all(c["ok"] for c in report["checks"])

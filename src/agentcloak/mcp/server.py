@@ -21,6 +21,46 @@ def _configure_logging() -> None:
     )
 
 
+def _emit_environment_precheck() -> None:
+    """Surface obvious environment problems on MCP startup.
+
+    The first tool call from an MCP client will trigger daemon auto-start.
+    If the CloakBrowser binary is missing we'd download ~200MB at that
+    moment, which freezes the agent and times out most clients. Printing a
+    warning to stderr up front lets the user pre-install or kick off
+    ``doctor --fix`` before the first navigate.
+
+    All output goes to stderr — MCP servers reserve stdout for the JSON-RPC
+    transport, so anything we'd send to stdout would corrupt the protocol.
+    """
+    try:
+        import cloakbrowser  # pyright: ignore[reportMissingImports,reportMissingTypeStubs]
+
+        info: dict[str, object] = cloakbrowser.binary_info()  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        if not info.get("installed"):
+            sys.stderr.write(
+                "[agentcloak-mcp] CloakBrowser binary not found. The first "
+                "tool call will trigger a ~200MB download and may exceed "
+                "client timeouts.\n"
+            )
+            sys.stderr.write(
+                "[agentcloak-mcp] Pre-install with: agentcloak doctor --fix "
+                "(or: uvx agentcloak doctor --fix)\n"
+            )
+    except ImportError:
+        sys.stderr.write(
+            "[agentcloak-mcp] CloakBrowser package missing — tools will fail. "
+            "Reinstall with: pip install agentcloak\n"
+        )
+    except Exception as exc:
+        # Defensive — binary_info changed shape once already during CloakBrowser
+        # development. We don't want a probe failure to block MCP startup.
+        sys.stderr.write(
+            f"[agentcloak-mcp] Environment precheck skipped ({exc!r}). "
+            "Run 'agentcloak doctor' to verify the install.\n"
+        )
+
+
 def create_server() -> object:
     """Create and configure the FastMCP server with all tools."""
     from mcp.server.fastmcp import FastMCP
@@ -98,6 +138,7 @@ def _register_exit_hook() -> None:
 def main() -> None:
     """Entry point for agentcloak-mcp and python -m agentcloak.mcp."""
     _configure_logging()
+    _emit_environment_precheck()
     _register_exit_hook()
     mcp = create_server()
     mcp.run()  # type: ignore[union-attr]
