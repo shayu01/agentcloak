@@ -666,6 +666,15 @@ class DaemonClient:
         except DaemonConnectionError:
             return {"ok": True}
 
+    def launch_sync(
+        self, *, tier: str = "auto", profile: str | None = None
+    ) -> dict[str, Any]:
+        """Hot-switch the daemon's active browser tier (sync)."""
+        body: dict[str, Any] = {"tier": tier}
+        if profile is not None:
+            body["profile"] = profile
+        return self._send_sync("POST", "/launch", json_body=body)
+
     def navigate_sync(
         self,
         url: str,
@@ -985,6 +994,15 @@ class DaemonClient:
             return await self._send_async("POST", "/shutdown")
         except DaemonConnectionError:
             return {"ok": True}
+
+    async def launch(
+        self, *, tier: str = "auto", profile: str | None = None
+    ) -> dict[str, Any]:
+        """Hot-switch the daemon's active browser tier (async)."""
+        body: dict[str, Any] = {"tier": tier}
+        if profile is not None:
+            body["profile"] = profile
+        return await self._send_async("POST", "/launch", json_body=body)
 
     async def navigate(
         self,

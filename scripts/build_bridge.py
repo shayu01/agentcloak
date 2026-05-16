@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 BRIDGE_ENTRY = ROOT / "src" / "agentcloak" / "bridge" / "__main__.py"
-EXTENSION_DIR = ROOT / "src" / "agentcloak" / "bridge" / "extension"
+EXTENSION_DIR = ROOT / "src" / "agentcloak" / "bridge" / "agentcloak-chrome-extension"
 
 
 def main() -> None:
@@ -22,6 +22,8 @@ def main() -> None:
         print(f"Entry point not found: {BRIDGE_ENTRY}", file=sys.stderr)
         sys.exit(1)
 
+    sep = ";" if sys.platform == "win32" else ":"
+    add_data = f"{EXTENSION_DIR}{sep}agentcloak-chrome-extension"
     cmd = [
         sys.executable,
         "-m",
@@ -30,7 +32,7 @@ def main() -> None:
         "--name",
         "agentcloak-bridge",
         "--add-data",
-        f"{EXTENSION_DIR}{';' if sys.platform == 'win32' else ':'}extension",
+        add_data,
         "--hidden-import",
         "agentcloak.bridge",
         "--hidden-import",

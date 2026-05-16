@@ -15,13 +15,21 @@
       padding: 40px 20px;
     }
     .container {
-      width: 400px;
+      width: 440px;
     }
     h1 {
       font-size: 20px;
       font-weight: 600;
       margin-bottom: 24px;
       color: #fff;
+    }
+    h2 {
+      font-size: 12px;
+      font-weight: 600;
+      margin: 24px 0 10px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     .field {
       margin-bottom: 16px;
@@ -52,9 +60,10 @@
       display: flex;
       gap: 10px;
       margin-top: 20px;
+      flex-wrap: wrap;
     }
     button {
-      padding: 8px 20px;
+      padding: 8px 18px;
       border: none;
       border-radius: 6px;
       font-size: 14px;
@@ -68,30 +77,59 @@
     #save-btn:hover {
       background: #7986cb;
     }
-    #reset-btn {
+    #reset-btn,
+    #test-btn {
       background: #333;
       color: #ccc;
     }
-    #reset-btn:hover {
+    #reset-btn:hover,
+    #test-btn:hover {
       background: #444;
     }
     .status {
-      margin-top: 20px;
+      margin-top: 10px;
       padding: 12px;
       border-radius: 6px;
       font-size: 13px;
+      line-height: 1.5;
     }
     .status-connected {
       background: #1b5e20;
       color: #a5d6a7;
     }
     .status-disconnected {
-      background: #b71c1c33;
-      color: #ef9a9a;
+      background: #424242;
+      color: #bdbdbd;
     }
     .status-reconnecting {
       background: #e65100;
       color: #ffcc80;
+    }
+    .status-error {
+      background: #b71c1c;
+      color: #ffcdd2;
+    }
+    .status-label {
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .error-hint {
+      margin-top: 10px;
+      padding: 12px;
+      background: #2a1414;
+      border-left: 3px solid #ef5350;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #ffab91;
+      line-height: 1.6;
+    }
+    .error-hint code {
+      background: rgba(0, 0, 0, 0.35);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: #fff;
     }
     .saved-msg {
       color: #81c784;
@@ -108,6 +146,14 @@
       font-size: 12px;
       color: #777;
       line-height: 1.6;
+    }
+    .info code {
+      background: #16213e;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: #b0bec5;
     }
   </style>
 </head>
@@ -132,19 +178,24 @@
 
     <div class="actions">
       <button id="save-btn">Save</button>
+      <button id="test-btn">Test Connection</button>
       <button id="reset-btn">Reset</button>
     </div>
 
     <div class="saved-msg" id="saved-msg">Settings saved. Reconnecting...</div>
 
+    <h2>Connection</h2>
     <div class="status status-disconnected" id="status">
-      Checking connection...
+      <span class="status-label">Status:</span><span id="status-text">Checking...</span>
     </div>
+
+    <div class="error-hint" id="error-hint" style="display: none;"></div>
 
     <div class="info">
       Leave host and port empty to use auto-detection.<br>
       Auto-detection probes ports 18765-18774 on the configured or last-known host.<br>
-      Token is required for remote (non-localhost) connections if the bridge enforces auth.
+      Token is required for remote (non-localhost) connections. Get the daemon's token by running
+      <code>agentcloak bridge token</code> on the daemon host.
     </div>
   </div>
 

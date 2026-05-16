@@ -23,7 +23,7 @@ On the daemon machine:
 
 ```bash
 cloak bridge extension-path
-# /home/you/.local/lib/python3.13/site-packages/agentcloak/bridge/extension
+# /home/you/.local/lib/python3.13/site-packages/agentcloak/bridge/agentcloak-chrome-extension
 ```
 
 Copy that directory to the machine where Chrome lives, then in Chrome:

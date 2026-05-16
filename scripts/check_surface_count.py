@@ -37,12 +37,11 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 
-# MCP tools that don't correspond to a daemon route. These wrap subprocess
-# lifecycle (``agentcloak_launch``) or aggregate health into a synthetic tool
-# (``agentcloak_doctor``) — keep this list short and explanatory.
+# MCP tools that don't correspond to a daemon route. ``agentcloak_doctor``
+# aggregates local probes plus a daemon health check, so it isn't a 1:1
+# route binding — keep this list short and explanatory.
 MCP_STANDALONE: set[str] = {
     "agentcloak_doctor",
-    "agentcloak_launch",
 }
 
 # Sentinel key used inside the CLI command map for top-level shortcuts

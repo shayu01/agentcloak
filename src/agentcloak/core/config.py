@@ -1,18 +1,23 @@
 """Paths, configuration loading, and defaults."""
 
+import contextlib
 import os
+import secrets
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 __all__ = [
     "AgentcloakConfig",
     "ConfigError",
     "Paths",
     "dump_config",
+    "ensure_bridge_token",
     "load_config",
+    "regenerate_bridge_token",
     "resolve_tier",
+    "write_example_config",
 ]
 
 _ENV_PREFIX = "AGENTCLOAK_"
@@ -94,6 +99,15 @@ class AgentcloakConfig:
     domain_blacklist: list[str] = field(default_factory=list[str])
     content_scan: bool = False
     content_scan_patterns: list[str] = field(default_factory=list[str])
+    # Persistent bridge auth token for Chrome extension <-> daemon. Empty
+    # string means "not yet provisioned" — the daemon generates one on
+    # first start and writes it back to config.toml via
+    # :func:`ensure_bridge_token`.
+    bridge_token: str = ""
+    # When in remote_bridge mode, close the local browser after it sits
+    # idle for this many seconds (0 = keep it warm forever). 30 min
+    # default matches the daemon idle timeout.
+    local_idle_timeout: int = 1800
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -115,6 +129,7 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
     daemon = raw.get("daemon", {})
     browser = raw.get("browser", {})
     security = raw.get("security", {})
+    bridge = raw.get("bridge", {})
 
     cfg = AgentcloakConfig()
 
@@ -152,9 +167,8 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         cfg.stop_on_exit = bool(browser.get("stop_on_exit", cfg.stop_on_exit))
     # Log settings belong in [daemon] (they control daemon process logging).
     # Fall back to [browser] for backward compat with pre-v0.2.0 configs.
-    cfg.log_level = (
-        _env("LOG_LEVEL")
-        or daemon.get("log_level", browser.get("log_level", cfg.log_level))
+    cfg.log_level = _env("LOG_LEVEL") or daemon.get(
+        "log_level", browser.get("log_level", cfg.log_level)
     )
 
     log_to_file_env = _env("LOG_TO_FILE")
@@ -251,6 +265,12 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
             "content_scan_patterns", cfg.content_scan_patterns
         )
 
+    cfg.bridge_token = _env("BRIDGE_TOKEN") or bridge.get("token", cfg.bridge_token)
+    cfg.local_idle_timeout = int(
+        _env("LOCAL_IDLE_TIMEOUT")
+        or bridge.get("local_idle_timeout", cfg.local_idle_timeout)
+    )
+
     _validate(cfg)
     return paths, cfg
 
@@ -266,9 +286,7 @@ _VALID_LOG_LEVELS = {"debug", "info", "warning", "error"}
 def _validate(cfg: AgentcloakConfig) -> None:
     """Validate config values; raise :class:`ConfigError` on bad input."""
     if not 1 <= cfg.daemon_port <= 65535:
-        raise ConfigError(
-            f"daemon.port must be 1-65535, got {cfg.daemon_port}"
-        )
+        raise ConfigError(f"daemon.port must be 1-65535, got {cfg.daemon_port}")
     if cfg.default_tier not in _VALID_TIERS:
         raise ConfigError(
             f"browser.default_tier must be one of {_VALID_TIERS}, "
@@ -276,8 +294,7 @@ def _validate(cfg: AgentcloakConfig) -> None:
         )
     if cfg.log_level not in _VALID_LOG_LEVELS:
         raise ConfigError(
-            f"log_level must be one of {_VALID_LOG_LEVELS}, "
-            f"got {cfg.log_level!r}"
+            f"log_level must be one of {_VALID_LOG_LEVELS}, got {cfg.log_level!r}"
         )
     if cfg.viewport_width < 1 or cfg.viewport_height < 1:
         raise ConfigError(
@@ -290,8 +307,11 @@ def _validate(cfg: AgentcloakConfig) -> None:
         )
     if cfg.mcp_screenshot_quality < 0 or cfg.mcp_screenshot_quality > 100:
         raise ConfigError(
-            f"mcp_screenshot_quality must be 0-100, "
-            f"got {cfg.mcp_screenshot_quality}"
+            f"mcp_screenshot_quality must be 0-100, got {cfg.mcp_screenshot_quality}"
+        )
+    if cfg.local_idle_timeout < 0:
+        raise ConfigError(
+            f"bridge.local_idle_timeout must be >= 0, got {cfg.local_idle_timeout}"
         )
 
 
@@ -323,11 +343,14 @@ _ENV_KEYS: dict[str, list[str]] = {
     "domain_blacklist": ["DOMAIN_BLACKLIST"],
     "content_scan": ["CONTENT_SCAN"],
     "content_scan_patterns": ["CONTENT_SCAN_PATTERNS"],
+    "bridge_token": ["BRIDGE_TOKEN"],
+    "local_idle_timeout": ["LOCAL_IDLE_TIMEOUT"],
 }
 
 
 def dump_config(
-    cfg: AgentcloakConfig, paths: Paths,
+    cfg: AgentcloakConfig,
+    paths: Paths,
 ) -> dict[str, dict[str, object]]:
     """Return each config field with its value and source (env/toml/default)."""
     raw = _read_toml(paths.config_file)
@@ -363,3 +386,367 @@ def resolve_tier(tier_value: str) -> str:
     if tier_value != "auto":
         return tier_value
     return "cloak"
+
+
+def _generate_bridge_token() -> str:
+    """Return a fresh URL-safe bridge token."""
+    return secrets.token_urlsafe(32)
+
+
+def _write_bridge_token(paths: Paths, token: str) -> None:
+    """Persist ``token`` under ``[bridge] token`` in ``paths.config_file``.
+
+    Preserves all other sections by reading the existing config, mutating
+    just the ``[bridge]`` table, and rewriting the file. We avoid adding
+    a ``tomli_w`` dependency by emitting the small set of tables we know
+    about ourselves — agentcloak only owns a handful of well-known
+    sections so a custom serialiser is simpler than another runtime dep.
+    """
+    paths.ensure_dirs()
+    raw: dict[str, Any] = _read_toml(paths.config_file)
+    existing: dict[str, dict[str, Any]] = {}
+    # ``_read_toml`` returns the parsed TOML as ``dict[str, Any]``. Only
+    # the table-valued entries get round-tripped — agentcloak's schema is
+    # flat-tables-only, so scalar top-level keys are dropped on purpose.
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            # ``isinstance(..., dict)`` narrows to ``dict[Unknown, Unknown]``
+            # so we cast back to the typed shape we want before round-tripping.
+            existing[k] = dict(cast("dict[str, Any]", v))
+
+    bridge_section = existing.setdefault("bridge", {})
+    bridge_section["token"] = token
+
+    paths.config_file.write_text(_serialise_toml(existing), encoding="utf-8")
+    # Permission flip is best-effort on Windows; the token is also held in
+    # active-session.json which already enforces 0o600.
+    with contextlib.suppress(OSError):
+        os.chmod(str(paths.config_file), 0o600)
+
+
+def _serialise_toml(sections: dict[str, dict[str, Any]]) -> str:
+    """Minimal TOML serialiser for the agentcloak config schema.
+
+    We only deal with flat ``[section]`` tables containing strings, ints,
+    bools, and string arrays — the same shapes ``load_config`` accepts.
+    Keeping this in-tree avoids pulling in ``tomli_w`` for one writer.
+    """
+    lines: list[str] = []
+    for section_name, table in sections.items():
+        if not table:
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"[{section_name}]")
+        for key, value in table.items():
+            lines.append(f"{key} = {_serialise_toml_value(value)}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _serialise_toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, list):
+        # ``value`` is typed Any inbound — cast through Any so pyright
+        # doesn't infer ``list[Unknown]`` after the isinstance narrow.
+        items = cast("list[Any]", value)
+        return "[" + ", ".join(_serialise_toml_value(v) for v in items) + "]"
+    # Fall back to quoted repr for anything exotic so we never silently
+    # corrupt the file (the validator above keeps this branch unreachable
+    # for documented config fields).
+    return f'"{value!s}"'
+
+
+def ensure_bridge_token(paths: Paths, cfg: AgentcloakConfig) -> str:
+    """Return the persisted bridge token, generating one on first use.
+
+    If ``cfg.bridge_token`` is empty, a fresh URL-safe token is generated
+    and written back to ``config.toml`` under ``[bridge] token``. The
+    in-memory config object is mutated so callers don't need to reload.
+    """
+    if cfg.bridge_token:
+        return cfg.bridge_token
+    token = _generate_bridge_token()
+    _write_bridge_token(paths, token)
+    cfg.bridge_token = token
+    return token
+
+
+def regenerate_bridge_token(paths: Paths, cfg: AgentcloakConfig) -> str:
+    """Generate a new bridge token, persist it, and return it.
+
+    Used by ``agentcloak bridge token --reset``. Any running daemons must
+    be restarted to pick the new value up — token rotation is intentionally
+    explicit so silent re-pairing is impossible.
+    """
+    token = _generate_bridge_token()
+    _write_bridge_token(paths, token)
+    cfg.bridge_token = token
+    return token
+
+
+# Each entry maps to one ``[section]`` in ``config.example.toml`` so a user
+# who opens the file can see exactly which keys agentcloak reads, what the
+# defaults are, and a one-line description of what the knob does. Keep in
+# sync with :class:`AgentcloakConfig` — preflight has a ``config`` check
+# that verifies every dataclass field shows up in the docs, and the
+# example file is the most discoverable doc surface.
+#
+# The file is regenerated on every daemon start; it never replaces a
+# user's actual ``config.toml``. The whole point is that the example is
+# safe to overwrite because it's just documentation.
+_EXAMPLE_CONFIG_HEADER = (
+    "# agentcloak configuration example\n"
+    "#\n"
+    "# Auto-generated on every daemon start. Your live settings live in\n"
+    "# `config.toml` in the same directory — copy any section from this\n"
+    "# file there to customise it. agentcloak NEVER touches your\n"
+    "# config.toml; only this example is rewritten.\n"
+    "#\n"
+    "# Precedence:  env var  >  config.toml  >  the default shown here.\n"
+    "# Env vars are AGENTCLOAK_<UPPERCASE_FIELD>, e.g. AGENTCLOAK_HEADLESS.\n"
+    "\n"
+)
+
+
+def _example_section(
+    title: str,
+    description: str,
+    entries: list[tuple[str, Any, str]],
+) -> str:
+    """Render one ``[section]`` block for the example config.
+
+    ``entries`` is ``[(key, default_value, comment), ...]``. The comment
+    lines are word-wrapped lightly so each option reads as a short
+    sentence rather than a paragraph that scrolls off the right.
+    """
+    lines: list[str] = [f"# {description}", f"[{title}]"]
+    for key, value, comment in entries:
+        if comment:
+            for ln in comment.splitlines():
+                lines.append(f"# {ln}")
+        lines.append(f"{key} = {_serialise_toml_value(value)}")
+        lines.append("")
+    # Trailing blank line trimmed below by ``\n\n`` joiner.
+    if lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines)
+
+
+def write_example_config(paths: Paths) -> Path:
+    """Write a freshly-generated ``config.example.toml`` next to ``config.toml``.
+
+    Always overwrites the existing example — that's the contract. The
+    user's real ``config.toml`` is left alone. We regenerate on every
+    daemon start so adding a new field in :class:`AgentcloakConfig`
+    automatically surfaces in the example the next time the daemon comes
+    up; no separate "regenerate docs" step to forget.
+    """
+    paths.ensure_dirs()
+    defaults = AgentcloakConfig()
+
+    daemon_section = _example_section(
+        "daemon",
+        "HTTP server + daemon process settings.",
+        [
+            (
+                "host",
+                defaults.daemon_host,
+                "Bind address. Use 0.0.0.0 to accept LAN connections.",
+            ),
+            (
+                "port",
+                defaults.daemon_port,
+                "Base port. If busy, daemon probes port+1, port+2, ...",
+            ),
+            (
+                "log_level",
+                defaults.log_level,
+                "One of: debug, info, warning, error.",
+            ),
+            (
+                "log_to_file",
+                defaults.log_to_file,
+                "When true, daemon log goes to ~/.agentcloak/logs/daemon.log\n"
+                "(otherwise stderr).",
+            ),
+            (
+                "log_max_bytes",
+                defaults.log_max_bytes,
+                "Rotation threshold for daemon.log (one-shot at startup).",
+            ),
+            (
+                "log_backup_count",
+                defaults.log_backup_count,
+                "Number of rotated daemon.log.N files to keep.",
+            ),
+            (
+                "http_client_timeout",
+                defaults.http_client_timeout,
+                "Seconds CLI/MCP will wait for a daemon HTTP reply.",
+            ),
+            (
+                "auto_start_timeout",
+                defaults.auto_start_timeout,
+                "Total budget (s) for /health probe when DaemonClient\n"
+                "auto-starts the daemon process.",
+            ),
+            (
+                "auto_start_poll_interval",
+                defaults.auto_start_poll_interval,
+                "Poll interval (s) between /health checks during\n"
+                "auto-start.",
+            ),
+        ],
+    )
+
+    browser_section = _example_section(
+        "browser",
+        "Default browser launch options + interaction defaults.",
+        [
+            (
+                "default_tier",
+                defaults.default_tier,
+                'Startup backend: "auto" (=cloak), "cloak", "playwright",\n'
+                'or "remote_bridge".',
+            ),
+            (
+                "default_profile",
+                defaults.default_profile,
+                "Profile directory name under ~/.agentcloak/profiles/ that\n"
+                "the daemon should attach to (empty = no profile).",
+            ),
+            (
+                "headless",
+                defaults.headless,
+                "Headless mode is on by default. Set to false to keep the\n"
+                "browser window visible (Xvfb is started automatically on\n"
+                "servers without a display).",
+            ),
+            (
+                "humanize",
+                defaults.humanize,
+                "CloakBrowser-only: Bezier mouse, realistic typing cadence.",
+            ),
+            (
+                "viewport_width",
+                defaults.viewport_width,
+                "Initial viewport width in pixels.",
+            ),
+            (
+                "viewport_height",
+                defaults.viewport_height,
+                "Initial viewport height in pixels.",
+            ),
+            (
+                "navigation_timeout",
+                defaults.navigation_timeout,
+                "Default timeout (s) for navigate / wait operations.",
+            ),
+            (
+                "action_timeout",
+                defaults.action_timeout,
+                "Per-action timeout (ms) for click/fill/etc.",
+            ),
+            (
+                "batch_settle_timeout",
+                defaults.batch_settle_timeout,
+                "Settle window (ms) after batched mutating actions\n"
+                "before the read-after-write snapshot.",
+            ),
+            (
+                "idle_timeout_min",
+                defaults.idle_timeout_min,
+                "Daemon shuts down after this many minutes of inactivity\n"
+                "(0 = never).",
+            ),
+            (
+                "stop_on_exit",
+                defaults.stop_on_exit,
+                "When true, CLI exit triggers a daemon shutdown.",
+            ),
+            (
+                "max_return_size",
+                defaults.max_return_size,
+                "Cap (bytes) on serialised /evaluate result; longer values\n"
+                "are truncated with a marker.",
+            ),
+            (
+                "screenshot_quality",
+                defaults.screenshot_quality,
+                "Default JPEG quality (0-100) for /screenshot.",
+            ),
+            (
+                "mcp_screenshot_quality",
+                defaults.mcp_screenshot_quality,
+                "Lower quality used by MCP tools to stay within token\n"
+                "budgets.",
+            ),
+        ],
+    )
+
+    security_section = _example_section(
+        "security",
+        "IDPI safety layer — domain allow/deny lists + content scan.",
+        [
+            (
+                "domain_whitelist",
+                defaults.domain_whitelist,
+                "If non-empty, only these glob patterns are reachable;\n"
+                'everything else is wrapped in <untrusted_web_content>.\n'
+                'Example: ["*.example.com", "api.trusted.io"].',
+            ),
+            (
+                "domain_blacklist",
+                defaults.domain_blacklist,
+                "Globs that are always blocked even if whitelisted.\n"
+                'file://, data:, javascript: are always blocked.',
+            ),
+            (
+                "content_scan",
+                defaults.content_scan,
+                "Enable regex scan of returned content for sensitive\n"
+                "patterns (off by default).",
+            ),
+            (
+                "content_scan_patterns",
+                defaults.content_scan_patterns,
+                "Regexes used when content_scan is true.",
+            ),
+        ],
+    )
+
+    bridge_section = _example_section(
+        "bridge",
+        "Remote bridge (Chrome extension) settings.",
+        [
+            (
+                "token",
+                "",
+                "Auto-generated on first daemon start and persisted here.\n"
+                "Run `agentcloak bridge token` to print the live value,\n"
+                "`--reset` to rotate.",
+            ),
+            (
+                "local_idle_timeout",
+                defaults.local_idle_timeout,
+                "Seconds before the warm local browser is closed when\n"
+                "the daemon is in remote_bridge mode (0 = keep warm\n"
+                "forever).",
+            ),
+        ],
+    )
+
+    body = "\n\n".join(
+        [daemon_section, browser_section, security_section, bridge_section]
+    )
+    text = _EXAMPLE_CONFIG_HEADER + body + "\n"
+
+    example_path = paths.root / "config.example.toml"
+    example_path.write_text(text, encoding="utf-8")
+    return example_path

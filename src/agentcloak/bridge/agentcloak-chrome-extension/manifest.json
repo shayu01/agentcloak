@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "agentcloak",
+  "version": "1.2",
+  "description": "Remote browser control bridge for agentcloak — connects your Chrome to a remote agentcloak daemon over WebSocket.",
+  "permissions": [
+    "alarms",
+    "cookies",
+    "tabs",
+    "tabGroups",
+    "activeTab",
+    "debugger",
+    "scripting",
+    "declarativeNetRequest",
+    "storage"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "agentcloak Bridge",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  }
+}

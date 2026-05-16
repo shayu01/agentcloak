@@ -61,6 +61,8 @@ __all__ = [
     "FrameFocusResponse",
     "FrameListResponse",
     "HealthResponse",
+    "LaunchRequest",
+    "LaunchResponse",
     "NavigateRequest",
     "NavigateResponse",
     "NetworkResponse",
@@ -527,6 +529,34 @@ class BridgeOpResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+# --- Launch ---
+
+
+class LaunchRequest(BaseModel):
+    """Hot-switch the active browser context.
+
+    ``tier`` selects the backend (``cloak`` / ``playwright`` /
+    ``remote_bridge``). ``profile`` only applies to local tiers — for
+    ``remote_bridge`` the profile is whatever the user's Chrome already
+    has loaded, so the field is ignored.
+    """
+
+    tier: Literal["auto", "cloak", "playwright", "remote_bridge"] = "auto"
+    profile: str | None = None
+
+
+class LaunchResponse(BaseModel):
+    """Result of a tier switch."""
+
+    model_config = ConfigDict(extra="allow")
+
+    active_tier: str
+    browser_ready: bool
+    remote_connected: bool
+    local_cached: bool
+    profile: str | None = None
+
+
 # --- Health ---
 
 
@@ -537,7 +567,13 @@ class HealthResponse(BaseModel):
 
     ok: Literal[True] = True
     service: str = "agentcloak-daemon"
+    # ``stealth_tier`` is the tier of the *currently active* backend; for a
+    # remote_bridge session awaiting the extension this is ``remote_bridge``
+    # even though no browser exists yet.
     stealth_tier: str | None = None
+    active_tier: str | None = None
+    browser_ready: bool | None = None
+    remote_connected: bool | None = None
     seq: int | None = None
     capture_recording: bool | None = None
     capture_entries: int | None = None

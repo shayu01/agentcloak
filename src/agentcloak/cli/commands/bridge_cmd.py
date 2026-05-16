@@ -46,7 +46,11 @@ def bridge_doctor() -> None:
     )
 
     # Check extension directory
-    ext_dir = Path(__file__).parent.parent.parent / "bridge" / "extension"
+    ext_dir = (
+        Path(__file__).parent.parent.parent
+        / "bridge"
+        / "agentcloak-chrome-extension"
+    )
     manifest = ext_dir / "manifest.json"
     checks.append(
         {
@@ -89,7 +93,11 @@ def bridge_doctor() -> None:
 @app.command("extension-path")
 def bridge_extension_path() -> None:
     """Print the path to the Chrome extension directory."""
-    ext_dir = Path(__file__).parent.parent.parent / "bridge" / "extension"
+    ext_dir = (
+        Path(__file__).parent.parent.parent
+        / "bridge"
+        / "agentcloak-chrome-extension"
+    )
     output_json({"path": str(ext_dir.resolve())}, seq=0)
 
 
@@ -144,3 +152,44 @@ def bridge_finalize(
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
+
+
+@app.command("token")
+def bridge_token(
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        help="Generate a new token, replacing the persisted one.",
+    ),
+) -> None:
+    """Show (or regenerate) the persistent bridge auth token.
+
+    The token lives in ``~/.agentcloak/config.toml`` under ``[bridge] token``.
+    Paste it into the Chrome Extension Options page to authorise the
+    extension's WebSocket connection.
+
+    ``--reset`` rotates the token; any already-paired extensions will
+    have to be re-configured.
+    """
+    from agentcloak.core.config import (
+        ensure_bridge_token,
+        load_config,
+        regenerate_bridge_token,
+    )
+
+    paths, cfg = load_config()
+    if reset:
+        token = regenerate_bridge_token(paths, cfg)
+        action = "reset"
+    else:
+        token = ensure_bridge_token(paths, cfg)
+        action = "show"
+
+    output_json(
+        {
+            "token": token,
+            "action": action,
+            "config_file": str(paths.config_file),
+        },
+        seq=0,
+    )

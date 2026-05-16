@@ -99,7 +99,7 @@ cloak navigate "https://example.com" --backend bridge
 
 ### 配置步骤
 
-1. **安装扩展。** 在 Chrome 中加载 `src/agentcloak/bridge/extension/` 下的未打包扩展（`chrome://extensions` > 开发者模式 > 加载已解压的扩展）。
+1. **安装扩展。** 在 Chrome 中加载 `src/agentcloak/bridge/agentcloak-chrome-extension/` 下的未打包扩展（`chrome://extensions` > 开发者模式 > 加载已解压的扩展）。
 
 2. **配置连接。** 点击扩展图标，设置 daemon 的主机/端口。扩展会自动连接。
 

@@ -99,6 +99,7 @@ All actions use `--target N` from the most recent snapshot.
 
 | Command | Purpose |
 |---------|---------|
+| `cloak launch --tier cloak\|playwright\|remote_bridge` | Hot-switch the daemon's browser tier (no restart) |
 | `cloak profile list` / `create` / `launch` / `delete` | Browser profile management |
 | `cloak tab list` / `new` / `close` / `switch` | Tab management |
 | `cloak spell list` / `info` / `run NAME` / `scaffold` | Spells (reusable site automation) |
@@ -107,6 +108,7 @@ All actions use `--target N` from the most recent snapshot.
 | `cloak config` | Show merged config with value sources (default/env/toml) |
 | `cloak doctor` | Self-check diagnostics |
 | `cloak bridge start` / `claim` / `finalize` | RemoteBridge (real browser) |
+| `cloak bridge token` / `--reset` | Show or rotate the persistent bridge auth token |
 
 ## Output Format
 

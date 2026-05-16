@@ -23,7 +23,7 @@ Chrome 扩展通过 `chrome.debugger` 说 CDP，把 daemon 的每条命令通过
 
 ```bash
 cloak bridge extension-path
-# /home/you/.local/lib/python3.13/site-packages/agentcloak/bridge/extension
+# /home/you/.local/lib/python3.13/site-packages/agentcloak/bridge/agentcloak-chrome-extension
 ```
 
 把这个目录复制到 Chrome 所在的机器，然后在 Chrome 里：

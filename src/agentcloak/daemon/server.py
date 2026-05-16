@@ -18,7 +18,6 @@ import asyncio
 import contextlib
 import logging
 import os
-import secrets
 import signal
 import sys
 import time
@@ -32,9 +31,15 @@ import uvicorn
 from agentcloak.browser import create_context
 from agentcloak.browser.cloak_ctx import TURNSTILE_PATCH_DIR
 from agentcloak.browser.xvfb import XvfbManager
-from agentcloak.core.config import Paths, load_config
+from agentcloak.core.config import (
+    Paths,
+    ensure_bridge_token,
+    load_config,
+    write_example_config,
+)
 from agentcloak.core.types import StealthTier
 from agentcloak.daemon.app import configure_app_state, create_app
+from agentcloak.daemon.context_manager import ContextManager
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -94,10 +99,6 @@ def _clear_pid(paths: Paths) -> None:
     pf = _pid_file(paths)
     if pf.exists():
         pf.unlink()
-
-
-def _generate_token() -> str:
-    return secrets.token_urlsafe(32)
 
 
 def _write_session(
@@ -303,14 +304,17 @@ async def start(
     tier = StealthTier(resolved)
     actual_headless = headless if headless is not None else cfg.headless
     actual_humanize = humanize if humanize is not None else cfg.humanize
-    extensions: list[str] | None = None
     xvfb_mgr: XvfbManager | None = None
+
+    # remote_bridge tier starts with no local browser at all — the
+    # context_manager waits for an extension to connect before any
+    # browser-dependent route can succeed.
+    skip_local_launch = tier == StealthTier.REMOTE_BRIDGE
 
     local_proxy: Any = None
     proxy_url: str | None = None
 
-    if tier == StealthTier.CLOAK:
-        extensions = [str(TURNSTILE_PATCH_DIR)]
+    if tier == StealthTier.CLOAK and not skip_local_launch:
         if not actual_headless and not os.environ.get("DISPLAY"):
             xvfb_mgr = XvfbManager(width=cfg.viewport_width, height=cfg.viewport_height)
             await xvfb_mgr.ensure_display()
@@ -341,7 +345,17 @@ async def start(
         except Exception as exc:
             logger.warning("local_proxy_failed", error=str(exc))
 
-    bridge_token = _generate_token()
+    # Persistent bridge token — survives daemon restarts so the extension
+    # only needs to be paired once. ``ensure_bridge_token`` mutates cfg in
+    # place when it has to generate, so subsequent ``load_config`` calls
+    # see the same value.
+    bridge_token = ensure_bridge_token(paths, cfg)
+
+    # Refresh the annotated example config every start. Always overwritten
+    # (the file is documentation, not user state); the user's actual
+    # ``config.toml`` is left strictly alone.
+    with contextlib.suppress(OSError):
+        write_example_config(paths)
 
     _write_pid(paths)
 
@@ -378,47 +392,61 @@ async def start(
         profile_dir = paths.profiles_dir / profile
         profile_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(
-        "launching_browser",
-        tier=tier.value,
-        headless=actual_headless,
-        humanize=actual_humanize,
-        profile=profile,
-    )
-    try:
-        raw_ctx = await create_context(
-            tier=tier,
+    raw_ctx: Any = None
+    if not skip_local_launch:
+        logger.info(
+            "launching_browser",
+            tier=tier.value,
             headless=actual_headless,
-            viewport_width=cfg.viewport_width,
-            viewport_height=cfg.viewport_height,
-            profile_dir=profile_dir,
             humanize=actual_humanize,
-            extensions=extensions,
-            proxy_url=proxy_url,
+            profile=profile,
         )
-    except Exception as exc:
-        # Browser launch failures are the most common first-run problem.
-        # Surface the underlying cause with an actionable hint instead of a
-        # raw Python exception. We pattern-match on the error text rather
-        # than the exception class because Playwright wraps everything in
-        # generic ``Error`` subclasses without stable error codes.
-        _diagnose_launch_failure(exc, tier=tier, headless=actual_headless)
-        # Tear down the partially-initialised side state so the next start
-        # attempt doesn't trip the "already running" guard.
-        if local_proxy is not None:
-            with contextlib.suppress(Exception):
-                local_proxy.close()  # pyright: ignore[reportUnknownMemberType]
-        if xvfb_mgr is not None:
-            xvfb_mgr.cleanup()
-        _clear_pid(paths)
-        _clear_session(paths)
-        raise
+        try:
+            raw_ctx = await create_context(
+                tier=tier,
+                headless=actual_headless,
+                viewport_width=cfg.viewport_width,
+                viewport_height=cfg.viewport_height,
+                profile_dir=profile_dir,
+                humanize=actual_humanize,
+                extensions=[str(TURNSTILE_PATCH_DIR)]
+                if tier == StealthTier.CLOAK
+                else None,
+                proxy_url=proxy_url,
+            )
+        except Exception as exc:
+            # Browser launch failures are the most common first-run problem.
+            # Surface the underlying cause with an actionable hint instead of a
+            # raw Python exception. We pattern-match on the error text rather
+            # than the exception class because Playwright wraps everything in
+            # generic ``Error`` subclasses without stable error codes.
+            _diagnose_launch_failure(exc, tier=tier, headless=actual_headless)
+            # Tear down the partially-initialised side state so the next start
+            # attempt doesn't trip the "already running" guard.
+            if local_proxy is not None:
+                with contextlib.suppress(Exception):
+                    local_proxy.close()  # pyright: ignore[reportUnknownMemberType]
+            if xvfb_mgr is not None:
+                xvfb_mgr.cleanup()
+            _clear_pid(paths)
+            _clear_session(paths)
+            raise
+    else:
+        logger.info(
+            "remote_bridge_startup",
+            tier=tier.value,
+            note="no local browser launched; waiting for extension to connect",
+        )
 
     from agentcloak.browser.secure_ctx import SecureBrowserContext
 
-    ctx = SecureBrowserContext(raw_ctx, cfg)
+    ctx: Any = SecureBrowserContext(raw_ctx, cfg) if raw_ctx is not None else None
 
-    logger.info("bridge_token_generated", token_suffix=bridge_token[-4:])
+    logger.info(
+        "bridge_token_loaded",
+        token_suffix=bridge_token[-4:],
+        persistent=True,
+    )
 
     from agentcloak.core.discovery import register_daemon
 
@@ -440,6 +468,17 @@ async def start(
         batch_settle_timeout=cfg.batch_settle_timeout,
         idle_timeout=idle_timeout,
     )
+    # Seed ContextManager with whatever the startup tier created so
+    # hot-switches see the live state. For remote_bridge startup the
+    # local cache is empty until the user explicitly switches back.
+    context_manager = ContextManager(app.state, cfg)
+    context_manager.seed_initial(
+        active_tier=tier,
+        local_ctx=raw_ctx,
+        local_tier=None if skip_local_launch else tier,
+        local_profile=profile if not skip_local_launch else None,
+    )
+    app.state.context_manager = context_manager
     app.state.last_request_time = time.monotonic()
 
     logger.info("daemon_starting", host=actual_host, port=actual_port)
@@ -467,7 +506,7 @@ async def start(
             range_end=actual_port + _PORT_RANGE_SIZE - 1,
         )
         with contextlib.suppress(Exception):
-            await ctx.close()
+            await context_manager.shutdown()
         _clear_pid(paths)
         _clear_session(paths)
         raise
@@ -516,7 +555,7 @@ async def start(
 
         unregister_daemon()
         with contextlib.suppress(Exception):
-            await ctx.close()
+            await context_manager.shutdown()
         if local_proxy is not None:
             with contextlib.suppress(Exception):
                 local_proxy.close()  # pyright: ignore[reportUnknownMemberType]

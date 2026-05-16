@@ -119,7 +119,7 @@ class TestBridgeCLI:
         result = runner.invoke(app, ["bridge", "extension-path"])
         data = json.loads(result.stdout)
         path = data["data"]["path"]
-        assert "extension" in path
+        assert "agentcloak-chrome-extension" in path
 
 
 class TestBridgeServer:
@@ -166,7 +166,7 @@ class TestExtensionFiles:
             / "src"
             / "agentcloak"
             / "bridge"
-            / "extension"
+            / "agentcloak-chrome-extension"
         )
         assert (ext_dir / "manifest.json").is_file()
         assert (ext_dir / "background.js").is_file()
@@ -179,10 +179,11 @@ class TestExtensionFiles:
             / "src"
             / "agentcloak"
             / "bridge"
-            / "extension"
+            / "agentcloak-chrome-extension"
         )
         data = json.loads((ext_dir / "manifest.json").read_text())
         assert data["manifest_version"] == 3
+        assert data.get("name") == "agentcloak"
         assert "debugger" in data["permissions"]
         assert "cookies" in data["permissions"]
         assert "tabs" in data["permissions"]

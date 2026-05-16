@@ -118,9 +118,7 @@ def _root_callback(  # pyright: ignore[reportUnusedFunction]
     verbose: int = typer.Option(
         0, "--verbose", "-v", count=True, help="Increase log verbosity."
     ),
-    pretty: bool = typer.Option(
-        False, "--pretty", help="Pretty-print JSON output."
-    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
     _version: bool = typer.Option(
         False,
         "--version",
@@ -151,6 +149,7 @@ def _register_commands() -> None:
         fetch,
         frame,
         js,
+        launch,
         network,
         profile,
         spell_cmd,
@@ -166,6 +165,11 @@ def _register_commands() -> None:
     )
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
     app.add_typer(daemon_cmd.app, name="daemon", help="Daemon lifecycle management.")
+    app.add_typer(
+        launch.app,
+        name="launch",
+        help="Hot-switch the daemon's active browser tier.",
+    )
     app.add_typer(
         browser.app, name="browser", help="Browser navigation and inspection."
     )

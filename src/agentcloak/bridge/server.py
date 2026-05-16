@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import os
+import secrets
 import sys
 import tempfile
 import uuid
@@ -164,8 +165,9 @@ class BridgeHub:
             agent = msg.get("agent")
             # Token verification for remote connections
             if self._cfg.token and not is_local:
-                ext_token = msg.get("token")
-                if ext_token != self._cfg.token:
+                ext_token = msg.get("token") or ""
+                # Constant-time comparison to avoid leaking token info via timing.
+                if not secrets.compare_digest(str(ext_token), str(self._cfg.token)):
                     logger.warning(
                         "extension_auth_failed",
                         agent=agent,
@@ -469,7 +471,7 @@ async def _wait_for_extension(hub: BridgeHub) -> None:
         logger.info("extension_already_connected")
         return
 
-    ext_dir = Path(__file__).parent / "extension"
+    ext_dir = Path(__file__).parent / "agentcloak-chrome-extension"
 
     sys.stderr.write("\n")
     sys.stderr.write("  Chrome extension not connected yet.\n")

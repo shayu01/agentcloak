@@ -86,6 +86,7 @@ GROUPS: list[tuple[str, list[str]]] = [
 ROUTE_TO_CLI: dict[str, str] = {
     "/health": "cloak doctor",
     "/shutdown": "cloak daemon stop",
+    "/launch": "cloak launch",
     "/resume": "cloak resume",
     "/navigate": "cloak navigate URL",
     "/snapshot": "cloak snapshot",
@@ -173,6 +174,7 @@ ROUTE_TO_MCP: dict[str, str] = {
     "/bridge/finalize": "agentcloak_bridge (action=finalize)",
     "/resume": "agentcloak_resume",
     "/shutdown": "(daemon lifecycle — not exposed)",
+    "/launch": "agentcloak_launch",
 }
 
 

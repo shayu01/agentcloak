@@ -8,7 +8,7 @@ Operate your real Chrome browser on another machine via a Chrome extension + Web
 
 ```bash
 cloak bridge extension-path
-# outputs: /path/to/src/agentcloak/bridge/extension/
+# outputs: /path/to/src/agentcloak/bridge/agentcloak-chrome-extension/
 ```
 
 Copy that directory to your Chrome machine, then:

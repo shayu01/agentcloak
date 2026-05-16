@@ -103,6 +103,13 @@ content_scan_patterns = []
 | `AGENTCLOAK_CONTENT_SCAN` | `security.content_scan` | `false` | 启用正则内容扫描。匹配以 `security_warnings` 出现在 snapshot 输出中（仅标记，不拦截）；action 目标元素文本若命中则拦截。 |
 | `AGENTCLOAK_CONTENT_SCAN_PATTERNS` | `security.content_scan_patterns` | `[]` | 逗号分隔的正则表达式（大小写不敏感）。 |
 
+### Bridge 设置
+
+| 变量 | 配置项 | 默认值 | 说明 |
+|------|-------|-------|------|
+| `AGENTCLOAK_BRIDGE_TOKEN` | `bridge.token` | 自动生成 | Chrome 扩展配对的持久 auth token。首次启动 daemon 时自动生成并写入 `config.toml`；用 `agentcloak bridge token --reset` 轮换。 |
+| `AGENTCLOAK_LOCAL_IDLE_TIMEOUT` | `bridge.local_idle_timeout` | `1800` | 切换到 `remote_bridge` tier 后本地浏览器保留多久（秒），到期自动关闭释放资源。`0` 表示永不自动关闭。 |
+
 > [!NOTE]
 > `file://`、`data:` 和 `javascript:` URL 始终被阻止，不受白名单/黑名单设置影响。详见 `docs/zh/guides/security.md` 完整的 IDPI 模型。
 

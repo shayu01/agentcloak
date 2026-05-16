@@ -14,6 +14,7 @@ specifics — when something goes wrong they either raise
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 import orjson
@@ -27,7 +28,7 @@ from fastapi import (
 )
 
 from agentcloak.browser.playwright_ctx import screenshot_to_base64
-from agentcloak.core.errors import ProfileError
+from agentcloak.core.errors import BackendError, ProfileError
 
 # Annotated dependency aliases (BrowserCtxDep etc.) must be available at
 # runtime so FastAPI can resolve `Depends()` markers when registering routes —
@@ -35,6 +36,8 @@ from agentcloak.core.errors import ProfileError
 from agentcloak.daemon.dependencies import (  # noqa: TC001
     BrowserCtxDep,
     ConfigDep,
+    ContextManagerDep,
+    OptionalBrowserCtxDep,
     RemoteCtxDep,
     RequiredRemoteCtxDep,
 )
@@ -74,6 +77,8 @@ from agentcloak.daemon.models import (
     FrameFocusResponse,
     FrameListResponse,
     HealthResponse,
+    LaunchRequest,
+    LaunchResponse,
     NavigateRequest,
     NavigateResponse,
     NetworkResponse,
@@ -197,10 +202,17 @@ async def _update_resume(
 
 
 @router.get("/health", response_model=HealthResponse)
-async def handle_health(ctx: BrowserCtxDep, request: Request) -> dict[str, Any]:
+async def handle_health(ctx: OptionalBrowserCtxDep, request: Request) -> dict[str, Any]:
     diagnostic = DiagnosticService()
     local_proxy = getattr(request.app.state, "local_proxy", None)
-    return await diagnostic.health(ctx, local_proxy=local_proxy)
+    active_tier = getattr(request.app.state, "active_tier", None)
+    remote_connected = getattr(request.app.state, "remote_ctx", None) is not None
+    return await diagnostic.health(
+        ctx,
+        local_proxy=local_proxy,
+        active_tier=active_tier,
+        remote_connected=remote_connected,
+    )
 
 
 # --- Navigate ---------------------------------------------------------------
@@ -412,6 +424,40 @@ async def handle_shutdown(request: Request) -> dict[str, Any]:
     return _ok({}, seq=0)
 
 
+# --- Launch (tier hot-switch) -----------------------------------------------
+
+
+@router.post("/launch", response_model=OkEnvelope[LaunchResponse])
+async def handle_launch(
+    body: LaunchRequest,
+    manager: ContextManagerDep,
+) -> dict[str, Any]:
+    """Hot-switch the active browser tier without restarting the daemon.
+
+    ``cloak``/``playwright`` create or re-use a local browser; remote_bridge
+    waits for the Chrome extension to connect (if it isn't already).
+    """
+    from agentcloak.core.config import resolve_tier
+    from agentcloak.core.types import StealthTier
+
+    resolved = resolve_tier(body.tier)
+    try:
+        tier_enum = StealthTier(resolved)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "ok": False,
+                "error": "invalid_tier",
+                "hint": f"Unknown tier: {body.tier!r}",
+                "action": "use one of: auto, cloak, playwright, remote_bridge",
+            },
+        ) from exc
+
+    result = await manager.switch_tier(tier_enum, profile=body.profile)
+    return _ok(result, seq=0)
+
+
 # --- Bridge auth + WebSocket endpoints --------------------------------------
 
 
@@ -426,7 +472,7 @@ def _check_bridge_token(websocket: WebSocket) -> bool:
         return True
 
     auth = websocket.headers.get("Authorization", "")
-    return auth == f"Bearer {expected}"
+    return secrets.compare_digest(auth, f"Bearer {expected}")
 
 
 class _BridgeWSAdapter:
@@ -464,6 +510,68 @@ class _BridgeWSAdapter:
         self._closed = True
 
 
+def _existing_remote_alive(app_state: Any) -> bool:
+    """Return True if a remote_ctx is set and its underlying WS is still open."""
+    existing = getattr(app_state, "remote_ctx", None)
+    if existing is None:
+        return False
+    ws = getattr(existing, "_ws", None)
+    if ws is None:
+        return False
+    # _BridgeWSAdapter exposes `closed`; treat unknown shape as alive to be safe.
+    closed = getattr(ws, "closed", False)
+    return not bool(closed)
+
+
+def _cleanup_dead_remote(app_state: Any) -> None:
+    """Drop a stale remote_ctx and its adapter handles before accepting a new one."""
+    manager = getattr(app_state, "context_manager", None)
+    if manager is not None:
+        manager.on_extension_disconnected()
+    else:
+        app_state.remote_ctx = None
+    app_state.bridge_ws = None
+    app_state.ext_ws = None
+
+
+def _notify_extension_connected(app_state: Any, remote_ctx: Any) -> None:
+    """Inform the context manager (or fall back to direct state mutation)."""
+    manager = getattr(app_state, "context_manager", None)
+    if manager is not None:
+        manager.on_extension_connected(remote_ctx)
+    else:
+        app_state.remote_ctx = remote_ctx
+
+
+def _notify_extension_disconnected(app_state: Any) -> None:
+    manager = getattr(app_state, "context_manager", None)
+    if manager is not None:
+        manager.on_extension_disconnected()
+    else:
+        app_state.remote_ctx = None
+
+
+def _fail_pending_remote(remote_ctx: Any, reason: str) -> None:
+    """Resolve every outstanding bridge future with a structured disconnect error.
+
+    Without this, callers (CLI/MCP) wait the full 60s ``bridge_timeout`` after
+    the extension drops the WebSocket. By failing futures eagerly we surface
+    the disconnect on the next response cycle.
+    """
+    pending = getattr(remote_ctx, "_pending", None)
+    if not pending:
+        return
+    err = BackendError(
+        error="extension_disconnected",
+        hint=f"Extension WebSocket closed: {reason}",
+        action="reconnect the Chrome extension, then retry the command",
+    )
+    for fut in list(pending.values()):
+        if not fut.done():
+            fut.set_exception(err)
+    pending.clear()
+
+
 @router.websocket("/bridge/ws")
 async def handle_bridge_ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for bridge connection."""
@@ -471,13 +579,21 @@ async def handle_bridge_ws(websocket: WebSocket) -> None:
         await websocket.close(code=1008, reason="invalid bridge token")
         return
 
+    # Mutex: only one remote_ctx may be active. Reject when an alive one exists.
+    if _existing_remote_alive(websocket.app.state):
+        await websocket.close(code=4002, reason="remote_ctx_in_use")
+        logger.warning("bridge_ws_rejected", reason="remote_ctx_in_use")
+        return
+
+    _cleanup_dead_remote(websocket.app.state)
+
     from agentcloak.browser.remote_ctx import RemoteBridgeContext
 
     await websocket.accept()
     adapter = _BridgeWSAdapter(websocket)
     remote_ctx = RemoteBridgeContext(bridge_ws=adapter)  # type: ignore[arg-type]
     websocket.app.state.bridge_ws = adapter
-    websocket.app.state.remote_ctx = remote_ctx
+    _notify_extension_connected(websocket.app.state, remote_ctx)
 
     try:
         while True:
@@ -487,27 +603,69 @@ async def handle_bridge_ws(websocket: WebSocket) -> None:
         pass
     finally:
         adapter.mark_closed()
+        _fail_pending_remote(remote_ctx, "bridge websocket closed")
         websocket.app.state.bridge_ws = None
-        websocket.app.state.remote_ctx = None
+        _notify_extension_disconnected(websocket.app.state)
 
 
 @router.websocket("/ext")
 async def handle_ext_ws(websocket: WebSocket) -> None:
-    """Direct WebSocket endpoint for Chrome Extension (local mode)."""
-    if not _check_bridge_token(websocket):
-        await websocket.close(code=1008, reason="invalid bridge token")
-        return
+    """Direct WebSocket endpoint for Chrome Extension.
 
+    Browser WebSocket API cannot set custom headers, so token auth
+    happens at the message level: accept first, then verify the token
+    in the hello message from the extension.
+    """
     from agentcloak.browser.remote_ctx import RemoteBridgeContext
 
+    client = websocket.client
+    is_local = client is not None and client.host in ("127.0.0.1", "::1", "localhost")
+
     await websocket.accept()
+
+    # Wait for hello message and verify token (unless localhost).
+    try:
+        first_msg = await websocket.receive_text()
+    except WebSocketDisconnect:
+        return
+
+    try:
+        hello = orjson.loads(first_msg)
+    except Exception:
+        await websocket.close(code=1008, reason="invalid hello message")
+        return
+
+    if not is_local:
+        expected = getattr(websocket.app.state, "bridge_token", None)
+        if expected:
+            ext_token = hello.get("token") or ""
+            # Constant-time comparison to avoid leaking token info via timing.
+            if not secrets.compare_digest(str(ext_token), str(expected)):
+                logger.warning(
+                    "ext_ws_auth_failed",
+                    remote=client.host if client else None,
+                )
+                await websocket.close(code=4001, reason="invalid bridge token")
+                return
+
+    # Mutex: reject second extension if one is already attached and alive.
+    # Token check above must come first so unauthenticated peers can't probe.
+    if _existing_remote_alive(websocket.app.state):
+        await websocket.close(code=4002, reason="remote_ctx_in_use")
+        logger.warning("ext_ws_rejected", reason="remote_ctx_in_use")
+        return
+
+    _cleanup_dead_remote(websocket.app.state)
+
     adapter = _BridgeWSAdapter(websocket)
     remote_ctx = RemoteBridgeContext(bridge_ws=adapter)  # type: ignore[arg-type]
     websocket.app.state.ext_ws = adapter
-    websocket.app.state.remote_ctx = remote_ctx
+    _notify_extension_connected(websocket.app.state, remote_ctx)
 
-    client = websocket.client
     logger.info("ext_ws_connected", remote=client.host if client else None)
+
+    # Feed the hello message to remote_ctx in case it carries useful data.
+    remote_ctx.feed_message(first_msg)
 
     try:
         while True:
@@ -517,8 +675,9 @@ async def handle_ext_ws(websocket: WebSocket) -> None:
         pass
     finally:
         adapter.mark_closed()
+        _fail_pending_remote(remote_ctx, "extension websocket closed")
         websocket.app.state.ext_ws = None
-        websocket.app.state.remote_ctx = None
+        _notify_extension_disconnected(websocket.app.state)
         logger.info("ext_ws_disconnected")
 
 

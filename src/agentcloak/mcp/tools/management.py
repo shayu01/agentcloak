@@ -92,34 +92,35 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
             action="use export or import",
         )
 
-    @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, readOnlyHint=False))
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, readOnlyHint=False))
     async def agentcloak_launch(
         tier: str = "",
         profile: str = "",
     ) -> str:
-        """Start or restart the browser daemon with specific options.
+        """Hot-switch the daemon's active browser tier.
 
-        If the daemon is already running, it will be stopped and restarted.
-        If you don't call this, the daemon auto-starts with env defaults.
+        Without restarting the daemon process, swap the browser context to
+        another backend. Local tiers ('cloak', 'playwright') create or
+        reuse a local browser; 'remote_bridge' waits for the Chrome
+        extension to connect.
 
         Args:
             tier: Browser tier — 'auto' (default: cloak), 'playwright', 'cloak',
                   or 'remote_bridge'. Empty = use AGENTCLOAK_DEFAULT_TIER env.
             profile: Named browser profile for persistent cookies/state
+                  (only meaningful for local tiers).
 
         Returns:
-            JSON with daemon health status.
+            JSON with active_tier, browser_ready, remote_connected,
+            local_cached, profile.
         """
-        from agentcloak.core.config import load_config, resolve_tier
+        from agentcloak.core.config import load_config
 
         _, cfg = load_config()
         actual_tier = tier or cfg.default_tier
-        # resolve_tier currently maps 'auto' → 'cloak'. We still resolve here so
-        # the response reflects the actual backend the daemon will use.
-        resolve_tier(actual_tier)
 
         try:
-            envelope = await client.launch_daemon(headless=True, profile=profile)
+            envelope = await client.launch(tier=actual_tier, profile=profile or None)
         except AgentBrowserError as exc:
             return error_json(exc)
         return format_envelope(envelope)

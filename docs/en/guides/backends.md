@@ -99,7 +99,7 @@ cloak navigate "https://example.com" --backend bridge
 
 ### Setup
 
-1. **Install the extension.** Load the unpacked extension from `src/agentcloak/bridge/extension/` in Chrome (`chrome://extensions` > Developer mode > Load unpacked).
+1. **Install the extension.** Load the unpacked extension from `src/agentcloak/bridge/agentcloak-chrome-extension/` in Chrome (`chrome://extensions` > Developer mode > Load unpacked).
 
 2. **Configure the connection.** Click the extension icon and set the daemon host/port. The extension auto-connects.
 

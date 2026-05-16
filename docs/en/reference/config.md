@@ -103,6 +103,13 @@ All environment variables use the `AGENTCLOAK_` prefix.
 | `AGENTCLOAK_CONTENT_SCAN` | `security.content_scan` | `false` | Enable regex content scanning. Matches surface as `security_warnings` in snapshot output (flag-only, not blocking). Action targets are also scanned and block on match. |
 | `AGENTCLOAK_CONTENT_SCAN_PATTERNS` | `security.content_scan_patterns` | `[]` | Comma-separated regex patterns for content scanning (case-insensitive). |
 
+### Bridge settings
+
+| Variable | Config key | Default | Description |
+|----------|-----------|---------|-------------|
+| `AGENTCLOAK_BRIDGE_TOKEN` | `bridge.token` | auto-generated | Persistent auth token paired with the Chrome extension. Generated on first daemon start and written to `config.toml`; rotate with `agentcloak bridge token --reset`. |
+| `AGENTCLOAK_LOCAL_IDLE_TIMEOUT` | `bridge.local_idle_timeout` | `1800` | Seconds the cached local browser stays warm after switching to `remote_bridge` tier. `0` means "never close". |
+
 > [!NOTE]
 > `file://`, `data:`, and `javascript:` URLs are always blocked regardless of whitelist/blacklist settings. See `docs/en/guides/security.md` for the full IDPI model.
 

@@ -55,6 +55,14 @@ def create_app() -> FastAPI:
     app.state.batch_settle_timeout = _bootstrap_cfg.batch_settle_timeout
     app.state.idle_timeout = 0.0
     app.state.prev_snapshot_lines = None
+    # ContextManager-owned slots — populated by ``server.start()`` after
+    # the initial browser launch. Routes that only need the active tier
+    # (e.g. health) can read these defaults safely during tests.
+    app.state.context_manager = None
+    app.state.local_ctx = None
+    app.state.local_tier = None
+    app.state.local_profile = None
+    app.state.active_tier = None
 
     install_middlewares(app)
     register_exception_handlers(app)

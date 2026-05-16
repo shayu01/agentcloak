@@ -86,7 +86,7 @@ Read this file when you need full parameter detail. For the common path, the qui
 - Body:
   - `actions` (array<object>, default: —)
   - `sleep` (number, default: 0.0)
-  - `settle_timeout` (integer, default: 5000)
+  - `settle_timeout` (integer, default: 2000)
 
 ## Dialog & Wait
 
@@ -311,6 +311,16 @@ Read this file when you need full parameter detail. For the common path, the qui
 - MCP: `agentcloak_bridge (action=finalize)`
 - Body:
   - `mode` (string, default: "close")
+
+## Other
+
+### `POST /launch`
+
+- CLI: `cloak launch`
+- MCP: `agentcloak_launch`
+- Body:
+  - `tier` (enum("auto" | "cloak" | "playwright" | "remote_bridge"), default: "auto")
+  - `profile` (string | null, default: —)
 
 
 _End of generated content. Updates flow from `daemon/models.py`; run `python scripts/generate_skill.py --write` after changing routes._

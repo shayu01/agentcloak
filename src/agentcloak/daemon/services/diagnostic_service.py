@@ -561,22 +561,49 @@ class DiagnosticService:
     # Health — runtime liveness with browser introspection
     # ------------------------------------------------------------------
 
-    async def health(self, ctx: Any, *, local_proxy: Any = None) -> dict[str, Any]:
+    async def health(
+        self,
+        ctx: Any,
+        *,
+        local_proxy: Any = None,
+        active_tier: Any = None,
+        remote_connected: bool = False,
+    ) -> dict[str, Any]:
+        """Build a health payload — supports the "no browser yet" state.
+
+        When ``ctx`` is ``None`` (typical in ``remote_bridge`` mode while
+        we wait for the extension), we still report the configured tier so
+        agents know what the daemon is set up for.
+        """
         data: dict[str, Any] = {
             "ok": True,
             "service": "agentcloak-daemon",
-            "stealth_tier": ctx.stealth_tier.value,
-            "seq": ctx.seq,
-            "capture_recording": ctx.capture_store.recording,
-            "capture_entries": len(ctx.capture_store),
+            "browser_ready": ctx is not None,
+            "remote_connected": remote_connected,
         }
+        if active_tier is not None:
+            tier_value = getattr(active_tier, "value", active_tier)
+            data["active_tier"] = str(tier_value)
+            data["stealth_tier"] = str(tier_value)
 
-        # Pull the current URL/title best-effort; failures are non-fatal.
-        try:
-            snap = await ctx.snapshot(mode="accessible")
-            data["current_url"] = snap.url
-            data["current_title"] = snap.title
-        except Exception:
+        if ctx is not None:
+            data["stealth_tier"] = ctx.stealth_tier.value
+            data["seq"] = ctx.seq
+            data["capture_recording"] = ctx.capture_store.recording
+            data["capture_entries"] = len(ctx.capture_store)
+
+            # Pull the current URL/title best-effort; failures are non-fatal.
+            try:
+                snap = await ctx.snapshot(mode="accessible")
+                data["current_url"] = snap.url
+                data["current_title"] = snap.title
+            except Exception:
+                data["current_url"] = None
+                data["current_title"] = None
+        else:
+            data["seq"] = 0
+            data["capture_recording"] = False
+            data["capture_entries"] = 0
             data["current_url"] = None
             data["current_title"] = None
 
