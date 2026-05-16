@@ -136,6 +136,7 @@ These work automatically:
 - **Follow error `action` field**: it tells you exactly what to do next
 - **Use compact mode**: `--mode compact` for focused interaction
 - **Large pages**: 100+ elements blow up token budgets. Use `--mode compact --max-nodes 80` (~1.8K tokens) as the default for big pages, then `--focus=N` or `--offset=N` to explore specific areas. Action targets work even if truncated from the tree output
+- **Timeouts**: navigation defaults to 30s, actions to 30s. For slow pages or large uploads, pass `--timeout 60` on `navigate` or `wait`. If `navigation_timeout` errors persist, set `AGENTCLOAK_NAVIGATION_TIMEOUT=60` globally
 
 ## References
 

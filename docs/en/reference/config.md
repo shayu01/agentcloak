@@ -20,7 +20,7 @@ The file uses three sections: `[daemon]`, `[browser]`, and `[security]`.
 [daemon]
 host = "127.0.0.1"
 port = 18765
-http_client_timeout = 120
+http_client_timeout = 90
 auto_start_timeout = 15.0
 auto_start_poll_interval = 0.5
 log_level = "warning"
@@ -34,12 +34,12 @@ default_profile = ""
 viewport_width = 1280
 viewport_height = 720
 navigation_timeout = 30
-idle_timeout_min = 0
+idle_timeout_min = 30
 stop_on_exit = false
 headless = true
-humanize = false
+humanize = true
 action_timeout = 30000
-batch_settle_timeout = 5000
+batch_settle_timeout = 2000
 max_return_size = 50000
 screenshot_quality = 80
 mcp_screenshot_quality = 50
@@ -64,7 +64,7 @@ All environment variables use the `AGENTCLOAK_` prefix.
 |----------|-----------|---------|-------------|
 | `AGENTCLOAK_HOST` | `daemon.host` | `127.0.0.1` | Daemon listen address |
 | `AGENTCLOAK_PORT` | `daemon.port` | `18765` | Daemon listen port |
-| `AGENTCLOAK_HTTP_CLIENT_TIMEOUT` | `daemon.http_client_timeout` | `120` | HTTP request timeout from CLI / MCP to daemon (seconds) |
+| `AGENTCLOAK_HTTP_CLIENT_TIMEOUT` | `daemon.http_client_timeout` | `90` | HTTP request timeout from CLI / MCP to daemon (seconds) |
 | `AGENTCLOAK_AUTO_START_TIMEOUT` | `daemon.auto_start_timeout` | `15.0` | Seconds to wait for `/health` after auto-spawning the daemon |
 | `AGENTCLOAK_AUTO_START_POLL_INTERVAL` | `daemon.auto_start_poll_interval` | `0.5` | Health-probe interval during daemon auto-start (seconds) |
 | `AGENTCLOAK_LOG_LEVEL` | `daemon.log_level` | `warning` | Daemon log level (debug/info/warning/error) |
@@ -84,12 +84,12 @@ All environment variables use the `AGENTCLOAK_` prefix.
 | `AGENTCLOAK_VIEWPORT_HEIGHT` | `browser.viewport_height` | `720` | Browser viewport height in pixels |
 | `AGENTCLOAK_NAVIGATION_TIMEOUT` | `browser.navigation_timeout` | `30` | Page load timeout in seconds |
 | `AGENTCLOAK_NAVIGATION_TIMEOUT_SEC` | (alias) | -- | Alias for `NAVIGATION_TIMEOUT` |
-| `AGENTCLOAK_IDLE_TIMEOUT_MIN` | `browser.idle_timeout_min` | `0` | Auto-shutdown after N minutes idle (0 = disabled). Set to 30-60 for long-running deployments to avoid process leaks |
+| `AGENTCLOAK_IDLE_TIMEOUT_MIN` | `browser.idle_timeout_min` | `30` | Auto-shutdown after N minutes idle (0 = disabled) |
 | `AGENTCLOAK_STOP_ON_EXIT` | `browser.stop_on_exit` | `false` | Stop daemon when CLI process exits |
 | `AGENTCLOAK_HEADLESS` | `browser.headless` | `true` | Run browser without a visible window |
-| `AGENTCLOAK_HUMANIZE` | `browser.humanize` | `false` | Enable CloakBrowser human-like behavior (mouse curves, typing cadence) |
+| `AGENTCLOAK_HUMANIZE` | `browser.humanize` | `true` | Enable CloakBrowser human-like behavior (mouse curves, typing cadence) |
 | `AGENTCLOAK_ACTION_TIMEOUT` | `browser.action_timeout` | `30000` | Action timeout in milliseconds |
-| `AGENTCLOAK_BATCH_SETTLE_TIMEOUT` | `browser.batch_settle_timeout` | `5000` | Time to wait between batch actions for page to settle (ms) |
+| `AGENTCLOAK_BATCH_SETTLE_TIMEOUT` | `browser.batch_settle_timeout` | `2000` | Time to wait between batch actions for page to settle (ms) |
 | `AGENTCLOAK_MAX_RETURN_SIZE` | `browser.max_return_size` | `50000` | Max bytes returned from `/evaluate` before truncation (prevents MCP token blow-up) |
 | `AGENTCLOAK_SCREENSHOT_QUALITY` | `browser.screenshot_quality` | `80` | Default JPEG quality for CLI screenshots (0-100) |
 | `AGENTCLOAK_MCP_SCREENSHOT_QUALITY` | `browser.mcp_screenshot_quality` | `50` | Default JPEG quality for MCP screenshots (lower than CLI to save tokens) |

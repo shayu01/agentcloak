@@ -65,19 +65,19 @@ class AgentcloakConfig:
     viewport_width: int = 1280
     viewport_height: int = 720
     navigation_timeout: int = 30
-    idle_timeout_min: int = 0
+    idle_timeout_min: int = 30
     stop_on_exit: bool = False
     log_level: str = "warning"
     log_to_file: bool = False
     log_max_bytes: int = 10_000_000  # 10 MB
     log_backup_count: int = 3
     headless: bool = True
-    humanize: bool = False
+    humanize: bool = True
     action_timeout: int = 30000
-    batch_settle_timeout: int = 5000
+    batch_settle_timeout: int = 2000
     # HTTP client (CLI/MCP ↔ daemon) request timeout. Browser work can be slow
     # (page load, full-page screenshot) so we lean generous here.
-    http_client_timeout: int = 120
+    http_client_timeout: int = 90
     # Maximum bytes of serialized result returned from /evaluate. Larger values
     # are truncated with a marker — prevents MCP token blow-up.
     max_return_size: int = 50_000

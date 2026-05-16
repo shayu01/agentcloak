@@ -20,7 +20,7 @@ agentcloak 开箱即用，无需任何配置。所有设置都有合理的默认
 [daemon]
 host = "127.0.0.1"
 port = 18765
-http_client_timeout = 120
+http_client_timeout = 90
 auto_start_timeout = 15.0
 auto_start_poll_interval = 0.5
 log_level = "warning"
@@ -34,12 +34,12 @@ default_profile = ""
 viewport_width = 1280
 viewport_height = 720
 navigation_timeout = 30
-idle_timeout_min = 0
+idle_timeout_min = 30
 stop_on_exit = false
 headless = true
-humanize = false
+humanize = true
 action_timeout = 30000
-batch_settle_timeout = 5000
+batch_settle_timeout = 2000
 max_return_size = 50000
 screenshot_quality = 80
 mcp_screenshot_quality = 50
@@ -64,7 +64,7 @@ content_scan_patterns = []
 |------|-------|-------|------|
 | `AGENTCLOAK_HOST` | `daemon.host` | `127.0.0.1` | Daemon 监听地址 |
 | `AGENTCLOAK_PORT` | `daemon.port` | `18765` | Daemon 监听端口 |
-| `AGENTCLOAK_HTTP_CLIENT_TIMEOUT` | `daemon.http_client_timeout` | `120` | CLI / MCP 调用 daemon 的 HTTP 请求超时（秒） |
+| `AGENTCLOAK_HTTP_CLIENT_TIMEOUT` | `daemon.http_client_timeout` | `90` | CLI / MCP 调用 daemon 的 HTTP 请求超时（秒） |
 | `AGENTCLOAK_AUTO_START_TIMEOUT` | `daemon.auto_start_timeout` | `15.0` | 自动拉起 daemon 后等待 `/health` 的总时长（秒） |
 | `AGENTCLOAK_AUTO_START_POLL_INTERVAL` | `daemon.auto_start_poll_interval` | `0.5` | 自动启动期间健康检查轮询间隔（秒） |
 | `AGENTCLOAK_LOG_LEVEL` | `daemon.log_level` | `warning` | Daemon 日志级别（debug/info/warning/error） |
@@ -84,12 +84,12 @@ content_scan_patterns = []
 | `AGENTCLOAK_VIEWPORT_HEIGHT` | `browser.viewport_height` | `720` | 浏览器视口高度（像素） |
 | `AGENTCLOAK_NAVIGATION_TIMEOUT` | `browser.navigation_timeout` | `30` | 页面加载超时（秒） |
 | `AGENTCLOAK_NAVIGATION_TIMEOUT_SEC` | （别名） | -- | `NAVIGATION_TIMEOUT` 的别名 |
-| `AGENTCLOAK_IDLE_TIMEOUT_MIN` | `browser.idle_timeout_min` | `0` | 空闲 N 分钟后自动关闭（0 = 禁用）。长期部署建议设为 30-60 避免进程泄漏 |
+| `AGENTCLOAK_IDLE_TIMEOUT_MIN` | `browser.idle_timeout_min` | `30` | 空闲 N 分钟后自动关闭（0 = 禁用） |
 | `AGENTCLOAK_STOP_ON_EXIT` | `browser.stop_on_exit` | `false` | CLI 进程退出时停止 daemon |
 | `AGENTCLOAK_HEADLESS` | `browser.headless` | `true` | 浏览器无窗口运行 |
-| `AGENTCLOAK_HUMANIZE` | `browser.humanize` | `false` | 启用 CloakBrowser 拟人行为（鼠标曲线、打字节奏） |
+| `AGENTCLOAK_HUMANIZE` | `browser.humanize` | `true` | 启用 CloakBrowser 拟人行为（鼠标曲线、打字节奏） |
 | `AGENTCLOAK_ACTION_TIMEOUT` | `browser.action_timeout` | `30000` | 操作超时（毫秒） |
-| `AGENTCLOAK_BATCH_SETTLE_TIMEOUT` | `browser.batch_settle_timeout` | `5000` | 批量操作间等待页面稳定的时间（毫秒） |
+| `AGENTCLOAK_BATCH_SETTLE_TIMEOUT` | `browser.batch_settle_timeout` | `2000` | 批量操作间等待页面稳定的时间（毫秒） |
 | `AGENTCLOAK_MAX_RETURN_SIZE` | `browser.max_return_size` | `50000` | `/evaluate` 返回值的最大字节数（超出截断，避免 MCP token 爆掉） |
 | `AGENTCLOAK_SCREENSHOT_QUALITY` | `browser.screenshot_quality` | `80` | CLI 截图默认 JPEG 质量（0-100） |
 | `AGENTCLOAK_MCP_SCREENSHOT_QUALITY` | `browser.mcp_screenshot_quality` | `50` | MCP 截图默认 JPEG 质量（低于 CLI 以节省 token） |
