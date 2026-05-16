@@ -16,22 +16,24 @@ runner = CliRunner()
 
 
 class TestDoctorCommand:
+    # CLI defaults to text output; tests assert against the legacy JSON
+    # envelope via ``--json`` (still the contract for scripts and MCP).
     def test_outputs_valid_json(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         assert "ok" in data
         assert data["ok"] is True
         assert "data" in data
 
     def test_has_checks_array(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         checks = data["data"]["checks"]
         assert isinstance(checks, list)
         assert len(checks) > 0
 
     def test_each_check_has_required_fields(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         for check in data["data"]["checks"]:
             assert "name" in check
@@ -40,14 +42,14 @@ class TestDoctorCommand:
             assert "hint" in check
 
     def test_python_version_check_passes(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         checks = data["data"]["checks"]
         py_check = next(c for c in checks if c["name"] == "python_version")
         assert py_check["ok"] is True
 
     def test_has_seq_field(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         assert "seq" in data
         assert data["seq"] == 0
@@ -56,13 +58,13 @@ class TestDoctorCommand:
         # ``path_entry`` warns when ``agentcloak``/``cloak`` aren't on PATH.
         # In CI/dev runs the venv's scripts dir is always on PATH, so this is
         # a smoke test confirming the check is wired up.
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         names = {c["name"] for c in data["data"]["checks"]}
         assert "path_entry" in names
 
     def test_playwright_libs_check_present(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         names = {c["name"] for c in data["data"]["checks"]}
         assert "playwright_libs" in names
@@ -70,7 +72,7 @@ class TestDoctorCommand:
     def test_fix_flag_returns_fix_section(self) -> None:
         # ``--fix`` adds a ``fix`` dict to the response (actions, command,
         # executed). On an already-healthy environment ``command`` is empty.
-        result = runner.invoke(app, ["doctor", "--fix"])
+        result = runner.invoke(app, ["--json", "doctor", "--fix"])
         data = json.loads(result.stdout)
         assert "fix" in data["data"]
         assert "actions" in data["data"]["fix"]

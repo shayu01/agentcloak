@@ -26,6 +26,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import PlainTextResponse, Response
 
 from agentcloak.browser.playwright_ctx import screenshot_to_base64
 from agentcloak.core.errors import BackendError, ProfileError
@@ -113,6 +114,35 @@ from agentcloak.daemon.services import (
     DiagnosticService,
     ProfileService,
     SnapshotService,
+)
+from agentcloak.daemon.text_renderers import (
+    render_action_text,
+    render_capture_analyze_text,
+    render_capture_status_text,
+    render_cdp_endpoint_text,
+    render_cookies_export_text,
+    render_cookies_import_text,
+    render_dialog_handle_text,
+    render_dialog_status_text,
+    render_evaluate_text,
+    render_fetch_text,
+    render_frame_focus_text,
+    render_frame_list_text,
+    render_health_text,
+    render_launch_text,
+    render_navigate_text,
+    render_network_text,
+    render_profile_list_text,
+    render_resume_text,
+    render_screenshot_text,
+    render_snapshot_text,
+    render_spell_list_text,
+    render_spell_run_text,
+    render_tab_list_text,
+    render_tab_op_text,
+    render_upload_text,
+    render_wait_text,
+    wants_text,
 )
 
 logger = structlog.get_logger()
@@ -203,17 +233,22 @@ async def _update_resume(
 
 
 @router.get("/health", response_model=HealthResponse)
-async def handle_health(ctx: OptionalBrowserCtxDep, request: Request) -> dict[str, Any]:
+async def handle_health(
+    ctx: OptionalBrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     diagnostic = DiagnosticService()
     local_proxy = getattr(request.app.state, "local_proxy", None)
     active_tier = getattr(request.app.state, "active_tier", None)
     remote_connected = getattr(request.app.state, "remote_ctx", None) is not None
-    return await diagnostic.health(
+    data = await diagnostic.health(
         ctx,
         local_proxy=local_proxy,
         active_tier=active_tier,
         remote_connected=remote_connected,
     )
+    if wants_text(request):
+        return PlainTextResponse(render_health_text(data))
+    return data
 
 
 # --- Navigate ---------------------------------------------------------------
@@ -224,7 +259,7 @@ async def handle_navigate(
     body: NavigateRequest,
     ctx: BrowserCtxDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Response | dict[str, Any]:
     result = await ctx.navigate(body.url, timeout=body.timeout)
     await _update_resume(
         request, ctx, action_summary={"kind": "navigate", "url": body.url}
@@ -237,6 +272,8 @@ async def handle_navigate(
         except Exception:
             logger.debug("include_snapshot_failed", exc_info=True)
 
+    if wants_text(request):
+        return PlainTextResponse(render_navigate_text(result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -246,11 +283,12 @@ async def handle_navigate(
 @router.get("/screenshot", response_model=OkEnvelope[ScreenshotResponse])
 async def handle_screenshot(
     ctx: BrowserCtxDep,
+    request: Request,
     config: ConfigDep,
     full_page: bool = False,
     format: str = "jpeg",
     quality: int | None = None,
-) -> dict[str, Any]:
+) -> Response | dict[str, Any]:
     # ``quality=None`` resolves to the configured default. CLI callers leave
     # this unset and inherit the file/env default; MCP tools pass an explicit
     # lower value so screenshots stay under MCP token budgets.
@@ -258,10 +296,14 @@ async def handle_screenshot(
         quality = config.screenshot_quality
     raw = await ctx.screenshot(full_page=full_page, format=format, quality=quality)
     b64 = screenshot_to_base64(raw)
-    return _ok(
-        {"base64": b64, "size": len(raw), "format": format},
-        seq=ctx.seq,
-    )
+    data = {"base64": b64, "size": len(raw), "format": format}
+    if wants_text(request):
+        # CLI command writes the bytes to a temp file before calling text — but
+        # daemon doesn't see the user filesystem. Best we can do here is the
+        # summary line; the CLI's text-mode screenshot helper composes the
+        # final path message itself.
+        return PlainTextResponse(render_screenshot_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 # --- Snapshot ---------------------------------------------------------------
@@ -271,15 +313,15 @@ async def handle_screenshot(
 async def handle_snapshot(
     ctx: BrowserCtxDep,
     request: Request,
-    mode: str = "accessible",
+    mode: str = "compact",
     max_nodes: int = 0,
     max_chars: int = 0,
     focus: int = 0,
     offset: int = 0,
-    include_selector_map: bool = True,
+    include_selector_map: bool = False,
     frames: bool = False,
     diff: bool = False,
-) -> dict[str, Any]:
+) -> Response | dict[str, Any]:
     service = SnapshotService()
     prev_cache = getattr(request.app.state, "prev_snapshot_lines", None)
 
@@ -299,6 +341,14 @@ async def handle_snapshot(
     if cur_cache is not None:
         request.app.state.prev_snapshot_lines = cur_cache
 
+    # Surface seq for the text renderer header line ("seq=N"). The JSON
+    # envelope already carries it in the wrapper.
+    data["seq"] = ctx.seq
+    if wants_text(request):
+        return PlainTextResponse(render_snapshot_text(data))
+    # Pop the redundant seq field from the inner data — it's already in the
+    # envelope and double-emitting would change the JSON shape.
+    data.pop("seq", None)
     return _ok(data, seq=ctx.seq)
 
 
@@ -306,7 +356,9 @@ async def handle_snapshot(
 
 
 @router.post("/evaluate", response_model=OkEnvelope[EvaluateResponse])
-async def handle_evaluate(body: EvaluateRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_evaluate(
+    body: EvaluateRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.evaluate(body.js, world=body.world)
 
     # Truncate large results before they exceed MCP token limits.
@@ -317,24 +369,30 @@ async def handle_evaluate(body: EvaluateRequest, ctx: BrowserCtxDep) -> dict[str
             result_bytes[: body.max_return_size].decode("utf-8", errors="replace")
             + "\n[...truncated...]"
         )
-        return _ok(
-            {"result": result_repr, "truncated": True, "total_size": total_size},
-            seq=ctx.seq,
-        )
+        data = {"result": result_repr, "truncated": True, "total_size": total_size}
+        if wants_text(request):
+            return PlainTextResponse(render_evaluate_text(data))
+        return _ok(data, seq=ctx.seq)
 
-    return _ok(
-        {"result": result, "truncated": False, "total_size": total_size}, seq=ctx.seq
-    )
+    data = {"result": result, "truncated": False, "total_size": total_size}
+    if wants_text(request):
+        return PlainTextResponse(render_evaluate_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 # --- Network ----------------------------------------------------------------
 
 
 @router.get("/network", response_model=OkEnvelope[NetworkResponse])
-async def handle_network(ctx: BrowserCtxDep, since: str = "0") -> dict[str, Any]:
+async def handle_network(
+    ctx: BrowserCtxDep, request: Request, since: str = "0"
+) -> Response | dict[str, Any]:
     since_value: int | str = int(since) if since.isdigit() else since
     reqs = await ctx.network(since=since_value)
-    return _ok({"requests": reqs, "count": len(reqs)}, seq=ctx.seq)
+    data = {"requests": reqs, "count": len(reqs)}
+    if wants_text(request):
+        return PlainTextResponse(render_network_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 # --- Action -----------------------------------------------------------------
@@ -345,7 +403,7 @@ async def handle_action(
     body: ActionRequest,
     ctx: BrowserCtxDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Response | dict[str, Any]:
     target = str(body.index) if body.index is not None else body.target
     extra = body.model_dump(exclude_unset=True)
     for known in ("kind", "index", "target", "include_snapshot", "snapshot_mode"):
@@ -376,6 +434,12 @@ async def handle_action(
         except Exception:
             logger.debug("include_snapshot_failed", exc_info=True)
 
+    if wants_text(request):
+        # Surface the parameters the renderer needs without polluting the
+        # JSON envelope (where they'd duplicate the request body).
+        result["text"] = extra.get("text", result.get("text", ""))
+        result["key"] = extra.get("key", result.get("key", ""))
+        return PlainTextResponse(render_action_text(body.kind, target, result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -385,7 +449,7 @@ async def handle_action_batch(
     ctx: BrowserCtxDep,
     config: ConfigDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Response | dict[str, Any]:
     settle_timeout = body.settle_timeout
     if not settle_timeout:
         settle_timeout = getattr(
@@ -396,6 +460,14 @@ async def handle_action_batch(
     result = await service.execute_batch(
         ctx, body.actions, sleep_s=body.sleep, settle_timeout=settle_timeout
     )
+    if wants_text(request):
+        completed = int(result.get("completed", 0) or 0)
+        total = int(result.get("total", 0) or 0)
+        aborted = result.get("aborted_reason", "")
+        line = f"batch: {completed}/{total} completed"
+        if aborted:
+            line += f" | aborted: {aborted}"
+        return PlainTextResponse(line)
     return _ok(result, seq=ctx.seq)
 
 
@@ -403,7 +475,9 @@ async def handle_action_batch(
 
 
 @router.post("/fetch", response_model=OkEnvelope[FetchResponse])
-async def handle_fetch(body: FetchRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_fetch(
+    body: FetchRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.fetch(
         body.url,
         method=body.method,
@@ -411,6 +485,8 @@ async def handle_fetch(body: FetchRequest, ctx: BrowserCtxDep) -> dict[str, Any]
         headers=body.headers,
         timeout=body.timeout,
     )
+    if wants_text(request):
+        return PlainTextResponse(render_fetch_text(result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -418,10 +494,12 @@ async def handle_fetch(body: FetchRequest, ctx: BrowserCtxDep) -> dict[str, Any]
 
 
 @router.post("/shutdown", response_model=OkEnvelope[ShutdownResponse])
-async def handle_shutdown(request: Request) -> dict[str, Any]:
+async def handle_shutdown(request: Request) -> Response | dict[str, Any]:
     event = getattr(request.app.state, "shutdown_event", None)
     if event is not None:
         event.set()
+    if wants_text(request):
+        return PlainTextResponse("stopped")
     return _ok({}, seq=0)
 
 
@@ -432,7 +510,8 @@ async def handle_shutdown(request: Request) -> dict[str, Any]:
 async def handle_launch(
     body: LaunchRequest,
     manager: ContextManagerDep,
-) -> dict[str, Any]:
+    request: Request,
+) -> Response | dict[str, Any]:
     """Hot-switch the active browser tier without restarting the daemon.
 
     ``cloak``/``playwright`` create or re-use a local browser; remote_bridge
@@ -456,6 +535,8 @@ async def handle_launch(
         ) from exc
 
     result = await manager.switch_tier(tier_enum, profile=body.profile)
+    if wants_text(request):
+        return PlainTextResponse(render_launch_text(result))
     return _ok(result, seq=0)
 
 
@@ -688,8 +769,8 @@ async def handle_ext_ws(websocket: WebSocket) -> None:
 
 @router.post("/bridge/claim", response_model=OkEnvelope[BridgeOpResponse])
 async def handle_bridge_claim(
-    body: BridgeClaimRequest, remote_ctx: RequiredRemoteCtxDep
-) -> dict[str, Any]:
+    body: BridgeClaimRequest, remote_ctx: RequiredRemoteCtxDep, request: Request
+) -> Response | dict[str, Any]:
     params: dict[str, Any] = {}
     if body.tab_id is not None:
         params["tabId"] = body.tab_id
@@ -697,14 +778,28 @@ async def handle_bridge_claim(
         params["urlPattern"] = body.url_pattern
 
     result = await remote_ctx.send_command("claim", params)
+    if wants_text(request):
+        if isinstance(result, dict):
+            claim: dict[str, Any] = dict(result)  # type: ignore[arg-type]
+            tab_id: Any = claim.get("tab_id") or claim.get("tabId") or "?"
+            url: Any = claim.get("url", "")
+            return PlainTextResponse(f"claimed [{tab_id}] {url}".rstrip())
+        return PlainTextResponse(str(result))
     return _ok(result, seq=0)
 
 
 @router.post("/bridge/finalize", response_model=OkEnvelope[BridgeOpResponse])
 async def handle_bridge_finalize(
-    body: BridgeFinalizeRequest, remote_ctx: RequiredRemoteCtxDep
-) -> dict[str, Any]:
+    body: BridgeFinalizeRequest, remote_ctx: RequiredRemoteCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await remote_ctx.send_command("finalize", {"mode": body.mode})
+    if wants_text(request):
+        count = 0
+        if isinstance(result, dict):
+            fin: dict[str, Any] = dict(result)  # type: ignore[arg-type]
+            count_val: Any = fin.get("count", fin.get("tabs", 0))
+            count = int(count_val or 0)
+        return PlainTextResponse(f"{body.mode} {count} tabs")
     return _ok(result, seq=0)
 
 
@@ -712,7 +807,7 @@ async def handle_bridge_finalize(
     "/bridge/token/reset",
     response_model=OkEnvelope[BridgeTokenResetResponse],
 )
-async def handle_bridge_token_reset(request: Request) -> dict[str, Any]:
+async def handle_bridge_token_reset(request: Request) -> Response | dict[str, Any]:
     """Rotate the persistent bridge auth token and hot-update the daemon.
 
     Persists the new token to ``~/.agentcloak/config.toml`` *and* replaces
@@ -728,6 +823,8 @@ async def handle_bridge_token_reset(request: Request) -> dict[str, Any]:
     new_token = regenerate_bridge_token(paths, cfg)
     request.app.state.bridge_token = new_token
     logger.info("bridge_token_rotated", token_suffix=new_token[-4:])
+    if wants_text(request):
+        return PlainTextResponse(new_token)
     return _ok({"token": new_token, "rotated": True}, seq=0)
 
 
@@ -739,7 +836,8 @@ async def handle_cookies_export(
     body: CookiesExportRequest,
     ctx: BrowserCtxDep,
     remote_ctx: RemoteCtxDep,
-) -> dict[str, Any]:
+    request: Request,
+) -> Response | dict[str, Any]:
     if remote_ctx is not None:
         from agentcloak.browser.remote_ctx import RemoteBridgeContext
 
@@ -749,6 +847,10 @@ async def handle_cookies_export(
         if body.url:
             params["url"] = body.url
         result = await remote_ctx.send_command("cookies", params)
+        count = len(result) if isinstance(result, list) else 0
+        data = {"cookies": result, "count": count}
+        if wants_text(request):
+            return PlainTextResponse(render_cookies_export_text(data))
         return _ok({"cookies": result}, seq=0)
 
     browser_context = ctx._get_browser_context()
@@ -773,13 +875,16 @@ async def handle_cookies_export(
         }
         for c in cookies
     ]
-    return _ok({"cookies": serializable, "count": len(serializable)}, seq=ctx.seq)
+    data = {"cookies": serializable, "count": len(serializable)}
+    if wants_text(request):
+        return PlainTextResponse(render_cookies_export_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 @router.post("/cookies/import", response_model=OkEnvelope[CookiesImportResponse])
 async def handle_cookies_import(
-    body: CookiesImportRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: CookiesImportRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     if not body.cookies:
         raise HTTPException(
             status_code=400,
@@ -792,48 +897,73 @@ async def handle_cookies_import(
         )
     browser_context = ctx._get_browser_context()
     await browser_context.add_cookies(body.cookies)
-    return _ok({"imported": len(body.cookies)}, seq=ctx.seq)
+    data = {"imported": len(body.cookies)}
+    if wants_text(request):
+        return PlainTextResponse(render_cookies_import_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 # --- Capture ----------------------------------------------------------------
 
 
 @router.post("/capture/start", response_model=OkEnvelope[CaptureStatusResponse])
-async def handle_capture_start(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_capture_start(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     # ctx.capture_start() runs the backend's ``_capture_setup_impl`` hook
     # (no-op for Playwright, ``Network.enable`` for RemoteBridge) so capture
     # works uniformly across both backends.
     result = await ctx.capture_start()
+    if wants_text(request):
+        return PlainTextResponse(render_capture_status_text(result))
     return _ok(result, seq=ctx.seq)
 
 
 @router.post("/capture/stop", response_model=OkEnvelope[CaptureStatusResponse])
-async def handle_capture_stop(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_capture_stop(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.capture_stop()
+    if wants_text(request):
+        return PlainTextResponse(render_capture_status_text(result))
     return _ok(result, seq=ctx.seq)
 
 
 @router.get("/capture/status", response_model=OkEnvelope[CaptureStatusResponse])
-async def handle_capture_status(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_capture_status(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     service = CaptureService(ctx.capture_store)
-    return _ok(service.status(), seq=ctx.seq)
+    result = service.status()
+    if wants_text(request):
+        return PlainTextResponse(render_capture_status_text(result))
+    return _ok(result, seq=ctx.seq)
 
 
 @router.get("/capture/export", response_model=OkEnvelope[CaptureExportResponse])
 async def handle_capture_export(
-    ctx: BrowserCtxDep, format: str = "har"
-) -> dict[str, Any]:
+    ctx: BrowserCtxDep, request: Request, format: str = "har"
+) -> Response | dict[str, Any]:
     service = CaptureService(ctx.capture_store)
-    return _ok(service.export(fmt=format), seq=ctx.seq)
+    result = service.export(fmt=format)
+    if wants_text(request):
+        # HAR/JSON is structured data — emit it pretty-printed so the user
+        # can pipe it straight to a file.
+        body = orjson.dumps(result, option=orjson.OPT_INDENT_2).decode()
+        return PlainTextResponse(body)
+    return _ok(result, seq=ctx.seq)
 
 
 @router.get("/capture/analyze", response_model=OkEnvelope[CaptureAnalyzeResponse])
 async def handle_capture_analyze(
-    ctx: BrowserCtxDep, domain: str | None = None
-) -> dict[str, Any]:
+    ctx: BrowserCtxDep, request: Request, domain: str | None = None
+) -> Response | dict[str, Any]:
     service = CaptureService(ctx.capture_store)
     try:
-        return _ok(service.analyze(domain=domain), seq=ctx.seq)
+        result = service.analyze(domain=domain)
+        if wants_text(request):
+            return PlainTextResponse(render_capture_analyze_text(result))
+        return _ok(result, seq=ctx.seq)
     except Exception as exc:
         from agentcloak.daemon.services.capture_service import CaptureReplayError
 
@@ -843,15 +973,23 @@ async def handle_capture_analyze(
 
 
 @router.post("/capture/clear", response_model=OkEnvelope[CaptureClearResponse])
-async def handle_capture_clear(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_capture_clear(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     service = CaptureService(ctx.capture_store)
-    return _ok(service.clear(), seq=ctx.seq)
+    result = service.clear()
+    if wants_text(request):
+        # PRD R2: ``cleared {n} entries`` — surface the count so agents see
+        # what they wiped without a follow-up status check.
+        n = int(result.get("entries", 0) or 0)
+        return PlainTextResponse(f"cleared {n} entries")
+    return _ok(result, seq=ctx.seq)
 
 
 @router.post("/capture/replay", response_model=OkEnvelope[CaptureReplayResponse])
 async def handle_capture_replay(
-    body: CaptureReplayRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: CaptureReplayRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     from agentcloak.daemon.services.capture_service import CaptureReplayError
 
     service = CaptureService(ctx.capture_store)
@@ -863,6 +1001,9 @@ async def handle_capture_replay(
             "capture_entry_not_found": 404,
         }.get(exc.error, 400)
         raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
+    if wants_text(request):
+        # Replay returns an HTTP-style response; bare-body matches fetch.
+        return PlainTextResponse(render_fetch_text(result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -870,7 +1011,9 @@ async def handle_capture_replay(
 
 
 @router.get("/cdp/endpoint", response_model=OkEnvelope[CDPEndpointResponse])
-async def handle_cdp_endpoint(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_cdp_endpoint(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     """Return the CDP WebSocket URL for jshookmcp browser_attach."""
     import httpx
 
@@ -903,42 +1046,61 @@ async def handle_cdp_endpoint(ctx: BrowserCtxDep) -> dict[str, Any]:
             },
         ) from exc
 
-    return _ok(
-        {"ws_endpoint": ws_endpoint, "http_url": http_url, "port": cdp_port},
-        seq=ctx.seq,
-    )
+    data = {"ws_endpoint": ws_endpoint, "http_url": http_url, "port": cdp_port}
+    if wants_text(request):
+        return PlainTextResponse(render_cdp_endpoint_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 # --- Tabs -------------------------------------------------------------------
 
 
 @router.get("/tabs", response_model=OkEnvelope[TabListResponse])
-async def handle_tab_list(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_tab_list(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     tabs = await ctx.tab_list()
     data = [
         {"tab_id": t.tab_id, "url": t.url, "title": t.title, "active": t.active}
         for t in tabs
     ]
-    return _ok({"tabs": data, "count": len(data)}, seq=ctx.seq)
+    envelope = {"tabs": data, "count": len(data)}
+    if wants_text(request):
+        return PlainTextResponse(render_tab_list_text(envelope))
+    return _ok(envelope, seq=ctx.seq)
 
 
 @router.post("/tab/new", response_model=OkEnvelope[TabOpResponse])
-async def handle_tab_new(body: TabNewRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_tab_new(
+    body: TabNewRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.tab_new(body.url)
+    if wants_text(request):
+        return PlainTextResponse(render_tab_op_text("new", result))
     return _ok(result, seq=ctx.seq)
 
 
 @router.post("/tab/close", response_model=OkEnvelope[TabOpResponse])
-async def handle_tab_close(body: TabCloseRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_tab_close(
+    body: TabCloseRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.tab_close(body.tab_id)
+    if wants_text(request):
+        # Preserve the closed id in the renderer payload — services don't
+        # always echo it back.
+        result.setdefault("tab_id", body.tab_id)
+        return PlainTextResponse(render_tab_op_text("closed", result))
     return _ok(result, seq=ctx.seq)
 
 
 @router.post("/tab/switch", response_model=OkEnvelope[TabOpResponse])
 async def handle_tab_switch(
-    body: TabSwitchRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: TabSwitchRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.tab_switch(body.tab_id)
+    if wants_text(request):
+        result.setdefault("tab_id", body.tab_id)
+        return PlainTextResponse(render_tab_op_text("switched to", result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -946,7 +1108,9 @@ async def handle_tab_switch(
 
 
 @router.get("/resume", response_model=OkEnvelope[ResumeResponse])
-async def handle_resume(ctx: BrowserCtxDep, request: Request) -> dict[str, Any]:
+async def handle_resume(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     writer = getattr(request.app.state, "resume_writer", None)
     if writer is None:
         raise HTTPException(
@@ -966,6 +1130,8 @@ async def handle_resume(ctx: BrowserCtxDep, request: Request) -> dict[str, Any]:
     data = writer.current_snapshot.to_dict()
     data["capture_active"] = ctx.capture_store.recording
     data["stealth_tier"] = ctx.stealth_tier.value
+    if wants_text(request):
+        return PlainTextResponse(render_resume_text(data))
     return _ok(data, seq=ctx.seq)
 
 
@@ -973,7 +1139,9 @@ async def handle_resume(ctx: BrowserCtxDep, request: Request) -> dict[str, Any]:
 
 
 @router.post("/spell/run", response_model=OkEnvelope[SpellRunResponse])
-async def handle_spell_run(body: SpellRunRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_spell_run(
+    body: SpellRunRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     """Run a registered spell with the daemon's live browser context."""
     from agentcloak.spells.discovery import discover_spells
     from agentcloak.spells.executor import execute_spell
@@ -1007,11 +1175,16 @@ async def handle_spell_run(body: SpellRunRequest, ctx: BrowserCtxDep) -> dict[st
         )
 
     result = await execute_spell(entry, args=body.args, browser=ctx)
-    return _ok({"result": result}, seq=ctx.seq)
+    data = {"result": result}
+    if wants_text(request):
+        return PlainTextResponse(render_spell_run_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 @router.get("/spell/list", response_model=OkEnvelope[SpellListResponse])
-async def handle_spell_list(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_spell_list(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     """List all registered spells."""
     from agentcloak.spells.discovery import discover_spells
     from agentcloak.spells.registry import get_registry
@@ -1027,7 +1200,10 @@ async def handle_spell_list(ctx: BrowserCtxDep) -> dict[str, Any]:
         }
         for e in registry.list_all()
     ]
-    return _ok({"spells": spells, "count": len(spells)}, seq=ctx.seq)
+    data = {"spells": spells, "count": len(spells)}
+    if wants_text(request):
+        return PlainTextResponse(render_spell_list_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 # --- Profile ----------------------------------------------------------------
@@ -1041,7 +1217,8 @@ async def handle_profile_create_from_current(
     body: ProfileCreateFromCurrentRequest,
     ctx: BrowserCtxDep,
     remote_ctx: RemoteCtxDep,
-) -> dict[str, Any]:
+    request: Request,
+) -> Response | dict[str, Any]:
     """Create a profile from the current browser session's cookies."""
     service = ProfileService(_profiles_dir())
 
@@ -1075,37 +1252,51 @@ async def handle_profile_create_from_current(
         result = await service.create_from_cookies(body.name, cookies)
     except ProfileError as exc:
         raise _profile_error_to_http(exc) from exc
+    if wants_text(request):
+        return PlainTextResponse(
+            f'created profile "{result.get("profile", body.name)}" '
+            f"({int(result.get('cookie_count', 0) or 0)} cookies)"
+        )
     return _ok(result, seq=ctx.seq)
 
 
 @router.get("/profile/list", response_model=OkEnvelope[ProfileListResponse])
-async def handle_profile_list(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_profile_list(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     service = ProfileService(_profiles_dir())
     names = service.list_profiles()
-    return _ok({"profiles": names, "count": len(names)}, seq=ctx.seq)
+    data = {"profiles": names, "count": len(names)}
+    if wants_text(request):
+        return PlainTextResponse(render_profile_list_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 @router.post("/profile/create", response_model=OkEnvelope[ProfileCreateResponse])
 async def handle_profile_create(
-    body: ProfileCreateRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: ProfileCreateRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     service = ProfileService(_profiles_dir())
     try:
         name = service.create(body.name)
     except ProfileError as exc:
         raise _profile_error_to_http(exc) from exc
+    if wants_text(request):
+        return PlainTextResponse(f'created profile "{name}"')
     return _ok({"created": name}, seq=ctx.seq)
 
 
 @router.post("/profile/delete", response_model=OkEnvelope[ProfileCreateResponse])
 async def handle_profile_delete(
-    body: ProfileDeleteRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: ProfileDeleteRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     service = ProfileService(_profiles_dir())
     try:
         name = service.delete(body.name)
     except ProfileError as exc:
         raise _profile_error_to_http(exc) from exc
+    if wants_text(request):
+        return PlainTextResponse(f'deleted profile "{name}"')
     return _ok({"deleted": name}, seq=ctx.seq)
 
 
@@ -1113,29 +1304,38 @@ async def handle_profile_delete(
 
 
 @router.get("/dialog/status", response_model=OkEnvelope[DialogStatusResponse])
-async def handle_dialog_status(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_dialog_status(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     dialog = await ctx.dialog_status()
     if dialog is None:
-        return _ok({"pending": False}, seq=ctx.seq)
-    return _ok(
-        {
-            "pending": True,
-            "dialog": {
-                "type": dialog.dialog_type,
-                "message": dialog.message,
-                "default_value": dialog.default_value,
-                "url": dialog.url,
-            },
+        data = {"pending": False}
+        if wants_text(request):
+            return PlainTextResponse(render_dialog_status_text(data))
+        return _ok(data, seq=ctx.seq)
+    data = {
+        "pending": True,
+        "dialog": {
+            "type": dialog.dialog_type,
+            "message": dialog.message,
+            "default_value": dialog.default_value,
+            "url": dialog.url,
         },
-        seq=ctx.seq,
-    )
+    }
+    if wants_text(request):
+        return PlainTextResponse(render_dialog_status_text(data))
+    return _ok(data, seq=ctx.seq)
 
 
 @router.post("/dialog/handle", response_model=OkEnvelope[DialogHandleResponse])
 async def handle_dialog_handle(
-    body: DialogHandleRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: DialogHandleRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.dialog_handle(body.action, text=body.text)
+    # Echo the requested action back so the renderer knows what we did.
+    result.setdefault("action", body.action)
+    if wants_text(request):
+        return PlainTextResponse(render_dialog_handle_text(result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -1143,13 +1343,21 @@ async def handle_dialog_handle(
 
 
 @router.post("/wait", response_model=OkEnvelope[WaitResponse])
-async def handle_wait(body: WaitRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_wait(
+    body: WaitRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.wait(
         condition=body.condition,
         value=body.value,
         timeout=body.timeout,
         state=body.state,
     )
+    # Surface the condition/value the renderer needs without forcing the
+    # browser layer to echo them back.
+    result.setdefault("condition", body.condition)
+    result.setdefault("value", body.value)
+    if wants_text(request):
+        return PlainTextResponse(render_wait_text(result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -1157,7 +1365,9 @@ async def handle_wait(body: WaitRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
 
 
 @router.post("/upload", response_model=OkEnvelope[UploadResponse])
-async def handle_upload(body: UploadRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_upload(
+    body: UploadRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     if not body.files:
         raise HTTPException(
             status_code=400,
@@ -1169,6 +1379,12 @@ async def handle_upload(body: UploadRequest, ctx: BrowserCtxDep) -> dict[str, An
             },
         )
     result = await ctx.upload(body.index, body.files)
+    # Backfill the renderer-only fields so the text path can format ``uploaded
+    # 2 files to [7]`` without inspecting the original request again.
+    result.setdefault("uploaded", len(body.files))
+    result.setdefault("index", body.index)
+    if wants_text(request):
+        return PlainTextResponse(render_upload_text(result))
     return _ok(result, seq=ctx.seq)
 
 
@@ -1176,17 +1392,28 @@ async def handle_upload(body: UploadRequest, ctx: BrowserCtxDep) -> dict[str, An
 
 
 @router.get("/frame/list", response_model=OkEnvelope[FrameListResponse])
-async def handle_frame_list(ctx: BrowserCtxDep) -> dict[str, Any]:
+async def handle_frame_list(
+    ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     frames = await ctx.frame_list()
     data = [{"name": f.name, "url": f.url, "is_current": f.is_current} for f in frames]
-    return _ok({"frames": data, "count": len(data)}, seq=ctx.seq)
+    envelope = {"frames": data, "count": len(data)}
+    if wants_text(request):
+        return PlainTextResponse(render_frame_list_text(envelope))
+    return _ok(envelope, seq=ctx.seq)
 
 
 @router.post("/frame/focus", response_model=OkEnvelope[FrameFocusResponse])
 async def handle_frame_focus(
-    body: FrameFocusRequest, ctx: BrowserCtxDep
-) -> dict[str, Any]:
+    body: FrameFocusRequest, ctx: BrowserCtxDep, request: Request
+) -> Response | dict[str, Any]:
     result = await ctx.frame_focus(name=body.name, url=body.url, main=body.main)
+    # Backfill the renderer hint fields without changing the JSON envelope.
+    result.setdefault("name", body.name)
+    result.setdefault("url", body.url)
+    result.setdefault("main", body.main)
+    if wants_text(request):
+        return PlainTextResponse(render_frame_focus_text(result))
     return _ok(result, seq=ctx.seq)
 
 

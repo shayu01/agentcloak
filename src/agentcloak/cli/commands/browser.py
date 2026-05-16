@@ -1,13 +1,24 @@
-"""Browser commands — open, screenshot, snapshot, state."""
+"""Browser commands — navigate, screenshot, snapshot, resume.
+
+Text-mode rendering happens on the daemon side (see
+:mod:`agentcloak.daemon.text_renderers`). The CLI is responsible for
+choosing the mode (``--json`` flag), assembling the request, and writing
+the daemon's response to stdout. Anything that mutates local state — e.g.
+``screenshot`` decoding base64 and saving a file — also lives here because
+the daemon has no access to the user's filesystem.
+"""
 
 from __future__ import annotations
 
 import base64
-from pathlib import Path  # noqa: TC003 — Typer needs runtime access
+import time
+from pathlib import Path
+from tempfile import gettempdir
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json, emit_envelope
+from agentcloak.cli.output import error, info, is_json_mode, value
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -23,34 +34,36 @@ def browser_navigate(
         "--timeout",
         help="Navigation timeout in seconds (default: config.navigation_timeout).",
     ),
-    snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--snapshot",
-        help="Attach compact snapshot to navigate result.",
+        help="Attach compact snapshot to the navigate result (one round-trip).",
     ),
     snapshot_mode: str = typer.Option(
         "compact",
         "--snapshot-mode",
-        help="Snapshot mode when --snapshot is used: compact, accessible.",
+        help="Snapshot mode when --snap is used: compact, accessible.",
     ),
 ) -> None:
     """Navigate to a URL."""
     client = DaemonClient()
-    result = client.navigate_sync(
-        url,
-        timeout=timeout,
-        include_snapshot=snapshot,
-        snapshot_mode=snapshot_mode,
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    body: dict[str, object] = {"url": url}
+    if timeout is not None:
+        body["timeout"] = timeout
+    if snap:
+        body["include_snapshot"] = True
+        body["snapshot_mode"] = snapshot_mode
+    dispatch_text_or_json(client, "POST", "/navigate", json_body=body)
 
 
 @app.command("screenshot")
 def browser_screenshot(
     output: Path | None = typer.Option(
-        None, "--output", "-o", help="Save to file instead of base64."
+        None,
+        "--output",
+        "-o",
+        help="Save to a specific file. Default: /tmp/agentcloak-<ts>.<ext>.",
     ),
     full_page: bool = typer.Option(
         False, "--full-page", help="Capture full scrollable page."
@@ -67,37 +80,61 @@ def browser_screenshot(
         ),
     ),
 ) -> None:
-    """Take a screenshot."""
+    """Take a screenshot. Default mode saves to /tmp and prints the path."""
     client = DaemonClient()
+    # Always pull the JSON envelope so we get the base64 payload — text mode
+    # would only give us a metadata line.
     result = client.screenshot_sync(full_page=full_page, format=format, quality=quality)
     data = result.get("data", result)
-    seq = result.get("seq", 0)
+    seq = int(result.get("seq", 0) or 0)
 
-    if output:
-        b64_str: str = data["base64"]
-        output.write_bytes(base64.b64decode(b64_str))
-        output_json({"saved": str(output), "size": data.get("size", 0)}, seq=seq)
-    else:
-        output_json(data, seq=seq)
+    b64_str: str = data.get("base64", "")
+    if not b64_str:
+        if is_json_mode():
+            emit_envelope(result)
+            return
+        error("screenshot returned empty payload", "retry, or check daemon logs")
+        return
+
+    if output is None:
+        ts = int(time.time() * 1000)
+        ext = "png" if format == "png" else "jpg"
+        output = Path(gettempdir()) / f"agentcloak-{ts}.{ext}"
+
+    output.write_bytes(base64.b64decode(b64_str))
+
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": True,
+                "seq": seq,
+                "data": {"saved": str(output), "size": data.get("size", 0)},
+            }
+        )
+        return
+    value(str(output))
 
 
 @app.command("snapshot")
 def browser_snapshot(
     mode: str = typer.Option(
-        "accessible",
+        "compact",
         "--mode",
         "-m",
-        help="Snapshot mode: accessible, compact, dom, content.",
+        help="Snapshot mode: compact (default), accessible, dom, content.",
     ),
     max_chars: int = typer.Option(
         0,
         "--max-chars",
         help="Truncate tree_text to this many characters (0 = no limit).",
     ),
-    max_nodes: int = typer.Option(
+    limit: int = typer.Option(
         0,
+        "--limit",
         "--max-nodes",
-        help="Truncate after N nodes (0 = no limit).",
+        help=(
+            "Truncate after N nodes (0 = no limit). --max-nodes is the legacy alias."
+        ),
     ),
     focus: int = typer.Option(
         0,
@@ -119,28 +156,41 @@ def browser_snapshot(
         "--diff",
         help="Compare with previous snapshot, mark [+] added and [~] changed.",
     ),
+    selector_map: bool = typer.Option(
+        False,
+        "--selector-map",
+        help="Include selector_map (off by default — agents don't need it).",
+    ),
 ) -> None:
-    """Get page snapshot (accessible tree, DOM, or text content)."""
+    """Get page snapshot (accessibility tree by default)."""
     client = DaemonClient()
-    result = client.snapshot_sync(
-        mode=mode,
-        max_chars=max_chars,
-        max_nodes=max_nodes,
-        focus=focus,
-        offset=offset,
-        frames=frames,
-        diff=diff,
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    params: dict[str, str] = {"mode": mode}
+    if max_chars:
+        params["max_chars"] = str(max_chars)
+    if limit:
+        params["max_nodes"] = str(limit)
+    if focus:
+        params["focus"] = str(focus)
+    if offset:
+        params["offset"] = str(offset)
+    if frames:
+        params["frames"] = "true"
+    if diff:
+        params["diff"] = "true"
+    if selector_map:
+        params["include_selector_map"] = "true"
+    else:
+        params["include_selector_map"] = "false"
+    dispatch_text_or_json(client, "GET", "/snapshot", params=params)
 
 
 @app.command("resume")
 def browser_resume() -> None:
-    """Get resume snapshot for session recovery."""
+    """Get the resume snapshot for session recovery."""
     client = DaemonClient()
-    result = client.resume_sync()
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    dispatch_text_or_json(client, "GET", "/resume")
+
+
+# Suppress unused-import warning for the ``info`` helper — it's reserved for
+# commands like ``screenshot`` that might add stderr breadcrumbs later.
+_ = info

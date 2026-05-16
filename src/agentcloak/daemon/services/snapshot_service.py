@@ -9,13 +9,13 @@ truncation, focus, and offset. This service exists to:
    don't poke ``app.state`` directly.
 
 Design note — ``include_selector_map``:
-    CLI callers leave the flag at its default of ``True`` and inspect the
-    structured map when scripting non-trivial flows. MCP tools pass
-    ``include_selector_map=False`` (see ``mcp/tools/navigation.py``) because
-    agents drive the page from ``[N]`` references in ``tree_text``; including
-    the map would burn 1-3kB of tokens per snapshot on metadata they never
-    read. The flag is the single knob — both surfaces hit the same route, the
-    difference is purely about who's reading the response.
+    CLI / MCP both omit ``selector_map`` by default (R7 of the v0.3.0 CLI
+    redesign): agents drive the page from ``[N]`` references in ``tree_text``
+    and the structured map would burn 1-3kB of tokens per snapshot on
+    metadata they never read. CLI callers can opt back in with the
+    ``--selector-map`` flag when scripting non-trivial flows; MCP tools never
+    set it. Both surfaces hit the same route, the difference is purely about
+    who's reading the response.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class SnapshotService:
         self,
         ctx: Any,
         *,
-        mode: str = "accessible",
+        mode: str = "compact",
         max_nodes: int = 0,
         max_chars: int = 0,
         focus: int = 0,

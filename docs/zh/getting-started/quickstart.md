@@ -17,103 +17,109 @@ daemon 在首次命令时自动启动，无需手动设置。
 
 ```bash
 # 导航并一步获取 snapshot
-cloak navigate "https://example.com" --snapshot
+cloak navigate "https://example.com" --snap
 ```
 
-输出同时包含导航结果和页面 snapshot：
+stdout 直接就是答案——一行导航结果，接着是 snapshot 树：
 
-```json
-{
-  "ok": true,
-  "seq": 1,
-  "data": {
-    "url": "https://example.com/",
-    "title": "Example Domain",
-    "snapshot": {
-      "tree_text": "[1] <heading level=1> Example Domain\n  More information...\n[2] <link> More information...",
-      "mode": "compact",
-      "total_nodes": 5,
-      "total_interactive": 2
-    }
-  }
-}
+```text
+https://example.com/ | Example Domain
+
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
+  heading "Example Domain" level=1
+  paragraph "This domain is for use in illustrative examples in documents."
+  [1] link "More information..." href="https://www.iana.org/domains/example"
 ```
 
 ## 阅读 snapshot
 
 snapshot 是一棵无障碍树，每个可交互元素分配一个 `[N]` 引用：
 
-```
-[1] <heading level=1> Example Domain
-  More information...
-[2] <link> More information...
+```text
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
+  heading "Example Domain" level=1
+  paragraph "This domain is for use in illustrative examples in documents."
+  [1] link "More information..." href="https://www.iana.org/domains/example"
 ```
 
-- `[1]` 是标题 -- 不可交互，但有索引方便引用
-- `[2]` 是可点击链接
-
-元素展示其 ARIA 角色、名称和状态。输入字段包含当前值。缩进表示页面层级结构。
+- 头行包含页面标题、URL、节点数量、daemon `seq`（状态计数器）
+- 没有 `[N]` 前缀的行是容器/上下文元素
+- 带 `[N]` 的行是可交互元素——把数字传给 click/fill 等命令
+- 输入框显示当前值；密码字段会脱敏为 `••••`
 
 ### Snapshot 模式
 
 | 模式 | 显示内容 | 使用场景 |
 |------|---------|---------|
-| `accessible` | 完整无障碍树，带 `[N]` 引用和 ARIA 状态、值 | 默认 -- 完整页面视图 |
-| `compact` | 仅可交互元素和命名容器 | action 之后 -- 输出更小 |
+| `compact` | 仅可交互元素和命名容器 | 默认——token 效率高 |
+| `accessible` | 完整无障碍树，带 `[N]` 引用、ARIA 状态、值 | 需要看完整层级时 |
 | `content` | 文本提取 | 阅读文章或文本密集页面 |
 | `dom` | 原始 HTML | 调试或 CSS 选择器相关工作 |
 
 ```bash
-cloak snapshot --mode compact    # 仅可交互元素
-cloak snapshot --mode content    # 文本提取
+cloak snapshot --mode accessible     # 完整无障碍树
+cloak snapshot --mode content        # 文本提取
 ```
 
 ## 与元素交互
 
-使用 snapshot 中的 `[N]` 引用作为操作目标：
+使用 snapshot 中的 `[N]` 引用作为操作目标。元素索引支持位置参数（agent 更简短）或 `--index N`：
 
 ```bash
-# 点击链接
-cloak click --target 2
+# 点击链接（位置参数或 --index 都行）
+cloak click 1
 
 # 填充文本字段
-cloak fill --target 5 --text "search query"
+cloak fill 5 "search query"
 
 # 按键
-cloak press --key Enter --target 5
+cloak press Enter
 
 # 选择下拉选项
-cloak select --target 8 --value "option-2"
+cloak select 8 --value "option-2"
+```
+
+每个 action 打印一行确认 + 主动反馈：
+
+```text
+$ cloak click 1
+clicked [1]
+  navigation: https://www.iana.org/domains/example
 ```
 
 ### 获取操作后状态
 
-给任何 action 命令添加 `--snapshot` 可在同一响应中获取 snapshot：
+给任何 action 命令添加 `--snap`，可在同一响应中获取 snapshot——比单独再跑 `cloak snapshot` 省一次往返：
 
 ```bash
-cloak click --target 2 --snapshot
+cloak click 2 --snap
 ```
 
-相比操作后单独运行 `cloak snapshot`，这省去了一次往返请求。响应中在 action 结果旁包含一个 `snapshot` 对象。
+```text
+clicked [2]
+  navigation: https://example.com/page2
+
+# Page Two | https://example.com/page2 | 12 nodes (4 interactive) | seq=4
+  ...
+```
 
 ## 完整登录示例
 
 ```bash
 # 导航到登录页并获取 snapshot
-cloak navigate "https://example.com/login" --snapshot
-
-# Snapshot 输出：
-# [1] <heading level=1> Sign In
-# [2] <textbox> Email
-# [3] <textbox type=password> Password
-# [4] <button> Sign In
+cloak navigate "https://example.com/login" --snap
+# Snapshot 输出（节选）：
+# heading "Sign In" level=1
+# [1] textbox "Email"
+# [2] textbox "Password" value="••••"
+# [3] button "Sign In"
 
 # 填写凭据
-cloak fill --target 2 --text "user@example.com"
-cloak fill --target 3 --text "my-password"
+cloak fill 1 "user@example.com"
+cloak fill 2 "my-password"
 
 # 提交并获取新 snapshot
-cloak click --target 4 --snapshot
+cloak click 3 --snap
 
 # 保存登录状态以便复用
 cloak profile create my-session
@@ -123,7 +129,7 @@ cloak profile create my-session
 
 ```bash
 cloak daemon start --profile my-session
-cloak navigate "https://example.com/dashboard" --snapshot
+cloak navigate "https://example.com/dashboard" --snap
 ```
 
 ## 网络监控
@@ -143,6 +149,7 @@ cloak network requests --since last_action
 ```bash
 # 视口截图（JPEG，比 PNG 小约 75-85%）
 cloak screenshot
+# stdout 输出文件路径，如 /tmp/agentcloak-1715920000.png
 
 # 完整可滚动页面
 cloak screenshot --full-page
@@ -150,7 +157,7 @@ cloak screenshot --full-page
 # PNG 格式获取像素级精确度
 cloak screenshot --format png
 
-# 保存到文件
+# 保存到指定文件
 cloak screenshot --output page.png
 ```
 
@@ -159,11 +166,11 @@ cloak screenshot --output page.png
 对于元素众多的页面，使用渐进加载：
 
 ```bash
-# 限制输出为 80 个节点
-cloak snapshot --max-nodes 80
+# 限制输出为 80 个节点（--max-nodes 仍兼容）
+cloak snapshot --limit 80
 
 # 分页浏览结果
-cloak snapshot --offset 80 --max-nodes 80
+cloak snapshot --offset 80 --limit 80
 
 # 聚焦特定元素的子树
 cloak snapshot --focus 15
@@ -182,8 +189,8 @@ cloak navigate "https://api-heavy-site.com"
 # 与页面交互...
 cloak capture stop
 
-# 导出为 HAR
-cloak capture export --format har -o traffic.har
+# 导出为 HAR（裸字节到 stdout，pipe 到文件）
+cloak capture export --format har > traffic.har
 
 # 自动检测 API 模式
 cloak capture analyze
@@ -193,23 +200,32 @@ cloak capture analyze
 
 ## 输出格式
 
-每个命令在 stdout 输出一个 JSON 对象：
+CLI 从 v0.3.0 起以文本为先。**stdout 就是答案**。提示和错误走 stderr；exit code 为 0 成功 / 1 失败 / 2 用法错误。
+
+```text
+$ cloak navigate https://example.com
+https://example.com/ | Example Domain
+
+$ cloak click 99
+Error: Element [99] not in selector_map (1 entries)
+  -> run 'snapshot' to refresh the selector_map, or re-snapshot if the page changed
+```
+
+需要旧的 JSON envelope（脚本或 MCP 风格消费方）？加 `--json`，或设 `AGENTCLOAK_OUTPUT=json`：
+
+```bash
+cloak --json snapshot | jq -r '.data.tree_text'
+AGENTCLOAK_OUTPUT=json cloak snapshot
+```
+
+`--json` 生效时的 JSON shape：
 
 ```json
 {"ok": true, "seq": 3, "data": {"url": "https://example.com", "title": "Example"}}
-```
-
-错误包含恢复建议：
-
-```json
 {"ok": false, "error": "element_not_found", "hint": "No element at index 99", "action": "re-snapshot to get fresh [N] refs"}
 ```
 
-`seq` 是单调递增计数器，每次浏览器状态变化时递增。使用 `jq` 解析：
-
-```bash
-cloak snapshot | jq -r '.data.tree_text'
-```
+`seq` 是单调递增计数器，每次浏览器状态变化时递增。
 
 ## 后续步骤
 

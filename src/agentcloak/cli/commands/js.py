@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -16,12 +16,13 @@ app = typer.Typer()
 def js_evaluate(
     code: str = typer.Argument(help="JavaScript code to evaluate."),
     world: str = typer.Option(
-        "main", help="Execution context: 'main' (page globals) or 'utility' (isolated)."
+        "main", help="Execution context: 'main' (page globals) or 'isolated'."
     ),
 ) -> None:
     """Evaluate JavaScript in the page context."""
-    client = DaemonClient()
-    result = client.evaluate_sync(code, world=world)
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    dispatch_text_or_json(
+        DaemonClient(),
+        "POST",
+        "/evaluate",
+        json_body={"js": code, "world": world},
+    )

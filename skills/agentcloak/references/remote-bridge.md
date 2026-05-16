@@ -44,7 +44,7 @@ cloak navigate "https://example.com"
 Take over a tab the user already has open:
 
 ```bash
-cloak bridge claim --url-pattern "github.com"   # claim tab matching URL
+cloak bridge claim --url "github.com"            # claim tab matching URL
 cloak snapshot                                   # now sees that tab
 ```
 

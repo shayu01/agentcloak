@@ -69,8 +69,9 @@ class CaptureService:
         return {"recording": self._store.recording, "entries": len(self._store)}
 
     def clear(self) -> dict[str, Any]:
+        cleared = len(self._store)
         self._store.clear()
-        return {"cleared": True}
+        return {"cleared": True, "entries": cleared}
 
     # ------------------------------------------------------------------
     # Export — HAR (default) or raw JSON

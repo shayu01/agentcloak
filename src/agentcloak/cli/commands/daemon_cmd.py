@@ -1,14 +1,16 @@
-"""Daemon lifecycle commands — start, stop, health."""
+"""Daemon lifecycle commands — start, stop, health, cdp-endpoint."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 
 import httpx
 import typer
 
-from agentcloak.cli.output import output_error, output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json, emit_envelope
+from agentcloak.cli.output import error_from_exception, is_json_mode, value
 from agentcloak.core.errors import DaemonConnectionError
 
 __all__ = ["app"]
@@ -92,16 +94,27 @@ def daemon_start(
         bind_port = port or cfg.daemon_port
         ready = _wait_for_daemon_ready(f"http://{bind_host}:{bind_port}")
 
-        output_json(
-            {
-                "pid": pid,
-                "background": True,
-                "profile": profile,
-                "tier": resolved_tier,
-                "ready": ready,
-            },
-            seq=0,
+        if is_json_mode():
+            emit_envelope(
+                {
+                    "ok": True,
+                    "seq": 0,
+                    "data": {
+                        "pid": pid,
+                        "background": True,
+                        "profile": profile,
+                        "tier": resolved_tier,
+                        "ready": ready,
+                    },
+                }
+            )
+            return
+        ready_str = "ready" if ready else "starting"
+        line = (
+            f"started bg | pid {pid} | http://{bind_host}:{bind_port} "
+            f"| tier={resolved_tier} | {ready_str}"
         )
+        value(line)
         return
 
     from agentcloak.daemon.server import start
@@ -126,8 +139,15 @@ def daemon_stop(
     from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port, auto_start=False)
-    client.shutdown_sync()
-    output_json({"stopped": True}, seq=0)
+    if is_json_mode():
+        client.shutdown_sync()
+        emit_envelope({"ok": True, "seq": 0, "data": {"stopped": True}})
+        return
+    # Text path tolerates the daemon-already-gone case (shutdown drops the
+    # listener mid-handler so the response is often empty/connection-reset).
+    with contextlib.suppress(DaemonConnectionError):
+        client.request_text_sync("POST", "/shutdown")
+    value("stopped")
 
 
 @app.command("cdp-endpoint")
@@ -138,9 +158,7 @@ def daemon_cdp_endpoint(
     """Get the CDP WebSocket URL for the current browser."""
     from agentcloak.client import DaemonClient
 
-    client = DaemonClient(host=host, port=port)
-    result = client.cdp_endpoint_sync()
-    output_json(result.get("data", result), seq=result.get("seq", 0))
+    dispatch_text_or_json(DaemonClient(host=host, port=port), "GET", "/cdp/endpoint")
 
 
 @app.command("health")
@@ -148,23 +166,20 @@ def daemon_health(
     host: str | None = typer.Option(None, "--host"),
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
-    """Show daemon health including stealth tier, current URL, capture state.
-
-    Mirrors MCP ``agentcloak_status(query='health')`` so both surfaces report
-    the same diagnostic detail (F4 from dogfood-v0.2.0-pre-release).
-    """
+    """Show daemon health (tier, browser status, seq, current URL, capture state)."""
     from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port, auto_start=False)
     try:
-        result = client.health_sync()
+        if is_json_mode():
+            result = client.health_sync()
+            # /health is a flat dict — strip the redundant ``ok`` and emit
+            # the rest under the envelope.
+            seq = int(result.get("seq", 0) or 0)
+            payload = {k: v for k, v in result.items() if k != "ok"}
+            emit_envelope({"ok": True, "seq": seq, "data": payload})
+            return
+        text = client.request_text_sync("GET", "/health")
+        value(text)
     except DaemonConnectionError as e:
-        output_error(e)
-        raise typer.Exit(1) from e
-
-    # ``/health`` is a flat dict (DiagnosticService.health does not wrap in
-    # ``_ok``). Strip ``ok`` from the data payload since the envelope already
-    # carries it; surface ``seq`` and the rest of the rich health details.
-    seq = int(result.get("seq", 0) or 0)
-    payload = {k: v for k, v in result.items() if k != "ok"}
-    output_json(payload, seq=seq)
+        error_from_exception(e)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -20,8 +20,9 @@ def do_upload(
     file: list[str] = typer.Option(..., "--file", "-f", help="File path(s) to upload."),
 ) -> None:
     """Upload file(s) to a file input element."""
-    client = DaemonClient()
-    result = client.upload_sync(index=index, files=file)
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    dispatch_text_or_json(
+        DaemonClient(),
+        "POST",
+        "/upload",
+        json_body={"index": index, "files": file},
+    )

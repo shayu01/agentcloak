@@ -293,9 +293,13 @@ class CaptureClearResponse(BaseModel):
     ``stop`` advertise the recording state, while ``clear`` reports whether
     the buffer was emptied. Conflating them led to FastAPI's response-model
     validator rejecting ``/capture/clear`` payloads that omit ``recording``.
+
+    ``entries`` echoes how many records were dropped so agents in text mode
+    see e.g. ``cleared 42 entries`` instead of a bare ``cleared``.
     """
 
     cleared: bool
+    entries: int = 0
 
 
 class CaptureExportResponse(BaseModel):

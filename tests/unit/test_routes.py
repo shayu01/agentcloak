@@ -134,7 +134,9 @@ class TestRoutes:
         assert "base64" in data["data"]
 
     def test_snapshot(self, client: TestClient) -> None:
-        resp = client.get("/snapshot?mode=accessible")
+        # ``include_selector_map`` defaults to ``False`` route-side so MCP
+        # doesn't pay the token cost; CLI scripting opts back in here.
+        resp = client.get("/snapshot?mode=accessible&include_selector_map=true")
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -15,11 +15,7 @@ app = typer.Typer()
 @app.command("status")
 def dialog_status() -> None:
     """Check for a pending dialog."""
-    client = DaemonClient()
-    result = client.dialog_status_sync()
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    dispatch_text_or_json(DaemonClient(), "GET", "/dialog/status")
 
 
 @app.command("accept")
@@ -29,18 +25,15 @@ def dialog_accept(
     ),
 ) -> None:
     """Accept the pending dialog."""
-    client = DaemonClient()
-    result = client.dialog_handle_sync("accept", text=text)
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    body: dict[str, object] = {"action": "accept"}
+    if text is not None:
+        body["text"] = text
+    dispatch_text_or_json(DaemonClient(), "POST", "/dialog/handle", json_body=body)
 
 
 @app.command("dismiss")
 def dialog_dismiss() -> None:
     """Dismiss the pending dialog."""
-    client = DaemonClient()
-    result = client.dialog_handle_sync("dismiss")
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    dispatch_text_or_json(
+        DaemonClient(), "POST", "/dialog/handle", json_body={"action": "dismiss"}
+    )

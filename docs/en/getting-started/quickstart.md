@@ -17,103 +17,109 @@ The daemon starts automatically on the first command. No setup step needed.
 
 ```bash
 # Navigate and get a snapshot in one step
-cloak navigate "https://example.com" --snapshot
+cloak navigate "https://example.com" --snap
 ```
 
-Output includes both the navigation result and the page snapshot:
+stdout becomes the answer directly — one line for the navigation, then the snapshot tree:
 
-```json
-{
-  "ok": true,
-  "seq": 1,
-  "data": {
-    "url": "https://example.com/",
-    "title": "Example Domain",
-    "snapshot": {
-      "tree_text": "[1] <heading level=1> Example Domain\n  More information...\n[2] <link> More information...",
-      "mode": "compact",
-      "total_nodes": 5,
-      "total_interactive": 2
-    }
-  }
-}
+```text
+https://example.com/ | Example Domain
+
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
+  heading "Example Domain" level=1
+  paragraph "This domain is for use in illustrative examples in documents."
+  [1] link "More information..." href="https://www.iana.org/domains/example"
 ```
 
 ## Reading the snapshot
 
 The snapshot is an accessibility tree where each interactive element gets a `[N]` reference:
 
-```
-[1] <heading level=1> Example Domain
-  More information...
-[2] <link> More information...
+```text
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
+  heading "Example Domain" level=1
+  paragraph "This domain is for use in illustrative examples in documents."
+  [1] link "More information..." href="https://www.iana.org/domains/example"
 ```
 
-- `[1]` is a heading -- not interactive, but indexed for reference
-- `[2]` is a clickable link
-
-Elements show their ARIA role, name, and state. Input fields include their current value. Indentation shows the page hierarchy.
+- The header line carries the page title, URL, node counts, and the daemon `seq` (monotonic state counter).
+- Plain rows are containers / context elements.
+- `[N]` rows are interactive — use the number as the click/fill target.
+- Inputs show their current value; password fields are redacted as `••••`.
 
 ### Snapshot modes
 
 | Mode | What it shows | When to use |
 |------|--------------|-------------|
-| `accessible` | Full a11y tree with `[N]` refs, ARIA states, values | Default -- complete page view |
-| `compact` | Interactive elements + named containers only | After actions -- smaller output |
+| `compact` | Interactive elements + named containers only | Default — token-efficient |
+| `accessible` | Full a11y tree with `[N]` refs, ARIA states, values | When you need every container / heading |
 | `content` | Text extraction | Reading articles or text-heavy pages |
 | `dom` | Raw HTML | Debugging or CSS selector work |
 
 ```bash
-cloak snapshot --mode compact    # interactive elements only
-cloak snapshot --mode content    # text extraction
+cloak snapshot --mode accessible     # full a11y tree
+cloak snapshot --mode content        # text extraction
 ```
 
 ## Interacting with elements
 
-Use `[N]` references from the snapshot as action targets:
+Use `[N]` references from the snapshot as action targets. Elements accept the index positionally (shorter for agents) or via `--index N`:
 
 ```bash
-# Click a link
-cloak click --target 2
+# Click a link (positional or --index both work)
+cloak click 1
 
 # Fill a text field
-cloak fill --target 5 --text "search query"
+cloak fill 5 "search query"
 
 # Press a key
-cloak press --key Enter --target 5
+cloak press Enter
 
 # Select a dropdown option
-cloak select --target 8 --value "option-2"
+cloak select 8 --value "option-2"
+```
+
+Each action prints a confirmation line and any proactive feedback:
+
+```text
+$ cloak click 1
+clicked [1]
+  navigation: https://www.iana.org/domains/example
 ```
 
 ### Getting post-action state
 
-Add `--snapshot` to any action to get a snapshot in the same response:
+Add `--snap` to any action to get a snapshot in the same response — saves a round-trip vs running `cloak snapshot` separately:
 
 ```bash
-cloak click --target 2 --snapshot
+cloak click 2 --snap
 ```
 
-This saves a round-trip compared to running a separate `cloak snapshot` after the action. The response includes a `snapshot` object alongside the action result.
+```text
+clicked [2]
+  navigation: https://example.com/page2
+
+# Page Two | https://example.com/page2 | 12 nodes (4 interactive) | seq=4
+  ...
+```
 
 ## Complete login example
 
 ```bash
 # Navigate to login page and get snapshot
-cloak navigate "https://example.com/login" --snapshot
-
-# Snapshot output:
-# [1] <heading level=1> Sign In
-# [2] <textbox> Email
-# [3] <textbox type=password> Password
-# [4] <button> Sign In
+cloak navigate "https://example.com/login" --snap
+# Snapshot output (excerpt):
+# heading "Sign In" level=1
+# [1] textbox "Email"
+# [2] textbox "Password" value="••••"
+# [3] button "Sign In"
 
 # Fill credentials
-cloak fill --target 2 --text "user@example.com"
-cloak fill --target 3 --text "my-password"
+cloak fill 1 "user@example.com"
+cloak fill 2 "my-password"
 
 # Submit and get new snapshot
-cloak click --target 4 --snapshot
+cloak click 3 --snap
 
 # Save login state for reuse
 cloak profile create my-session
@@ -123,7 +129,7 @@ Next time, launch with the saved profile:
 
 ```bash
 cloak daemon start --profile my-session
-cloak navigate "https://example.com/dashboard" --snapshot
+cloak navigate "https://example.com/dashboard" --snap
 ```
 
 ## Network monitoring
@@ -143,6 +149,7 @@ cloak network requests --since last_action
 ```bash
 # Viewport screenshot (JPEG, ~75-85% smaller than PNG)
 cloak screenshot
+# stdout = file path, e.g. /tmp/agentcloak-1715920000.png
 
 # Full scrollable page
 cloak screenshot --full-page
@@ -150,7 +157,7 @@ cloak screenshot --full-page
 # PNG for pixel-perfect fidelity
 cloak screenshot --format png
 
-# Save to file
+# Save to a specific file
 cloak screenshot --output page.png
 ```
 
@@ -159,11 +166,11 @@ cloak screenshot --output page.png
 For pages with many elements, use progressive loading:
 
 ```bash
-# Limit output to 80 nodes
-cloak snapshot --max-nodes 80
+# Limit output to 80 nodes (--max-nodes also accepted)
+cloak snapshot --limit 80
 
 # Paginate through results
-cloak snapshot --offset 80 --max-nodes 80
+cloak snapshot --offset 80 --limit 80
 
 # Focus on a specific element's subtree
 cloak snapshot --focus 15
@@ -182,8 +189,8 @@ cloak navigate "https://api-heavy-site.com"
 # interact with the page...
 cloak capture stop
 
-# Export as HAR
-cloak capture export --format har -o traffic.har
+# Export as HAR (raw bytes to stdout — pipe to a file)
+cloak capture export --format har > traffic.har
 
 # Auto-detect API patterns
 cloak capture analyze
@@ -193,23 +200,32 @@ See the [capture guide](../guides/capture.md) for more on API analysis and spell
 
 ## Output format
 
-Every command returns one JSON object on stdout:
+CLI is text-first since v0.3.0. **stdout is the answer.** Hints / errors go to stderr; exit code is 0 on success, 1 on failure, 2 on bad usage.
+
+```text
+$ cloak navigate https://example.com
+https://example.com/ | Example Domain
+
+$ cloak click 99
+Error: Element [99] not in selector_map (1 entries)
+  -> run 'snapshot' to refresh the selector_map, or re-snapshot if the page changed
+```
+
+Need the legacy JSON envelope (for scripts or MCP-style consumers)? Pass `--json`, or set `AGENTCLOAK_OUTPUT=json`:
+
+```bash
+cloak --json snapshot | jq -r '.data.tree_text'
+AGENTCLOAK_OUTPUT=json cloak snapshot
+```
+
+JSON shape when `--json` is active:
 
 ```json
 {"ok": true, "seq": 3, "data": {"url": "https://example.com", "title": "Example"}}
-```
-
-Errors include a recovery hint:
-
-```json
 {"ok": false, "error": "element_not_found", "hint": "No element at index 99", "action": "re-snapshot to get fresh [N] refs"}
 ```
 
-`seq` is a monotonic counter that increments on every browser state change. Parse with `jq`:
-
-```bash
-cloak snapshot | jq -r '.data.tree_text'
-```
+`seq` is a monotonic counter that increments on every browser state change.
 
 ## Next steps
 

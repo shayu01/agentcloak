@@ -26,7 +26,9 @@ class TestSpellList:
         get_registry().clear()
 
     def test_list_empty(self) -> None:
-        result = runner.invoke(app, ["spell", "list"])
+        # ``--json`` keeps the envelope shape these assertions rely on; the
+        # default CLI output is now plain text since v0.3.0.
+        result = runner.invoke(app, ["--json", "spell", "list"])
         assert result.exit_code == 0
         data = _parse_json(result.stdout)
         assert data["ok"] is True
@@ -36,7 +38,7 @@ class TestSpellList:
         from agentcloak.spells.discovery import discover_spells
 
         discover_spells()
-        result = runner.invoke(app, ["spell", "list"])
+        result = runner.invoke(app, ["--json", "spell", "list"])
         assert result.exit_code == 0
         data = _parse_json(result.stdout)
         assert data["data"]["count"] >= 2
@@ -50,7 +52,7 @@ class TestSpellInfo:
         discover_spells()
 
     def test_info_existing(self) -> None:
-        result = runner.invoke(app, ["spell", "info", "httpbin/headers"])
+        result = runner.invoke(app, ["--json", "spell", "info", "httpbin/headers"])
         assert result.exit_code == 0
         data = _parse_json(result.stdout)
         assert data["ok"] is True

@@ -58,7 +58,7 @@ cloak daemon stop        # manual stop
 
 ### Too much output
 
-Use `--mode compact` (interactive elements only) or `--max-nodes 50` to limit.
+Use `--mode compact` (the default — interactive elements only) or `--limit 50` to truncate further.
 
 ### Missing elements
 

@@ -11,7 +11,12 @@ import structlog
 import typer
 
 from agentcloak import __version__
-from agentcloak.cli.output import set_pretty
+from agentcloak.cli.output import (
+    _detect_env_json_mode,
+    is_json_mode,
+    set_json_mode,
+    set_pretty,
+)
 from agentcloak.core.errors import AgentBrowserError
 
 __all__ = ["app", "main"]
@@ -76,9 +81,9 @@ def _extract_global_flags(argv: list[str]) -> tuple[list[str], dict[str, object]
     """Strip global flags from ``argv`` and return ``(cleaned, state)``.
 
     The recognised globals are ``--pretty``, ``--verbose`` / ``-v`` (counted),
-    and ``--version``. Adding a new one means appending a branch here *and*
-    declaring it on :func:`_root_callback` so ``--help`` documents it — keep
-    the two in sync.
+    ``--json``, and ``--version``. Adding a new one means appending a branch
+    here *and* declaring it on :func:`_root_callback` so ``--help`` documents
+    it — keep the two in sync.
 
     Click parses options per-command — a flag declared on the root callback is
     invisible to subcommand parsers, so ``agentcloak doctor --pretty`` fails
@@ -96,6 +101,7 @@ def _extract_global_flags(argv: list[str]) -> tuple[list[str], dict[str, object]
     pretty = False
     verbose = 0
     version = False
+    json_mode = False
     for arg in argv:
         if arg == "--pretty":
             pretty = True
@@ -103,12 +109,15 @@ def _extract_global_flags(argv: list[str]) -> tuple[list[str], dict[str, object]
             verbose += 1
         elif arg == "--version":
             version = True
+        elif arg == "--json":
+            json_mode = True
         else:
             cleaned.append(arg)
     state: dict[str, object] = {
         "pretty": pretty,
         "verbose": verbose,
         "version": version,
+        "json": json_mode,
     }
     return cleaned, state
 
@@ -118,7 +127,17 @@ def _root_callback(  # pyright: ignore[reportUnusedFunction]
     verbose: int = typer.Option(
         0, "--verbose", "-v", count=True, help="Increase log verbosity."
     ),
-    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+    pretty: bool = typer.Option(
+        False, "--pretty", help="Pretty-print JSON output (requires --json)."
+    ),
+    json: bool = typer.Option(
+        False,
+        "--json",
+        help=(
+            "Emit full JSON envelopes on stdout (backwards-compat mode). "
+            "Equivalent to AGENTCLOAK_OUTPUT=json."
+        ),
+    ),
     _version: bool = typer.Option(
         False,
         "--version",
@@ -127,11 +146,19 @@ def _root_callback(  # pyright: ignore[reportUnusedFunction]
         help="Show version.",
     ),
 ) -> None:
-    # All effects of the declared options are applied in ``main()`` via
-    # ``_extract_global_flags`` before Typer dispatches here. Keeping the
-    # parameters listed makes ``--help`` discover them; their values are
-    # ignored because the same flags have already been stripped from argv.
-    return
+    # ``main()`` strips these globals from argv via ``_extract_global_flags``
+    # before Typer dispatches, so during normal CLI use the parameters arrive
+    # here as their defaults (False) — the flag has already been consumed and
+    # applied to the module-level state.
+    #
+    # For ``CliRunner`` invocations (tests, programmatic use) ``main()`` never
+    # runs and Typer parses ``--json`` itself. We OR-merge so a True coming
+    # from either path wins; we never *clear* an already-enabled flag because
+    # ``main()`` may have set it from argv or AGENTCLOAK_OUTPUT before us.
+    if json or _detect_env_json_mode():
+        set_json_mode(enabled=True)
+    if pretty:
+        set_pretty(enabled=True)
 
 
 def _register_commands() -> None:
@@ -285,28 +312,51 @@ _register_shortcuts()
 
 
 def main() -> None:
-    from agentcloak.cli.output import output_error
+    from agentcloak.cli.output import error_from_exception
 
     _maybe_emit_first_run_banner()
-    # Lift ``--pretty``/``--verbose``/``--version`` out of argv before Typer
-    # sees it (see :func:`_extract_global_flags`). This is what makes these
-    # flags work in any position — including after a subcommand name.
+    # Lift ``--pretty``/``--verbose``/``--version``/``--json`` out of argv
+    # before Typer sees it (see :func:`_extract_global_flags`). This is what
+    # makes these flags work in any position — including after a subcommand
+    # name.
     cleaned_argv, state = _extract_global_flags(sys.argv[1:])
     if state["version"]:
         typer.echo(f"agentcloak {__version__}")
         return
     verbose = state["verbose"]
     pretty = state["pretty"]
+    json_flag = bool(state["json"])
+    # AGENTCLOAK_OUTPUT=json is the escape hatch for scripts that can't pass
+    # CLI flags (cron jobs, CI tools that wrap the binary, etc.). Either path
+    # sets the same module-level flag.
+    json_enabled = json_flag or _detect_env_json_mode()
+    set_json_mode(enabled=json_enabled)
     set_pretty(enabled=bool(pretty))
     _configure_logging(verbosity=int(verbose))  # type: ignore[arg-type]
+
+    # ``--pretty`` without ``--json`` is a no-op (text output isn't JSON).
+    # Warn so the user doesn't think their formatting is broken.
+    if bool(pretty) and not json_enabled:
+        sys.stderr.write(
+            "warning: --pretty has no effect without --json (text output mode)\n"
+        )
 
     try:
         app(args=cleaned_argv)
     except AgentBrowserError as exc:
-        # We've already serialised the error envelope to stdout via
-        # ``output_error``. Use ``sys.exit`` rather than ``raise typer.Exit
-        # from exc`` so Python doesn't dump the original exception chain to
-        # stderr — agents already have the structured envelope they need
-        # and the traceback would just burn ~800 tokens per failure.
-        output_error(exc)
+        # In JSON mode the envelope was serialised to stdout. In text mode we
+        # emit ``Error: <hint>`` to stderr. Either way the call exits with 1.
+        # Using ``sys.exit`` rather than ``raise typer.Exit from exc`` keeps
+        # Python from dumping the exception chain — agents already have the
+        # structured info they need and a traceback would burn ~800 tokens.
+        # ``error_from_exception`` will raise SystemExit(1) itself; the catch
+        # below just guards against the rare path where it doesn't.
+        try:
+            error_from_exception(exc)
+        except SystemExit:
+            raise
+        # Reached only if error_from_exception returns normally (it shouldn't).
         sys.exit(1)
+    # Surface the post-call json mode to anyone calling main() in-process so
+    # they see the flag was honoured (kept silent under normal CLI use).
+    _ = is_json_mode()

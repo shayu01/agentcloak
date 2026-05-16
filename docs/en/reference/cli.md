@@ -2,17 +2,52 @@
 
 agentcloak provides two equivalent CLI entry points: `agentcloak` and `cloak` (shorthand). All examples use `cloak`.
 
-Every command outputs one JSON object to stdout with the format:
+## Output convention
+
+Since v0.3.0 the CLI is **text-first**. stdout is the answer itself; stderr carries hints and errors; exit code is `0` on success, `1` on business failure, `2` on bad usage.
+
+Examples:
+
+```text
+$ cloak navigate https://example.com
+https://example.com/ | Example Domain
+
+$ cloak snapshot
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=2
+  heading "Example Domain" level=1
+  [1] link "More information..." href="https://www.iana.org/domains/example"
+
+$ cloak click 99
+Error: Element [99] not in selector_map (1 entries)
+  -> run 'snapshot' to refresh the selector_map, or re-snapshot if the page changed
+```
+
+For programmatic consumers (scripts, jq pipelines, MCP-style integrations) opt back into the legacy envelope:
+
+```bash
+# --json flag (any position)
+cloak --json snapshot | jq -r '.data.tree_text'
+
+# AGENTCLOAK_OUTPUT env var (no flag changes for CI / wrappers)
+AGENTCLOAK_OUTPUT=json cloak snapshot
+```
+
+Envelope shape (only when `--json` is active):
 
 ```json
 {"ok": true, "seq": 3, "data": {...}}
-```
-
-Errors include recovery hints:
-
-```json
 {"ok": false, "error": "error_code", "hint": "description", "action": "suggested next step"}
 ```
+
+## Global flags
+
+| Flag | Effect |
+|------|--------|
+| `--json` | Switch to JSON envelope output for the whole command |
+| `--pretty` | Indent JSON output (no-op without `--json`; warns on stderr) |
+| `--verbose` / `-v` | Raise log level (`-v` info, `-vv` debug) |
+| `--version` | Print version and exit |
+| `AGENTCLOAK_OUTPUT=json` env var | Same as `--json`, no flag rewrite needed |
 
 ## Navigation and observation
 
@@ -21,31 +56,38 @@ Errors include recovery hints:
 Navigate the browser to a URL.
 
 ```bash
-cloak navigate URL [--timeout SECONDS] [--snapshot] [--snapshot-mode MODE]
+cloak navigate URL [--timeout SECONDS] [--snap] [--snapshot-mode MODE]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--timeout` | `30` | Max seconds to wait for page load |
-| `--snapshot` | off | Include accessibility tree snapshot in response |
-| `--snapshot-mode` | `compact` | Snapshot mode when `--snapshot` is used |
+| `--snap` (alias `--snapshot`) | off | Attach a compact snapshot to the result (saves a round-trip) |
+| `--snapshot-mode` | `compact` | Snapshot mode when `--snap` is set (`compact` or `accessible`) |
 
 ### snapshot
 
 Get the page as an accessibility tree with `[N]` element references.
 
 ```bash
-cloak snapshot [--mode MODE] [--max-nodes N] [--focus N] [--offset N] [--frames] [--diff]
+cloak snapshot [--mode MODE] [--limit N] [--focus N] [--offset N] [--frames] [--diff] [--selector-map]
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--mode` | `accessible` | `accessible`, `compact`, `content`, or `dom` |
-| `--max-nodes` | `0` | Truncate after N nodes (0 = no limit) |
+| `--mode` | `compact` | `compact` (default), `accessible`, `content`, `dom` |
+| `--limit` (alias `--max-nodes`) | `0` | Truncate after N nodes (0 = no limit) |
 | `--focus` | `0` | Expand subtree around element `[N]` |
 | `--offset` | `0` | Start output from Nth element (pagination) |
 | `--frames` | off | Include iframe content |
 | `--diff` | off | Mark changes since previous snapshot |
+| `--selector-map` | off | Include the raw selector_map (debug / scripting) |
+
+Output starts with a header line:
+
+```text
+# <title> | <url> | <total_nodes> nodes (<interactive> interactive) | seq=<n>
+```
 
 ### screenshot
 
@@ -57,7 +99,7 @@ cloak screenshot [--output FILE] [--full-page] [--format FORMAT] [--quality N]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--output` | stdout | Save to file instead of base64 in JSON |
+| `--output` | auto-named in `/tmp/` | Save to file; stdout prints the path |
 | `--full-page` | off | Capture full scrollable page |
 | `--format` | `jpeg` | `jpeg` or `png` |
 | `--quality` | `80` | JPEG quality 0-100 (ignored for PNG) |
@@ -74,12 +116,18 @@ Returns current URL, open tabs, last 5 actions, capture state, and stealth tier.
 
 ## Interaction
 
+All interaction commands accept the element index positionally (`cloak click 5`) or via `--index N` / `-i N`. Most also take a positional secondary value (`cloak fill 5 "query"`).
+
+Add `--snap` to any interaction to attach a compact snapshot to the response.
+
 ### click
 
 Click an element by `[N]` reference.
 
 ```bash
-cloak click --target N [--snapshot]
+cloak click N [--snap]
+cloak click --index N [--snap]
+cloak click --x X --y Y           # coordinate fallback
 ```
 
 ### fill
@@ -87,7 +135,8 @@ cloak click --target N [--snapshot]
 Clear an input field and set its value.
 
 ```bash
-cloak fill --target N --text "value" [--snapshot]
+cloak fill N "value" [--snap]
+cloak fill --index N --text "value" [--snap]
 ```
 
 ### type
@@ -95,7 +144,7 @@ cloak fill --target N --text "value" [--snapshot]
 Type text character by character (triggers key events).
 
 ```bash
-cloak type --target N --text "value" [--snapshot]
+cloak type N "value" [--snap]
 ```
 
 ### press
@@ -103,7 +152,8 @@ cloak type --target N --text "value" [--snapshot]
 Press a keyboard key or key combination.
 
 ```bash
-cloak press --key KEY [--target N] [--snapshot]
+cloak press KEY [N] [--snap]
+cloak press --key KEY [--index N] [--snap]
 ```
 
 Key names use Playwright syntax: `Enter`, `Tab`, `Escape`, `Control+a`, `Shift+ArrowDown`.
@@ -113,7 +163,8 @@ Key names use Playwright syntax: `Enter`, `Tab`, `Escape`, `Control+a`, `Shift+A
 Scroll the page.
 
 ```bash
-cloak scroll --direction DIRECTION [--snapshot]
+cloak scroll DIRECTION [--snap]
+cloak scroll --direction DIRECTION
 ```
 
 Direction: `up` or `down`.
@@ -123,7 +174,7 @@ Direction: `up` or `down`.
 Hover over an element.
 
 ```bash
-cloak hover --target N [--snapshot]
+cloak hover N [--snap]
 ```
 
 ### select
@@ -131,11 +182,8 @@ cloak hover --target N [--snapshot]
 Select a dropdown option.
 
 ```bash
-cloak select --target N --value "option" [--snapshot]
+cloak select N --value "option" [--snap]
 ```
-
-> [!NOTE]
-> All interaction commands support `--snapshot` to include a compact snapshot in the response, saving a round-trip.
 
 ## Content and network
 
@@ -147,11 +195,11 @@ Execute JavaScript in the page context.
 cloak js evaluate "expression"
 ```
 
-Runs in the page's main world by default. Page globals (jQuery, Vue, React, etc.) are accessible.
+Scalar results (string/number/boolean) print as raw values. Objects and arrays print as pretty JSON.
 
 ### fetch
 
-HTTP request using the browser's cookies and user agent.
+HTTP request using the browser's cookies and user agent. The response body goes to stdout; status / headers go to stderr.
 
 ```bash
 cloak fetch URL [--method METHOD] [--body BODY] [--headers-json JSON]
@@ -177,28 +225,13 @@ cloak network console [--since SEQ]
 
 ## Dialog handling
 
-### dialog status
-
-Check for pending browser dialogs.
-
 ```bash
-cloak dialog status
-```
-
-### dialog accept / dismiss
-
-Handle a pending dialog.
-
-```bash
+cloak dialog status                # check for pending dialogs
 cloak dialog accept [--text "reply"]
 cloak dialog dismiss
 ```
 
 ## Waiting
-
-### wait
-
-Wait for a condition before continuing.
 
 ```bash
 cloak wait --selector "CSS_SELECTOR"
@@ -219,29 +252,14 @@ cloak wait --ms 2000
 
 ## File upload
 
-### upload
-
-Upload files to a file input element.
-
 ```bash
 cloak upload --index N --file /path/to/file [--file /path/to/another]
 ```
 
 ## Frame management
 
-### frame list
-
-List all frames on the page.
-
 ```bash
 cloak frame list
-```
-
-### frame focus
-
-Switch to a specific frame.
-
-```bash
 cloak frame focus --name "frame-name"
 cloak frame focus --url "partial-url"
 cloak frame focus --main
@@ -249,241 +267,88 @@ cloak frame focus --main
 
 ## Capture and spells
 
-### capture start / stop
-
-Control network traffic recording.
-
 ```bash
 cloak capture start
 cloak capture stop
-```
-
-### capture status
-
-Check recording state.
-
-```bash
 cloak capture status
-```
-
-### capture export
-
-Export captured traffic.
-
-```bash
-cloak capture export --format har [-o output.har]
+cloak capture export --format har > traffic.har
 cloak capture export --format json
-```
-
-### capture analyze
-
-Auto-detect API patterns from captured traffic.
-
-```bash
 cloak capture analyze [--domain example.com]
-```
-
-### capture clear
-
-Delete all captured data.
-
-```bash
 cloak capture clear
-```
 
-### spell list
-
-List all registered spells.
-
-```bash
 cloak spell list
-```
-
-### spell run
-
-Run a named spell.
-
-```bash
-cloak spell run NAME [--args-json '{"key": "value"}']
-```
-
-### spell info
-
-Get details about a spell.
-
-```bash
 cloak spell info NAME
-```
-
-### spell scaffold
-
-Generate a spell template.
-
-```bash
+cloak spell run NAME [--args-json '{"key": "value"}']
 cloak spell scaffold SITE COMMAND
 ```
 
+`capture export` writes the raw HAR/JSON to stdout — pipe to a file. `spell run` prints the spell's return value directly (no envelope).
+
 ## Profile management
-
-### profile create
-
-Create a named browser profile.
 
 ```bash
 cloak profile create NAME [--from-current]
-```
-
-`--from-current` copies cookies from the active browser session.
-
-### profile list
-
-List all saved profiles.
-
-```bash
 cloak profile list
-```
-
-### profile launch
-
-Launch the browser with a saved profile.
-
-```bash
 cloak profile launch NAME
-```
-
-### profile delete
-
-Delete a saved profile.
-
-```bash
 cloak profile delete NAME
 ```
 
 ## Tab management
 
-### tab list
-
-List open browser tabs.
-
 ```bash
-cloak tab list
-```
-
-### tab new
-
-Open a new tab.
-
-```bash
+cloak tab list                    # git-branch style: * marks active
 cloak tab new [--url URL]
-```
-
-### tab close
-
-Close a tab by ID.
-
-```bash
 cloak tab close --tab-id N
-```
-
-### tab switch
-
-Switch to a tab by ID.
-
-```bash
 cloak tab switch --tab-id N
 ```
 
 ## Bridge commands
 
-### bridge claim
-
-Take control of a user-opened tab (RemoteBridge only).
-
 ```bash
 cloak bridge claim --tab-id N
-cloak bridge claim --url-pattern "dashboard"
-```
-
-### bridge finalize
-
-End the agent session (RemoteBridge only).
-
-```bash
+cloak bridge claim --url "dashboard"
 cloak bridge finalize --mode close        # close agent tabs
 cloak bridge finalize --mode handoff      # leave tabs for user
 cloak bridge finalize --mode deliverable  # rename group to "results"
+cloak bridge token                        # print the persistent auth token
+cloak bridge token --reset                # rotate the token
 ```
+
+`cloak bridge token` prints the raw token to stdout — easy to pipe into other tools.
 
 ## Cookie management
 
-### cookies export
-
-Export cookies from the browser (local or RemoteBridge).
-
 ```bash
 cloak cookies export
-```
-
-### cookies import
-
-Import cookies into the browser. Supports httpOnly cookies.
-
-```bash
 cloak cookies import -c '[{"name":"token","value":"abc","domain":".example.com","path":"/"}]'
 ```
 
+`cookies export` prints `name=value` lines (one cookie per line). `cookies import` accepts the structured JSON form so httpOnly cookies survive.
+
 ## Daemon management
-
-### daemon start
-
-Start the background daemon.
 
 ```bash
 cloak daemon start [--host HOST] [--port PORT] [--headed] [--profile NAME]
-```
-
-### daemon stop
-
-Stop the running daemon.
-
-```bash
 cloak daemon stop
-```
-
-### daemon health
-
-Check daemon status.
-
-```bash
-cloak daemon health
+cloak daemon health                # tier | browser status | seq
 ```
 
 ## Configuration
 
-### config
-
-Show merged configuration with value sources. Each field shows whether it came from `default`, `config.toml`, or an environment variable.
-
 ```bash
-cloak config
+cloak config                       # key = value (source) — git-config -l style
 ```
+
+Each row shows the field name, current value, and where the value came from (`default`, `config.toml`, or an env var).
 
 ## Diagnostics
 
-### doctor
-
-Run diagnostic checks.
-
 ```bash
-cloak doctor
+cloak doctor                       # per-check [ok]/[fail] lines
+cloak doctor --fix                 # attempt in-process repair (binary download, data dir)
+cloak doctor --fix --sudo          # also run the synthesised system command via sudo
+
+cloak cdp endpoint                 # raw ws:// URL for jshookmcp / other CDP tools
 ```
 
-Checks Python version, CloakBrowser status, daemon connectivity, and configuration.
-
-### cdp endpoint
-
-Get the CDP WebSocket URL (for jshookmcp or other CDP tools).
-
-```bash
-cloak cdp endpoint
-```
+`doctor` exits with code `1` when any check fails, so it composes with shell scripts.

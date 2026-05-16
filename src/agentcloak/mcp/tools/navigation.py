@@ -60,7 +60,7 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_snapshot(
-        mode: str = "accessible",
+        mode: str = "compact",
         max_chars: int = 0,
         max_nodes: int = 0,
         focus: int = 0,
@@ -79,10 +79,10 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
         Password fields are redacted as value="••••".
 
         Args:
-            mode: 'accessible' (a11y tree with [N] refs -- default, includes
-                  ARIA states and values), 'compact' (interactive elements +
-                  named containers only -- much smaller output), 'dom'
-                  (raw HTML), or 'content' (text extraction)
+            mode: 'compact' (default -- interactive elements + named containers
+                  only; the sweet spot for agent loops), 'accessible' (full a11y
+                  tree with all containers and states), 'dom' (raw HTML), or
+                  'content' (text extraction)
             max_chars: Truncate tree_text to this many characters (0 = no limit).
             max_nodes: Truncate after N nodes (0 = no limit).
                 Node-level truncation is more precise than char truncation.

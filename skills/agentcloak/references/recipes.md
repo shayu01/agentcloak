@@ -72,12 +72,12 @@ Frame targeting: `--name`, `--url "*pattern*"`, or `--main`.
 
 ```bash
 cloak navigate "https://example.com/dashboard"
-cloak snapshot --mode compact --max-nodes 50
+cloak snapshot --limit 50
 # output shows: --- not shown: [13]-[24] 12 elements ---
 # zoom into an area:
 cloak snapshot --focus 12  # expand around element [12]
 # or page through:
-cloak snapshot --offset 50 --max-nodes 50
+cloak snapshot --offset 50 --limit 50
 ```
 
 You can action on any `[N]` ref even if not visible in truncated output — the daemon keeps the full ref mapping.

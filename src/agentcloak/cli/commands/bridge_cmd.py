@@ -1,4 +1,4 @@
-"""Bridge lifecycle commands — start, doctor, claim, finalize."""
+"""Bridge lifecycle commands — start, doctor, claim, finalize, token."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from typing import Any
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json, emit_envelope
+from agentcloak.cli.output import error, is_json_mode, value
 
 __all__ = ["app"]
 
@@ -47,9 +48,7 @@ def bridge_doctor() -> None:
 
     # Check extension directory
     ext_dir = (
-        Path(__file__).parent.parent.parent
-        / "bridge"
-        / "agentcloak-chrome-extension"
+        Path(__file__).parent.parent.parent / "bridge" / "agentcloak-chrome-extension"
     )
     manifest = ext_dir / "manifest.json"
     checks.append(
@@ -84,7 +83,17 @@ def bridge_doctor() -> None:
             )
 
     all_ok = all(c["ok"] for c in checks)
-    output_json({"healthy": all_ok, "checks": checks}, seq=0)
+    if is_json_mode():
+        emit_envelope(
+            {"ok": True, "seq": 0, "data": {"healthy": all_ok, "checks": checks}}
+        )
+    else:
+        for check in checks:
+            mark = "ok" if check["ok"] else "fail"
+            line = f"[{mark}] {check['name']} | {check['detail']}"
+            if check["hint"]:
+                line += f" | hint: {check['hint']}"
+            value(line)
 
     if not all_ok:
         raise typer.Exit(1)
@@ -94,11 +103,12 @@ def bridge_doctor() -> None:
 def bridge_extension_path() -> None:
     """Print the path to the Chrome extension directory."""
     ext_dir = (
-        Path(__file__).parent.parent.parent
-        / "bridge"
-        / "agentcloak-chrome-extension"
+        Path(__file__).parent.parent.parent / "bridge" / "agentcloak-chrome-extension"
     )
-    output_json({"path": str(ext_dir.resolve())}, seq=0)
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": 0, "data": {"path": str(ext_dir.resolve())}})
+        return
+    value(str(ext_dir.resolve()))
 
 
 @app.command("claim")
@@ -106,28 +116,28 @@ def bridge_claim(
     tab_id: int | None = typer.Option(
         None, "--tab-id", help="Claim a specific tab by its Chrome tab ID."
     ),
-    url_pattern: str | None = typer.Option(
+    url: str | None = typer.Option(
         None,
+        "--url",
         "--url-pattern",
         help="Claim first tab whose URL contains this substring.",
     ),
 ) -> None:
     """Claim a user-opened tab for agent control.
 
-    Attaches the Chrome debugger to an existing tab and adds it to the
-    agentcloak tab group.  Provide either --tab-id or --url-pattern.
+    Provide either ``--tab-id`` or ``--url``.
     """
-    if tab_id is None and url_pattern is None:
-        typer.echo("Error: provide --tab-id or --url-pattern", err=True)
-        raise typer.Exit(1)
+    if tab_id is None and url is None:
+        error("missing claim selector", "provide --tab-id or --url")
 
     from agentcloak.client import DaemonClient
 
-    client = DaemonClient()
-    result = client.bridge_claim_sync(tab_id=tab_id, url_pattern=url_pattern)
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    body: dict[str, Any] = {}
+    if tab_id is not None:
+        body["tab_id"] = tab_id
+    if url is not None:
+        body["url_pattern"] = url
+    dispatch_text_or_json(DaemonClient(), "POST", "/bridge/claim", json_body=body)
 
 
 @app.command("finalize")
@@ -138,20 +148,12 @@ def bridge_finalize(
         help="Session end mode: close (default), handoff, deliverable.",
     ),
 ) -> None:
-    """Finalize the agent session — clean up managed tabs.
-
-    Modes:
-      close       — close all agent-managed tabs (default)
-      handoff     — ungroup tabs and leave them open for the user
-      deliverable — rename the tab group to 'agentcloak results' (green)
-    """
+    """Finalize the agent session — clean up managed tabs."""
     from agentcloak.client import DaemonClient
 
-    client = DaemonClient()
-    result = client.bridge_finalize_sync(mode=mode)
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    dispatch_text_or_json(
+        DaemonClient(), "POST", "/bridge/finalize", json_body={"mode": mode}
+    )
 
 
 @app.command("token")
@@ -169,10 +171,7 @@ def bridge_token(
     extension's WebSocket connection.
 
     ``--reset`` rotates the token; any already-paired extensions will
-    have to be re-configured. If a daemon is running we route the rotation
-    through it so the in-memory token is replaced atomically, otherwise we
-    fall back to writing the new value into ``config.toml`` and the next
-    daemon start will pick it up.
+    have to be re-configured.
     """
     from agentcloak.client import DaemonClient
     from agentcloak.core.config import (
@@ -186,43 +185,55 @@ def bridge_token(
 
     if reset:
         # Prefer the daemon-side reset so any already-connected extension is
-        # severed on its next reconnect (close code 4001). Auto-start is off
-        # because the user explicitly asked for a rotate — silently spawning
-        # a daemon to do it would be surprising.
+        # severed on its next reconnect (close code 4001). Auto-start off:
+        # silently spawning a daemon just to rotate would be surprising.
         client = DaemonClient(auto_start=False)
-        hot_updated = False
         new_token = ""
+        hot_updated = False
         try:
-            result = client.bridge_token_reset_sync()
-            data = result.get("data", result)
-            new_token = str(data.get("token", "") or "")
+            if is_json_mode():
+                result = client.bridge_token_reset_sync()
+                data = result.get("data", result)
+                new_token = str(data.get("token", "") or "")
+            else:
+                new_token = client.request_text_sync("POST", "/bridge/token/reset")
             hot_updated = bool(new_token)
         except (DaemonConnectionError, AgentBrowserError):
-            # Daemon not running (or returned an error) — fall back to the
-            # offline path. The next ``daemon start`` reads the new token.
             new_token = ""
 
         if not new_token:
             new_token = regenerate_bridge_token(paths, cfg)
 
-        output_json(
-            {
-                "token": new_token,
-                "action": "reset",
-                "hot_updated": hot_updated,
-                "config_file": str(paths.config_file),
-            },
-            seq=0,
-        )
+        if is_json_mode():
+            emit_envelope(
+                {
+                    "ok": True,
+                    "seq": 0,
+                    "data": {
+                        "token": new_token,
+                        "action": "reset",
+                        "hot_updated": hot_updated,
+                        "config_file": str(paths.config_file),
+                    },
+                }
+            )
+            return
+        value(new_token)
         return
 
     token = ensure_bridge_token(paths, cfg)
-    output_json(
-        {
-            "token": token,
-            "action": "show",
-            "hot_updated": False,
-            "config_file": str(paths.config_file),
-        },
-        seq=0,
-    )
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": True,
+                "seq": 0,
+                "data": {
+                    "token": token,
+                    "action": "show",
+                    "hot_updated": False,
+                    "config_file": str(paths.config_file),
+                },
+            }
+        )
+        return
+    value(token)

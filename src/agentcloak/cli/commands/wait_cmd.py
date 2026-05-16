@@ -1,10 +1,11 @@
-"""Wait command — conditional waiting."""
+"""Wait command — conditional waiting on selector / URL / load / JS / ms."""
 
 from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
+from agentcloak.cli.output import error
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -41,31 +42,28 @@ def do_wait(
     ),
 ) -> None:
     """Wait for a condition before continuing."""
-    # Determine condition from flags
+    # Determine condition from flags. ``error()`` raises SystemExit so the
+    # assignment is always reachable when we keep going.
+    condition: str
+    val: str
     if selector is not None:
-        condition, value = "selector", selector
+        condition, val = "selector", selector
     elif url is not None:
-        condition, value = "url", url
+        condition, val = "url", url
     elif load is not None:
-        condition, value = "load", load
+        condition, val = "load", load
     elif js is not None:
-        condition, value = "js", js
+        condition, val = "js", js
     elif ms is not None:
-        condition, value = "ms", str(ms)
+        condition, val = "ms", str(ms)
     else:
-        typer.echo(
-            "Error: provide one of --selector, --url, --load, --js, or --ms",
-            err=True,
-        )
-        raise typer.Exit(2)
-
-    client = DaemonClient()
-    result = client.wait_sync(
-        condition=condition,
-        value=value,
-        timeout=timeout,
-        state=state,
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+        error("no wait condition", "provide --selector, --url, --load, --js, or --ms")
+        return
+    body: dict[str, object] = {
+        "condition": condition,
+        "value": val,
+        "state": state,
+    }
+    if timeout is not None:
+        body["timeout"] = timeout
+    dispatch_text_or_json(DaemonClient(), "POST", "/wait", json_body=body)

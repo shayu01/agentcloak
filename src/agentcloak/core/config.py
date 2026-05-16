@@ -599,8 +599,7 @@ def write_example_config(paths: Paths) -> Path:
             (
                 "auto_start_poll_interval",
                 defaults.auto_start_poll_interval,
-                "Poll interval (s) between /health checks during\n"
-                "auto-start.",
+                "Poll interval (s) between /health checks during\nauto-start.",
             ),
         ],
     )
@@ -662,8 +661,7 @@ def write_example_config(paths: Paths) -> Path:
             (
                 "idle_timeout_min",
                 defaults.idle_timeout_min,
-                "Daemon shuts down after this many minutes of inactivity\n"
-                "(0 = never).",
+                "Daemon shuts down after this many minutes of inactivity\n(0 = never).",
             ),
             (
                 "stop_on_exit",
@@ -684,8 +682,7 @@ def write_example_config(paths: Paths) -> Path:
             (
                 "mcp_screenshot_quality",
                 defaults.mcp_screenshot_quality,
-                "Lower quality used by MCP tools to stay within token\n"
-                "budgets.",
+                "Lower quality used by MCP tools to stay within token\nbudgets.",
             ),
         ],
     )
@@ -698,14 +695,14 @@ def write_example_config(paths: Paths) -> Path:
                 "domain_whitelist",
                 defaults.domain_whitelist,
                 "If non-empty, only these glob patterns are reachable;\n"
-                'everything else is wrapped in <untrusted_web_content>.\n'
+                "everything else is wrapped in <untrusted_web_content>.\n"
                 'Example: ["*.example.com", "api.trusted.io"].',
             ),
             (
                 "domain_blacklist",
                 defaults.domain_blacklist,
                 "Globs that are always blocked even if whitelisted.\n"
-                'file://, data:, javascript: are always blocked.',
+                "file://, data:, javascript: are always blocked.",
             ),
             (
                 "content_scan",

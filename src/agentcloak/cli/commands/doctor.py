@@ -1,15 +1,4 @@
-"""Self-check and diagnostics command.
-
-The actual checks live in :class:`DiagnosticService` so CLI / MCP / daemon
-all run exactly the same probes. The CLI surface adds two extras:
-
-1. A daemon liveness probe (only the CLI knows about the local host:port
-   we'd point at — the daemon process itself doesn't need to ping itself).
-2. ``--fix`` and ``--fix --sudo`` flags. ``--fix`` runs the in-process repairs
-   the service can do (download CloakBrowser binary, create data dir) and
-   prints a one-liner shell command for the remaining system-level work.
-   ``--sudo`` actually executes that command if sudo/root is available.
-"""
+"""Self-check and diagnostics command."""
 
 from __future__ import annotations
 
@@ -18,7 +7,8 @@ from typing import Any
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import emit_envelope
+from agentcloak.cli.output import is_json_mode, value
 from agentcloak.core.config import load_config
 from agentcloak.daemon.services import DiagnosticService
 
@@ -70,27 +60,12 @@ def run_doctor(
         ),
     ),
 ) -> None:
-    """Run all diagnostic checks and report status.
-
-    Without flags this is a read-only inspection.
-
-    With ``--fix`` the doctor first tries to repair things the running process
-    can fix on its own (downloads the CloakBrowser binary, creates the data
-    directory). For system-level work it can't do alone — installing Xvfb or
-    Playwright's libs — it prints a single combined shell command.
-
-    With ``--fix --sudo`` that command is actually executed if sudo (or root)
-    is available; otherwise the response includes a ``reason`` field
-    explaining why we didn't run it.
-    """
+    """Run all diagnostic checks and report status."""
     paths, cfg = load_config()
     diagnostic = DiagnosticService()
 
     if fix:
         report = diagnostic.doctor_fix(data_dir=paths.root, execute_sudo=sudo)
-        # The fix-mode response can include long package-manager output;
-        # callers that want the daemon check can still infer it from the
-        # subsequent doctor-without-fix run. Keep this response focused.
     else:
         report = diagnostic.doctor(data_dir=paths.root)
 
@@ -98,12 +73,20 @@ def run_doctor(
     report["checks"].append(daemon_check)
     report["healthy"] = all(c["ok"] for c in report["checks"])
 
-    output_json(report, seq=0)
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": 0, "data": report})
+    else:
+        # ``[ok] / [fail]`` lines for each check, one per line.
+        for check in report["checks"]:
+            mark = "ok" if check["ok"] else "fail"
+            line = f"[{mark}] {check['name']} | {check['detail']}"
+            if not check["ok"] and check.get("hint"):
+                line += f" | hint: {check['hint']}"
+            value(line)
 
     if fix and not report["healthy"] and not sudo:
-        # Help text on stderr so the JSON envelope on stdout stays parseable
-        # for scripts. ``output_json`` writes to stdout; this complementary
-        # banner lands on stderr.
+        # Help text on stderr so the JSON envelope / text on stdout stays
+        # parseable for scripts.
         cmd = report.get("fix", {}).get("command", "")
         if cmd:
             sys.stderr.write("\n--- Run this to finish fixing the environment ---\n")

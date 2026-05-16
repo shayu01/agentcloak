@@ -344,7 +344,7 @@ class BrowserContextBase(ABC):
     async def snapshot(
         self,
         *,
-        mode: str = "accessible",
+        mode: str = "compact",
         max_nodes: int = 0,
         max_chars: int = 0,
         focus: int = 0,

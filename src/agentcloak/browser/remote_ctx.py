@@ -275,7 +275,7 @@ class RemoteBridgeContext(BrowserContextBase):
     async def snapshot(
         self,
         *,
-        mode: str = "accessible",
+        mode: str = "compact",
         max_nodes: int = 0,
         max_chars: int = 0,
         focus: int = 0,
@@ -1035,9 +1035,7 @@ class RemoteBridgeContext(BrowserContextBase):
         # — they would otherwise leak across capture sessions.
         self._pending_captures.clear()
 
-    def _handle_network_event(
-        self, method: str, params: dict[str, Any]
-    ) -> None:
+    def _handle_network_event(self, method: str, params: dict[str, Any]) -> None:
         """Stitch CDP ``Network.*`` events into :class:`CaptureEntry` records.
 
         Each requestId moves through three states:
@@ -1052,9 +1050,7 @@ class RemoteBridgeContext(BrowserContextBase):
 
         if method == "Network.requestWillBeSent":
             request_obj = cast("dict[str, Any]", params.get("request") or {})
-            req_headers = cast(
-                "dict[str, Any]", request_obj.get("headers") or {}
-            )
+            req_headers = cast("dict[str, Any]", request_obj.get("headers") or {})
             self._pending_captures[request_id] = {
                 "request_id": request_id,
                 "url": str(request_obj.get("url", "")),
@@ -1076,17 +1072,11 @@ class RemoteBridgeContext(BrowserContextBase):
             entry = self._pending_captures.get(request_id)
             if entry is None:
                 return
-            response_obj = cast(
-                "dict[str, Any]", params.get("response") or {}
-            )
-            resp_headers = cast(
-                "dict[str, Any]", response_obj.get("headers") or {}
-            )
+            response_obj = cast("dict[str, Any]", params.get("response") or {})
+            resp_headers = cast("dict[str, Any]", response_obj.get("headers") or {})
             entry["status"] = int(response_obj.get("status", 0) or 0)
             entry["response_headers"] = self._stringify_headers(resp_headers)
-            entry["content_type"] = str(
-                response_obj.get("mimeType", "") or ""
-            )
+            entry["content_type"] = str(response_obj.get("mimeType", "") or "")
             return
 
         if method == "Network.loadingFinished":

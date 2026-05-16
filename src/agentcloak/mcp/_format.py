@@ -29,9 +29,35 @@ def format_envelope(envelope: dict[str, Any]) -> str:
     MCP clients only care about the payload, so we strip the envelope and emit
     the inner ``data`` object directly. ``orjson`` keeps the byte order stable
     so checksum-based caching still works.
+
+    ``None`` values are pruned recursively (R7 from the CLI redesign): the
+    daemon ships open-ended Pydantic models that include nullable fields like
+    ``current_url`` / ``local_proxy``, but MCP tools pay per-token. Stripping
+    nulls shaves ~10% off snapshot/health responses without losing
+    information — agents can tell "missing key" from "value=None" through
+    the schema.
     """
     payload = envelope.get("data", envelope)
-    return orjson.dumps(payload).decode()
+    cleaned = _drop_nulls(payload)
+    return orjson.dumps(cleaned).decode()
+
+
+def _drop_nulls(value: Any) -> Any:
+    """Recursively strip ``None`` values from dicts / lists.
+
+    Lists keep ``None`` entries (positional semantics matter for some
+    payloads); only dict-level keys with ``None`` value are removed. This
+    matches what ``Pydantic.model_dump(exclude_none=True)`` does for nested
+    models, but operates on plain dicts so it covers daemon-side payloads
+    that don't round-trip through Pydantic.
+    """
+    if isinstance(value, dict):
+        d: dict[str, Any] = value  # type: ignore[assignment]
+        return {k: _drop_nulls(v) for k, v in d.items() if v is not None}
+    if isinstance(value, list):
+        lst: list[Any] = value  # type: ignore[assignment]
+        return [_drop_nulls(v) for v in lst]
+    return value
 
 
 def error_json(exc: AgentBrowserError) -> str:

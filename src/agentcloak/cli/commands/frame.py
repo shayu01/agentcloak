@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
+from agentcloak.cli.output import error
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -15,11 +16,7 @@ app = typer.Typer()
 @app.command("list")
 def frame_list() -> None:
     """List all frames on the current page."""
-    client = DaemonClient()
-    result = client.frame_list_sync()
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    dispatch_text_or_json(DaemonClient(), "GET", "/frame/list")
 
 
 @app.command("focus")
@@ -32,14 +29,10 @@ def frame_focus(
 ) -> None:
     """Switch focus to a frame."""
     if not main and name is None and url is None:
-        typer.echo(
-            "Error: provide --name, --url, or --main",
-            err=True,
-        )
-        raise typer.Exit(2)
-
-    client = DaemonClient()
-    result = client.frame_focus_sync(name=name, url=url, main=main)
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+        error("missing frame selector", "provide --name, --url, or --main")
+    body: dict[str, object] = {"main": main}
+    if name is not None:
+        body["name"] = name
+    if url is not None:
+        body["url"] = url
+    dispatch_text_or_json(DaemonClient(), "POST", "/frame/focus", json_body=body)

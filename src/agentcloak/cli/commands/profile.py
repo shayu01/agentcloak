@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Any
 import orjson
 import typer
 
-from agentcloak.cli.output import output_error, output_json
+from agentcloak.cli._dispatch import emit_envelope
+from agentcloak.cli.output import error_from_exception, is_json_mode, value
 from agentcloak.core.config import load_config
 from agentcloak.core.errors import ProfileError
 from agentcloak.core.types import PROFILE_NAME_RE as _NAME_RE
@@ -32,14 +33,7 @@ app = typer.Typer()
 
 
 def _validate_name(name: str) -> str:  # pyright: ignore[reportUnusedFunction]
-    """Kebab-case validator kept for backwards compatibility with tests.
-
-    Mirrors :meth:`ProfileService.validate_name` but returns the name so
-    callers can chain it inline. Production code paths go through the
-    service; this helper exists so ``test_profile.py`` can keep importing it
-    without rewriting every assertion. Pyright can't see test-only consumers,
-    hence the ``reportUnusedFunction`` waiver.
-    """
+    """Kebab-case validator kept for backwards compatibility with tests."""
     if not _NAME_RE.match(name):
         raise ProfileError(
             error="invalid_profile_name",
@@ -101,21 +95,37 @@ def profile_create(
         try:
             result = client.profile_create_from_current_sync(name=name)
         except ProfileError as exc:
-            output_error(exc)
-            raise typer.Exit(1) from exc
-        output_json(result.get("data", result), seq=result.get("seq", 0))
+            error_from_exception(exc)
+            return
+        if is_json_mode():
+            emit_envelope(result)
+            return
+        data = result.get("data", result)
+        value(
+            f'created profile "{data.get("profile", name)}" '
+            f"({int(data.get('cookie_count', 0) or 0)} cookies)"
+        )
         return
 
     service = _service()
     try:
         service.create(name)
     except ProfileError as exc:
-        output_error(exc)
-        raise typer.Exit(1) from exc
+        error_from_exception(exc)
+        return
 
     pdir = service.profiles_dir / name
     _write_profile_meta(pdir, name)
-    output_json({"name": name, "path": str(pdir), "created": True}, seq=0)
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": True,
+                "seq": 0,
+                "data": {"name": name, "path": str(pdir), "created": True},
+            }
+        )
+        return
+    value(f'created profile "{name}"')
 
 
 @app.command("list")
@@ -149,7 +159,25 @@ def profile_list() -> None:
                 }
             )
 
-    output_json({"profiles": profiles, "count": len(profiles)}, seq=0)
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": True,
+                "seq": 0,
+                "data": {"profiles": profiles, "count": len(profiles)},
+            }
+        )
+        return
+    if not profiles:
+        value("no profiles")
+        return
+    # git-branch style listing — first profile gets the active marker since
+    # the local CLI doesn't track which one the daemon is using.
+    lines: list[str] = []
+    for idx, prof in enumerate(profiles):
+        marker = "*" if idx == 0 else " "
+        lines.append(f"{marker} {prof['name']} | {prof['path']} | {prof['size']}")
+    value("\n".join(lines))
 
 
 @app.command("delete")
@@ -161,9 +189,12 @@ def profile_delete(
     try:
         service.delete(name)
     except ProfileError as exc:
-        output_error(exc)
-        raise typer.Exit(1) from exc
-    output_json({"name": name, "deleted": True}, seq=0)
+        error_from_exception(exc)
+        return
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": 0, "data": {"name": name, "deleted": True}})
+        return
+    value(f'deleted profile "{name}"')
 
 
 @app.command("launch")
@@ -183,8 +214,8 @@ def profile_launch(
     try:
         service.validate_name(name)
     except ProfileError as exc:
-        output_error(exc)
-        raise typer.Exit(1) from exc
+        error_from_exception(exc)
+        return
 
     pdir = service.profiles_dir / name
     # Auto-create the profile if it doesn't exist
@@ -202,10 +233,16 @@ def profile_launch(
             headless=headless,
             profile=name,
         )
-        output_json(
-            {"pid": pid, "profile": name, "background": True},
-            seq=0,
-        )
+        if is_json_mode():
+            emit_envelope(
+                {
+                    "ok": True,
+                    "seq": 0,
+                    "data": {"pid": pid, "profile": name, "background": True},
+                }
+            )
+            return
+        value(f"started bg | pid {pid} | profile={name}")
         return
 
     # Acceptable exception to layer isolation: CLI starts daemon in-process

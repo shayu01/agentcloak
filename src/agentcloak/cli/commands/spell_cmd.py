@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import orjson
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import emit_envelope
+from agentcloak.cli.output import is_json_mode, value
 from agentcloak.client import DaemonClient
 from agentcloak.core.errors import AgentBrowserError
 from agentcloak.spells.discovery import discover_spells
@@ -28,23 +30,41 @@ def spell_list() -> None:
     """List all registered spells."""
     _ensure_discovered()
     registry = get_registry()
-    spells: list[dict[str, Any]] = []
-    for entry in registry.list_all():
-        m = entry.meta
-        spells.append(
+    if is_json_mode():
+        spells: list[dict[str, Any]] = []
+        for entry in registry.list_all():
+            m = entry.meta
+            spells.append(
+                {
+                    "site": m.site,
+                    "name": m.name,
+                    "full_name": m.full_name,
+                    "strategy": m.strategy.value,
+                    "access": m.access,
+                    "description": m.description,
+                    "domain": m.domain,
+                    "needs_browser": m.needs_browser,
+                    "mode": "pipeline" if entry.is_pipeline else "function",
+                }
+            )
+        emit_envelope(
             {
-                "site": m.site,
-                "name": m.name,
-                "full_name": m.full_name,
-                "strategy": m.strategy.value,
-                "access": m.access,
-                "description": m.description,
-                "domain": m.domain,
-                "needs_browser": m.needs_browser,
-                "mode": "pipeline" if entry.is_pipeline else "function",
+                "ok": True,
+                "seq": 0,
+                "data": {"spells": spells, "count": len(spells)},
             }
         )
-    output_json({"spells": spells, "count": len(spells)}, seq=0)
+        return
+
+    entries = list(registry.list_all())
+    if not entries:
+        value("no spells registered")
+        return
+    lines: list[str] = []
+    for entry in entries:
+        m = entry.meta
+        lines.append(f"{m.full_name} | {m.strategy.value} | {m.description}")
+    value("\n".join(lines))
 
 
 @app.command("info")
@@ -69,7 +89,7 @@ def spell_info(
             action="run 'agentcloak spell list' to see available spells",
         )
     m = entry.meta
-    info: dict[str, Any] = {
+    info_data: dict[str, Any] = {
         "site": m.site,
         "name": m.name,
         "full_name": m.full_name,
@@ -92,7 +112,22 @@ def spell_info(
         ],
         "columns": list(m.columns) if m.columns else None,
     }
-    output_json(info, seq=0)
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": 0, "data": info_data})
+        return
+    lines = [
+        f"# {m.full_name}",
+        f"description: {m.description}",
+        f"strategy: {m.strategy.value}",
+        f"domain: {m.domain}",
+        f"needs_browser: {m.needs_browser}",
+    ]
+    if m.args:
+        lines.append("args:")
+        for arg in m.args:
+            req = "required" if arg.required else f"default={arg.default!r}"
+            lines.append(f"  {arg.name}: {arg.type.__name__} ({req}) — {arg.help}")
+    value("\n".join(lines))
 
 
 @app.command("run")
@@ -124,10 +159,21 @@ def spell_run(
     # Local spell execution stays async (executor + pipeline are async); we
     # only need asyncio.run here, not a daemon round-trip.
     result = asyncio.run(_execute(entry, parsed_args))
-    output_json({"result": result}, seq=0)
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": 0, "data": {"result": result}})
+        return
+    # Text mode: bare result if scalar/string, pretty JSON for structures.
+    if isinstance(result, str):
+        value(result)
+    elif isinstance(result, int | float | bool):
+        value(str(result))
+    elif result is None:
+        value("")
+    else:
+        value(orjson.dumps(result, option=orjson.OPT_INDENT_2).decode())
 
 
-async def _execute(entry: Any, args: dict[str, Any]) -> list[dict[str, Any]]:
+async def _execute(entry: Any, args: dict[str, Any]) -> Any:
     from agentcloak.spells.executor import execute_spell
 
     if entry.meta.needs_browser:
@@ -166,10 +212,16 @@ def spell_scaffold(
     )
 
     if not patterns_data:
-        output_json(
-            {"code": "", "message": "No API patterns found in captured traffic."},
-            seq=0,
-        )
+        if is_json_mode():
+            emit_envelope(
+                {
+                    "ok": True,
+                    "seq": 0,
+                    "data": {"code": "", "message": "No API patterns found."},
+                }
+            )
+            return
+        value("no API patterns found in captured traffic")
         return
 
     from agentcloak.core.types import Strategy
@@ -194,4 +246,13 @@ def spell_scaffold(
         )
 
     code = generate_spells(site, patterns)
-    output_json({"code": code, "pattern_count": len(patterns)}, seq=0)
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": True,
+                "seq": 0,
+                "data": {"code": code, "pattern_count": len(patterns)},
+            }
+        )
+        return
+    value(code)

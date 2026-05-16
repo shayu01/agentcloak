@@ -1,15 +1,14 @@
 """Network request monitoring command.
 
 Exposed as a flat ``agentcloak network`` (no nested ``network network``) via
-the same ``@app.callback(invoke_without_command=True)`` pattern used by
-``doctor`` — F3 from dogfood-v0.2.0-pre-release.
+``@app.callback(invoke_without_command=True)``.
 """
 
 from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -43,8 +42,6 @@ def network_list(
         raise typer.BadParameter(
             f"--since must be an integer or 'last_action' (got {since!r})"
         )
-    client = DaemonClient()
-    result = client.network_sync(since=since)
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
+    dispatch_text_or_json(
+        DaemonClient(), "GET", "/network", params={"since": str(since)}
+    )

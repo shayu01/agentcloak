@@ -15,14 +15,14 @@ First-time setup: read `references/getting-started.md`.
 
 Observe-then-act. Snapshot first because `[N]` refs are only valid for the current page state.
 
-1. **Navigate**: `cloak navigate "https://example.com" --snapshot` -- navigate and get snapshot in one step
-2. **Observe**: `cloak snapshot` -- get a11y tree with `[N]` element refs (or use `--snapshot` on navigate/action)
-3. **Act**: `cloak click --target 5` or `cloak fill --target 3 --text "query"`
-4. **Handle feedback**: check action return for `pending_requests`, `dialog`, `navigation`
-5. **Re-observe if needed**: when `caused_navigation: true` or `dom_changed: true`, snapshot again
+1. **Navigate**: `cloak navigate "https://example.com" --snap` -- navigate and get snapshot in one step
+2. **Observe**: `cloak snapshot` -- get a11y tree with `[N]` element refs (or use `--snap` on navigate/action)
+3. **Act**: `cloak click 5` or `cloak fill 3 "query"` (positional `[N]` is shorter than `--index N`)
+4. **Handle feedback**: action stdout shows proactive state (navigation, pending_requests, dialog)
+5. **Re-observe if needed**: when navigation occurred or DOM changed, snapshot again
 6. **Repeat** steps 2-5
 
-Every action returns state changes (`pending_requests`, `dialog`, `navigation`, `download`, `current_value`). Fields appear only when relevant. When `error: "blocked_by_dialog"`, handle with `cloak dialog accept/dismiss` before retrying.
+Actions emit `pending_requests`, `dialog`, `navigation`, `download`, `current_value` inline after the confirmation line when relevant. When `Error: blocked by dialog` appears on stderr, handle with `cloak dialog accept/dismiss` before retrying.
 
 ## Element Addressing
 
@@ -44,7 +44,7 @@ form "Login"
 
 Numbers are `--target` values for actions. They change on navigation/DOM update -- always re-snapshot for fresh refs. ARIA states shown: `checked`, `disabled`, `expanded`, `selected`, `pressed`, `invalid`, `required`, `focused`. Passwords redacted as `••••`.
 
-Snapshot modes: `accessible` (default, full tree) | `compact` (interactive + containers only) | `content` (text extraction) | `dom` (raw HTML).
+Snapshot modes: `compact` (default, interactive + containers only) | `accessible` (full tree, heavier) | `content` (text extraction) | `dom` (raw HTML).
 
 ## Command Reference
 
@@ -52,38 +52,38 @@ Snapshot modes: `accessible` (default, full tree) | `compact` (interactive + con
 
 | Command | Purpose |
 |---------|---------|
-| `cloak navigate URL` | Navigate to URL (add `--snapshot` to get a11y tree in one step) |
-| `cloak snapshot` | Get a11y tree with `[N]` refs |
-| `cloak snapshot --mode compact` | Interactive elements + containers only |
+| `cloak navigate URL` | Navigate to URL (add `--snap` to get a11y tree in one step) |
+| `cloak snapshot` | Get a11y tree with `[N]` refs (default mode: compact) |
+| `cloak snapshot --mode accessible` | Full a11y tree (heavier, all containers) |
 | `cloak snapshot --mode content` | Text extraction |
-| `cloak snapshot --max-nodes 50` | Limit node count (summary of hidden) |
+| `cloak snapshot --limit 50` | Limit node count (summary of hidden); `--max-nodes` still accepted |
 | `cloak snapshot --focus N` | Expand subtree around element [N] |
 | `cloak snapshot --offset 50` | Paginate from 50th element |
 | `cloak snapshot --frames` | Include iframe content |
 | `cloak snapshot --diff` | Mark `[+]` added, `[~]` changed vs previous |
-| `cloak screenshot` | Take page screenshot |
+| `cloak screenshot` | Take page screenshot (saves file, stdout = path) |
 | `cloak resume` | Session state: URL, tabs, recent actions |
 
 ### Interaction
 
-All actions use `--target N` from the most recent snapshot.
+Actions accept the element index positionally (`cloak click 5`) or via `--index N`. Most also take a positional second arg where it makes sense (`cloak fill 3 "query"`).
 
 | Command | Purpose |
 |---------|---------|
-| `cloak click --target N` | Click element |
-| `cloak fill --target N --text "value"` | Clear and set input value |
-| `cloak type --target N --text "value"` | Type character by character |
-| `cloak press --key Enter` | Press key (Enter, Tab, Escape, Backspace, ArrowDown, Space...) |
-| `cloak press --key "Control+a"` | Combo key (Playwright `+` syntax) |
-| `cloak scroll --direction down` | Scroll page |
-| `cloak hover --target N` | Hover over element |
-| `cloak select --target N --value "opt"` | Select dropdown option |
-| `cloak keydown/keyup --key Shift` | Hold/release key |
+| `cloak click N` | Click element |
+| `cloak fill N "value"` | Clear and set input value |
+| `cloak type N "value"` | Type character by character |
+| `cloak press Enter` | Press key (Enter, Tab, Escape, Backspace, ArrowDown, Space...) |
+| `cloak press "Control+a"` | Combo key (Playwright `+` syntax) |
+| `cloak scroll down` | Scroll page |
+| `cloak hover N` | Hover over element |
+| `cloak select N --value "opt"` | Select dropdown option |
+| `cloak keydown/keyup Shift` | Hold/release key |
 | `cloak dialog accept` / `dismiss` | Handle confirm/prompt dialog |
 | `cloak wait --selector ".results"` | Wait for element / URL / JS condition / time |
 | `cloak upload --index N --file path` | Upload file to input element |
 | `cloak frame focus --name "x"` | Switch to iframe (`--main` to return) |
-| Add `--include-snapshot` to any action | Get compact snapshot with result (saves round trip) |
+| Add `--snap` to any action | Get compact snapshot with result (saves a round trip) |
 
 ### Content & Network
 
@@ -112,47 +112,83 @@ All actions use `--target N` from the most recent snapshot.
 
 ## Response Convention
 
-Every command returns JSON on stdout with a consistent envelope:
+CLI is **text-first**. stdout is the answer; no JSON parsing required.
+
+| What you see | Where |
+|--------------|-------|
+| The useful data (URL, snapshot tree, JS result, ...) | stdout |
+| Hints, warnings, errors | stderr |
+| Exit code 0 = success, 1 = failure, 2 = bad usage | shell `$?` |
+
+**Examples (default text mode):**
+
+```text
+$ cloak navigate https://example.com
+https://example.com/ | Example Domain
+
+$ cloak snapshot
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=2
+  heading "Example Domain" level=1
+  paragraph "This domain is for use in illustrative examples in documents."
+  [1] link "More information..." href="https://www.iana.org/domains/example"
+
+$ cloak click 1
+clicked [1]
+  navigation: https://www.iana.org/...
+
+$ cloak js evaluate "document.title"
+Example Domain
+
+$ cloak doctor
+[ok] python_version | 3.12.4
+[ok] cloakbrowser | binary v140.0.7339 installed
+[fail] daemon | 127.0.0.1:18765 | hint: run 'cloak daemon start -b' to launch
+```
+
+**Errors go to stderr** with a recovery hint:
+
+```text
+$ cloak click 99
+Error: Element [99] not in selector_map (4 entries)
+  -> run 'snapshot' to refresh the selector_map, or re-snapshot if the page changed
+```
+
+**`--json` flag** restores the full envelope for scripting / backwards compatibility:
+
+```bash
+cloak --json snapshot | jq '.data.tree_text'
+# Or via env var (handy for CI / wrappers)
+AGENTCLOAK_OUTPUT=json cloak snapshot | jq -r '.data.tree_text'
+```
+
+JSON envelope shape (only when `--json` is active):
 
 ```json
 {"ok": true, "seq": 3, "data": {...}}
 {"ok": false, "error": "element_not_found", "hint": "...", "action": "..."}
 ```
 
-`seq` is a monotonic counter for state changes. Error `action` field tells you what to try next.
-
-**Data shapes by operation type:**
-
-| Type | `data` structure | Example |
-|------|-----------------|---------|
-| Single result | `{field1, field2, ...}` | `navigate` → `{url, title, status, seq}` |
-| List | `{<items>: [...], count: N}` | `tab list` → `{tabs: [...], count: 38}` |
-| Action | `{action, seq, <feedback>}` | `click` → `{action: "click", seq: 5, clicked: true}` |
-| Snapshot | `{url, title, tree_text, mode, total_nodes, ...}` | compact tree + metadata |
-
-**MCP tools** strip the envelope — they return only the `data` payload directly (no `ok`/`seq` wrapper).
-
-**CLI** outputs the full envelope as JSON. Parse with jq or Python:
-`cloak snapshot --mode compact | jq -r '.data.tree_text'`
+**MCP tools** always return JSON — they strip the envelope to the inner `data` payload and prune `null` fields to save tokens.
 
 ## Smart Behaviors
 
 These work automatically:
 - **Stale ref auto-retry**: `element_not_found` triggers one automatic re-snapshot + retry
-- **`--include-snapshot`**: add to any action to get a compact snapshot back, saving a round trip
-- **`--snapshot` on navigate**: `cloak navigate URL --snapshot` returns page + a11y tree in one call
+- **`--snap`**: add to any action to get a compact snapshot back, saving a round trip (alias for `--include-snapshot` / `--snapshot`)
+- **`--snap` on navigate**: `cloak navigate URL --snap` returns page + a11y tree in one call
 - **`$N.path` batch refs**: in `--calls-file` batch mode, reference prior results (e.g. `"$0.url"`)
 - **Tab group**: RemoteBridge auto-groups agent tabs under blue "agentcloak" Chrome tab group
 
 ## Key Principles
 
 - **Snapshot before acting**: `[N]` refs are only valid for current page state
-- **Read feedback fields**: `pending_requests`, `dialog`, `navigation` tell you what happened
+- **Read stderr / inline feedback**: `pending_requests`, `dialog`, `navigation` lines follow the action confirmation
 - **Handle dialogs immediately**: they block everything until dismissed
-- **Follow error `action` field**: it tells you exactly what to do next
-- **Use compact mode**: `--mode compact` for focused interaction
-- **Large pages**: 100+ elements blow up token budgets. Use `--mode compact --max-nodes 80` (~1.8K tokens) as the default for big pages, then `--focus=N` or `--offset=N` to explore specific areas. Action targets work even if truncated from the tree output
+- **Follow error hints**: stderr `Error: ... -> action` tells you what to do next
+- **Compact is the default**: `cloak snapshot` already runs in compact mode (interactive + named containers)
+- **Large pages**: 100+ elements blow up token budgets. Default compact + `--limit 80` (~1.8K tokens), then `--focus N` or `--offset N` to explore specific areas. Action targets work even if truncated from the tree output
 - **Timeouts**: navigation defaults to 30s, actions to 30s. For slow pages or large uploads, pass `--timeout 60` on `navigate` or `wait`. If `navigation_timeout` errors persist, set `AGENTCLOAK_NAVIGATION_TIMEOUT=60` globally
+- **Scripting / piping**: add `--json` for the legacy envelope shape when piping to jq, or set `AGENTCLOAK_OUTPUT=json` for the same effect
 
 ## References
 

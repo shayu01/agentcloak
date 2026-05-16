@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003 — Typer needs runtime access
 
+import orjson
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json, emit_envelope
+from agentcloak.cli.output import is_json_mode, value
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -21,22 +23,35 @@ def cookies_export(
         None, "--output", "-o", help="Save cookies to file."
     ),
 ) -> None:
-    """Export cookies from remote Chrome via bridge."""
+    """Export cookies from the active browser session."""
+    body: dict[str, object] = {}
+    if url:
+        body["url"] = url
+
     client = DaemonClient()
-    result = client.cookies_export_sync(url=url)
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-
-    if output:
-        import orjson
-
+    if output is not None:
+        # File output needs the structured envelope to serialize the cookie
+        # list verbatim — text mode would only give us ``name=value`` lines.
+        result = client.cookies_export_sync(url=url)
+        data = result.get("data", result)
         output.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-        output_json(
-            {"saved": str(output), "count": len(data.get("cookies", []))},
-            seq=seq,
-        )
-    else:
-        output_json(data, seq=seq)
+        if is_json_mode():
+            seq = int(result.get("seq", 0) or 0)
+            emit_envelope(
+                {
+                    "ok": True,
+                    "seq": seq,
+                    "data": {
+                        "saved": str(output),
+                        "count": len(data.get("cookies", [])),
+                    },
+                }
+            )
+            return
+        value(f"saved {output} ({len(data.get('cookies', []))} cookies)")
+        return
+
+    dispatch_text_or_json(client, "POST", "/cookies/export", json_body=body)
 
 
 @app.command("import")
@@ -53,10 +68,10 @@ def cookies_import(
     ),
 ) -> None:
     """Import cookies into the browser (supports httpOnly)."""
-    import orjson
-
     cookies = orjson.loads(cookies_json)
-    client = DaemonClient()
-    result = client.cookies_import_sync(cookies=cookies)
-    data = result.get("data", result)
-    output_json(data, seq=result.get("seq", 0))
+    dispatch_text_or_json(
+        DaemonClient(),
+        "POST",
+        "/cookies/import",
+        json_body={"cookies": cookies},
+    )

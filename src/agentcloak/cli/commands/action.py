@@ -1,4 +1,11 @@
-"""Action commands — click, fill, type, scroll, hover, select, press, batch."""
+"""Action commands — click, fill, type, scroll, hover, select, press, batch.
+
+All action commands share the same dispatch pattern: assemble a body, call
+``/action`` (or ``/action/batch``), and emit the daemon's text or JSON
+response. The ``--snap`` combo flag asks the daemon to attach a compact
+snapshot to the action result so the agent can observe-and-act in one
+round-trip.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +15,8 @@ from typing import Any
 import orjson
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json, emit_envelope
+from agentcloak.cli.output import error, is_json_mode
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
@@ -16,242 +24,241 @@ __all__ = ["app"]
 app = typer.Typer()
 
 
+def _build_action_body(
+    kind: str,
+    *,
+    index: int | None = None,
+    target: str | None = None,
+    snap: bool = False,
+    snapshot_mode: str = "compact",
+    **extras: Any,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"kind": kind}
+    if index is not None:
+        body["index"] = index
+    if target is not None:
+        body["target"] = target
+    if snap:
+        body["include_snapshot"] = True
+        body["snapshot_mode"] = snapshot_mode
+    for k, v in extras.items():
+        if v is not None:
+            body[k] = v
+    return body
+
+
 @app.command("click")
 def do_click(
+    target: int | None = typer.Argument(
+        None,
+        help="Element index [N] from snapshot. Equivalent to --index.",
+    ),
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
-    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     x: float | None = typer.Option(None, "--x", help="X coordinate (fallback)."),
     y: float | None = typer.Option(None, "--y", help="Y coordinate (fallback)."),
     button: str = typer.Option("left", "--button", help="Mouse button."),
     click_count: int = typer.Option(1, "--click-count", help="Number of clicks."),
-    include_snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action (one round-trip).",
     ),
 ) -> None:
-    """Click an element by index or coordinates."""
-    resolved = target if index is None else index
-    client = DaemonClient()
-    kwargs: dict[str, Any] = {
-        "button": button,
-        "click_count": click_count,
-    }
-    if x is not None:
-        kwargs["x"] = x
-    if y is not None:
-        kwargs["y"] = y
-    result = client.action_sync(
+    """Click an element. Accept index as positional ``[N]`` or via ``--index``."""
+    resolved = index if index is not None else target
+    body = _build_action_body(
         "click",
         index=resolved,
-        include_snapshot=include_snapshot,
-        **kwargs,
+        snap=snap,
+        button=button,
+        click_count=click_count,
+        x=x,
+        y=y,
     )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("fill")
 def do_fill(
+    target: int | None = typer.Argument(None, help="Element index [N]."),
+    text_pos: str | None = typer.Argument(None, help="Text to fill."),
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
-    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
-    text: str = typer.Option(..., "--text", "-t", help="Text to fill."),
-    include_snapshot: bool = typer.Option(
+    text: str | None = typer.Option(None, "--text", "-t", help="Text to fill."),
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Fill an input element (clear then set value)."""
-    resolved = target if index is None else index
+    resolved = index if index is not None else target
     if resolved is None:
-        typer.echo("Error: provide --target or --index", err=True)
-        raise typer.Exit(2)
-    client = DaemonClient()
-    result = client.action_sync(
-        "fill", index=resolved, include_snapshot=include_snapshot, text=text
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+        error("missing element index", "pass it as the first positional or --index N")
+    if text is None:
+        text = text_pos
+    if text is None:
+        error("missing text to fill", "pass it as the second positional or --text")
+    body = _build_action_body("fill", index=resolved, snap=snap, text=text)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("type")
 def do_type(
+    target: int | None = typer.Argument(None, help="Element index [N]."),
+    text_pos: str | None = typer.Argument(None, help="Text to type."),
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
-    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
-    text: str = typer.Option(..., "--text", "-t", help="Text to type."),
+    text: str | None = typer.Option(None, "--text", "-t", help="Text to type."),
     delay: float = typer.Option(0, "--delay", help="Delay between keystrokes in ms."),
-    include_snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Type text character by character (per-key events)."""
-    resolved = target if index is None else index
+    resolved = index if index is not None else target
     if resolved is None:
-        typer.echo("Error: provide --target or --index", err=True)
-        raise typer.Exit(2)
-    client = DaemonClient()
-    result = client.action_sync(
-        "type",
-        index=resolved,
-        include_snapshot=include_snapshot,
-        text=text,
-        delay=delay,
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+        error("missing element index", "pass it as the first positional or --index N")
+    if text is None:
+        text = text_pos
+    if text is None:
+        error("missing text to type", "pass it as the second positional or --text")
+    body = _build_action_body("type", index=resolved, snap=snap, text=text, delay=delay)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("scroll")
 def do_scroll(
+    direction_pos: str | None = typer.Argument(
+        None, help="Direction: up/down/left/right. Defaults to 'down'."
+    ),
     index: int | None = typer.Option(None, "--index", "-i", help="Element to scroll."),
     target: int | None = typer.Option(None, "--target", help="Alias for --index."),
-    direction: str = typer.Option(
-        "down", "--direction", "-d", help="up/down/left/right."
+    direction: str | None = typer.Option(
+        None, "--direction", "-d", help="up/down/left/right."
     ),
     amount: int = typer.Option(300, "--amount", help="Scroll amount in pixels."),
-    include_snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Scroll the page or an element into view."""
     resolved = target if index is None else index
-    client = DaemonClient()
-    result = client.action_sync(
-        "scroll",
-        index=resolved,
-        include_snapshot=include_snapshot,
-        direction=direction,
-        amount=amount,
+    final_dir = direction or direction_pos or "down"
+    body = _build_action_body(
+        "scroll", index=resolved, snap=snap, direction=final_dir, amount=amount
     )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("hover")
 def do_hover(
+    target: int | None = typer.Argument(None, help="Element index [N]."),
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
-    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
     x: float | None = typer.Option(None, "--x", help="X coordinate (fallback)."),
     y: float | None = typer.Option(None, "--y", help="Y coordinate (fallback)."),
-    include_snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Hover over an element or coordinates."""
-    resolved = target if index is None else index
-    client = DaemonClient()
-    kwargs: dict[str, Any] = {}
-    if x is not None:
-        kwargs["x"] = x
-    if y is not None:
-        kwargs["y"] = y
-    result = client.action_sync(
-        "hover",
-        index=resolved,
-        include_snapshot=include_snapshot,
-        **kwargs,
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    resolved = index if index is not None else target
+    body = _build_action_body("hover", index=resolved, snap=snap, x=x, y=y)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("select")
 def do_select(
+    target: int | None = typer.Argument(None, help="Element index [N]."),
     index: int | None = typer.Option(None, "--index", "-i", help="Element index [N]."),
-    target: int | None = typer.Option(None, "--target", help="Alias for --index."),
-    value: str | None = typer.Option(None, "--value", help="Option value."),
+    value_opt: str | None = typer.Option(None, "--value", help="Option value."),
     label: str | None = typer.Option(None, "--label", help="Option display text."),
-    include_snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Select a dropdown option."""
-    resolved = target if index is None else index
+    resolved = index if index is not None else target
     if resolved is None:
-        typer.echo("Error: provide --target or --index", err=True)
-        raise typer.Exit(2)
-    client = DaemonClient()
-    kwargs: dict[str, Any] = {}
-    if value is not None:
-        kwargs["value"] = value
-    if label is not None:
-        kwargs["label"] = label
-    result = client.action_sync(
-        "select", index=resolved, include_snapshot=include_snapshot, **kwargs
+        error("missing element index", "pass it as the first positional or --index N")
+    body = _build_action_body(
+        "select", index=resolved, snap=snap, value=value_opt, label=label
     )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("press")
 def do_press(
-    key: str = typer.Option(..., "--key", "-k", help="Key to press (Enter, etc.)."),
+    key_pos: str | None = typer.Argument(
+        None, help="Key to press (Enter, Tab, Control+a, etc.)."
+    ),
+    key: str | None = typer.Option(None, "--key", "-k", help="Key to press."),
     target: int | None = typer.Option(
         None, "--target", help="Element index [N] to focus before pressing."
     ),
-    include_snapshot: bool = typer.Option(
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
-    """Press a keyboard key."""
-    client = DaemonClient()
-    result = client.action_sync(
-        "press", index=target, include_snapshot=include_snapshot, key=key
-    )
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    """Press a keyboard key (supports modifiers like Control+a)."""
+    final_key = key or key_pos
+    if not final_key:
+        error("missing key", "pass it as a positional arg or --key Enter")
+    body = _build_action_body("press", index=target, snap=snap, key=final_key)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("keydown")
 def do_keydown(
-    key: str = typer.Option(..., "--key", "-k", help="Key to hold down."),
-    include_snapshot: bool = typer.Option(
+    key_pos: str | None = typer.Argument(None, help="Key to hold down."),
+    key: str | None = typer.Option(None, "--key", "-k", help="Key to hold down."),
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Hold a key down (e.g. Shift, Control)."""
-    client = DaemonClient()
-    result = client.action_sync("keydown", include_snapshot=include_snapshot, key=key)
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    final_key = key or key_pos
+    if not final_key:
+        error("missing key", "pass it as a positional arg or --key Shift")
+    body = _build_action_body("keydown", snap=snap, key=final_key)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("keyup")
 def do_keyup(
-    key: str = typer.Option(..., "--key", "-k", help="Key to release."),
-    include_snapshot: bool = typer.Option(
+    key_pos: str | None = typer.Argument(None, help="Key to release."),
+    key: str | None = typer.Option(None, "--key", "-k", help="Key to release."),
+    snap: bool = typer.Option(
         False,
+        "--snap",
         "--include-snapshot",
-        help="Attach compact snapshot to action result.",
+        help="Attach compact snapshot after the action.",
     ),
 ) -> None:
     """Release a held key."""
-    client = DaemonClient()
-    result = client.action_sync("keyup", include_snapshot=include_snapshot, key=key)
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    final_key = key or key_pos
+    if not final_key:
+        error("missing key", "pass it as a positional arg or --key Shift")
+    body = _build_action_body("keyup", snap=snap, key=final_key)
+    dispatch_text_or_json(DaemonClient(), "POST", "/action", json_body=body)
 
 
 @app.command("batch")
@@ -263,23 +270,26 @@ def do_batch(
 ) -> None:
     """Execute a batch of actions from a JSONL file.
 
-    Actions in the JSONL can reference prior results with $N.path syntax.
-    For example, $0.data.url references the URL from the first action's result.
+    Actions in the JSONL can reference prior results with ``$N.path`` syntax;
+    e.g. ``$0.data.url`` references the URL from the first action's result.
     """
     if not calls_file.exists():
-        typer.echo(f"File not found: {calls_file}", err=True)
-        raise typer.Exit(2)
+        error(f"file not found: {calls_file}", "pass an existing JSONL file")
 
     actions: list[dict[str, Any]] = []
     raw = calls_file.read_text(encoding="utf-8").strip()
-    for line in raw.splitlines():
-        line = line.strip()
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         actions.append(orjson.loads(line))
 
+    body = {"actions": actions, "sleep": sleep}
     client = DaemonClient()
-    result = client.action_batch_sync(actions, sleep=sleep)
-    data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
-    output_json(data, seq=seq)
+    if is_json_mode():
+        result = client._send_sync(  # pyright: ignore[reportPrivateUsage]
+            "POST", "/action/batch", json_body=body
+        )
+        emit_envelope(result)
+        return
+    dispatch_text_or_json(client, "POST", "/action/batch", json_body=body)

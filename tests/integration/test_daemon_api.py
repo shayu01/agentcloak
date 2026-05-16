@@ -77,7 +77,12 @@ def test_snapshot_via_http(daemon_test_client: TestClient, local_server: str) ->
         "/navigate",
         json={"url": f"{local_server}/index.html"},
     )
-    resp = daemon_test_client.get("/snapshot", params={"mode": "accessible"})
+    # ``include_selector_map`` defaults to ``False`` (token-saving for MCP),
+    # so this test asks for it explicitly.
+    resp = daemon_test_client.get(
+        "/snapshot",
+        params={"mode": "accessible", "include_selector_map": "true"},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True

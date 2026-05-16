@@ -9,21 +9,12 @@ from __future__ import annotations
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import dispatch_text_or_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app", "launch"]
 
 app = typer.Typer()
-
-
-def _do_launch(tier: str, profile: str | None) -> None:
-    from agentcloak.client import DaemonClient
-
-    client = DaemonClient()
-    result = client.launch_sync(tier=tier, profile=profile)
-    data = result.get("data", result)
-    seq = result.get("seq", 0)
-    output_json(data, seq=seq)
 
 
 @app.callback(invoke_without_command=True)
@@ -45,4 +36,7 @@ def launch(
     ),
 ) -> None:
     """Hot-switch the daemon's active browser tier (no restart)."""
-    _do_launch(tier, profile)
+    body: dict[str, object] = {"tier": tier}
+    if profile is not None:
+        body["profile"] = profile
+    dispatch_text_or_json(DaemonClient(), "POST", "/launch", json_body=body)

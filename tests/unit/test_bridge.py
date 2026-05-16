@@ -107,7 +107,8 @@ class TestBridgeCLI:
         assert "doctor" in result.stdout
 
     def test_bridge_doctor_runs(self) -> None:
-        result = runner.invoke(app, ["bridge", "doctor"])
+        # ``--json`` opts back into the envelope shape these assertions rely on.
+        result = runner.invoke(app, ["--json", "bridge", "doctor"])
         data = json.loads(result.stdout)
         assert "ok" in data
         checks = data["data"]["checks"]
@@ -116,7 +117,7 @@ class TestBridgeCLI:
         assert "extension_files" in names
 
     def test_bridge_extension_path(self) -> None:
-        result = runner.invoke(app, ["bridge", "extension-path"])
+        result = runner.invoke(app, ["--json", "bridge", "extension-path"])
         data = json.loads(result.stdout)
         path = data["data"]["path"]
         assert "agentcloak-chrome-extension" in path

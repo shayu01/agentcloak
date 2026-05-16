@@ -66,29 +66,42 @@ The daemon starts automatically on the first command.
 
 ```bash
 # Navigate and get the page snapshot in one call
-cloak navigate "https://example.com" --snapshot
-
-# Output includes an accessibility tree with [N] element refs:
-#   [1] link "About" href="https://example.com/about"
-#   [2] button "Settings"
-#   [3] combobox "Search" value="" focused
-
-# Interact using [N] refs -- add --include-snapshot to get a fresh snapshot back
-cloak fill --target 3 --text "search query" --include-snapshot
-cloak press --key Enter --target 3
-
-# Take a screenshot
-cloak screenshot --output page.png
+cloak navigate "https://example.com" --snap
 ```
 
-Every command returns one JSON object on stdout. Errors include a recovery hint:
+stdout is the answer itself — text-first, no JSON parsing required:
 
-```json
-{"ok": true, "seq": 3, "data": {"url": "https://example.com", "title": "Example"}}
-{"ok": false, "error": "element_not_found", "hint": "No element at index 99", "action": "re-snapshot to get fresh [N] refs"}
+```text
+https://example.com/ | Example Domain
+
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
+  heading "Example Domain" level=1
+  [1] link "More information..." href="https://www.iana.org/domains/example"
 ```
 
-The `--snapshot` flag on `navigate` and action commands keeps the observe-act loop tight -- no separate snapshot call needed between steps.
+```bash
+# Interact using [N] refs (positional or --index N) -- --snap returns a fresh snapshot
+cloak fill 3 "search query" --snap
+cloak press Enter
+
+# Take a screenshot (stdout = file path)
+cloak screenshot
+```
+
+Errors go to stderr with a recovery hint and a non-zero exit code:
+
+```text
+Error: Element [99] not in selector_map (1 entries)
+  -> run 'snapshot' to refresh the selector_map, or re-snapshot if the page changed
+```
+
+Need the legacy JSON envelope for scripts? Pass `--json` (or set `AGENTCLOAK_OUTPUT=json`):
+
+```bash
+cloak --json snapshot | jq -r '.data.tree_text'
+```
+
+The `--snap` flag on `navigate` and action commands keeps the observe-act loop tight -- no separate snapshot call needed between steps.
 
 See the full [Quick Start tutorial](docs/en/getting-started/quickstart.md) for login persistence, profile management, and API capture.
 

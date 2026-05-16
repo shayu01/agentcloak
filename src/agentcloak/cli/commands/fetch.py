@@ -1,8 +1,7 @@
 """Fetch command — HTTP request with browser cookies.
 
 Exposed as a flat ``agentcloak fetch <URL>`` (no nested ``fetch fetch``) via
-``@app.callback(invoke_without_command=True)`` — F3 from
-dogfood-v0.2.0-pre-release.
+``@app.callback(invoke_without_command=True)``.
 """
 
 from __future__ import annotations
@@ -11,20 +10,14 @@ from pathlib import Path  # noqa: TC003 — Typer needs runtime access
 
 import typer
 
-from agentcloak.cli.output import output_json
+from agentcloak.cli._dispatch import emit_envelope
+from agentcloak.cli.output import info, is_json_mode, value
 from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
-# ``allow_extra_args=False`` is the key fix for B4 from dogfood
-# v0.2.0: without it, Click treats trailing tokens like ``-m POST`` as
-# subcommand candidates once the positional URL is consumed and bails out with
-# "No such command '-m'". Forcing ``allow_extra_args=False`` (combined with
-# ``invoke_without_command=True``) tells the parser there is no subcommand to
-# look up — every flag is bound to this callback regardless of its position
-# relative to the URL argument. ``allow_interspersed_args=True`` is the Click
-# default but we set it explicitly so future Click upgrades don't quietly
-# regress the ordering guarantee covered by the tests.
+# See the original module-level comment in v0.2.0 for why we need
+# ``allow_extra_args=False`` here (B4 from dogfood v0.2.0).
 app = typer.Typer(
     invoke_without_command=True,
     context_settings={
@@ -39,8 +32,8 @@ def _parse_header(raw: str) -> tuple[str, str]:
     if ":" not in raw:
         msg = f"Invalid header format: '{raw}' (expected 'Key: Value')"
         raise typer.BadParameter(msg)
-    key, _, value = raw.partition(":")
-    return key.strip(), value.strip()
+    key, _, val = raw.partition(":")
+    return key.strip(), val.strip()
 
 
 @app.callback(invoke_without_command=True)
@@ -65,8 +58,6 @@ def fetch_url(
     if ctx.invoked_subcommand is not None:
         return
     if url is None:
-        # Argument is declared optional so ``--help`` works on the bare group;
-        # missing URL on actual invocation is still a usage error.
         raise typer.BadParameter("URL argument is required")
 
     headers: dict[str, str] | None = None
@@ -77,6 +68,9 @@ def fetch_url(
             headers[k] = v
 
     client = DaemonClient()
+    # Fetch always goes through the JSON path because the body and metadata
+    # (status, content_type, truncated) live in separate fields. Text mode
+    # extracts the body afterward.
     result = client.fetch_sync(
         url,
         method=method,
@@ -85,19 +79,35 @@ def fetch_url(
         timeout=timeout,
     )
     data = result.get("data", result)
-    seq = result.get("seq", data.get("seq", 0))
+    seq = int(result.get("seq", 0) or 0)
 
     if output:
         resp_body: str = data.get("body", "")
         output.write_text(resp_body, encoding="utf-8")
-        output_json(
-            {
-                "saved": str(output),
-                "status": data.get("status"),
-                "content_type": data.get("content_type", ""),
-                "truncated": data.get("truncated", False),
-            },
-            seq=seq,
-        )
-    else:
-        output_json(data, seq=seq)
+        if is_json_mode():
+            emit_envelope(
+                {
+                    "ok": True,
+                    "seq": seq,
+                    "data": {
+                        "saved": str(output),
+                        "status": data.get("status"),
+                        "content_type": data.get("content_type", ""),
+                        "truncated": data.get("truncated", False),
+                    },
+                }
+            )
+            return
+        value(f"saved {output} ({data.get('status')} {data.get('content_type', '')})")
+        return
+
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": seq, "data": data})
+        return
+    # Text mode: print body to stdout, status to stderr so pipes get clean
+    # data.
+    status = data.get("status")
+    ctype = data.get("content_type", "")
+    if status is not None:
+        info(f"status={status} content_type={ctype}")
+    value(data.get("body", "") or "")

@@ -23,7 +23,7 @@ Get page content as an accessibility tree with `[N]` element references.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `mode` | `str` | `accessible` | `accessible`, `compact`, `content`, or `dom` |
+| `mode` | `str` | `compact` | `compact` (default), `accessible`, `content`, or `dom` |
 | `max_chars` | `int` | `0` | Truncate tree_text to N characters (0 = no limit) |
 | `max_nodes` | `int` | `0` | Truncate after N nodes (0 = no limit) |
 | `focus` | `int` | `0` | Expand subtree around element `[N]` |

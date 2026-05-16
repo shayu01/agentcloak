@@ -144,8 +144,9 @@ class TestXvfbManager:
 
 
 class TestDoctorExtras:
+    # CLI defaults to text since v0.3.0; ``--json`` keeps the legacy envelope.
     def test_doctor_includes_extras_section(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         assert "extras" in data["data"]
         extras = data["data"]["extras"]
@@ -153,7 +154,7 @@ class TestDoctorExtras:
         assert "checks" in extras
 
     def test_extras_checks_have_required_fields(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         for check in data["data"]["extras"]["checks"]:
             assert "name" in check
@@ -209,7 +210,7 @@ class TestProxyUrlIntegration:
         assert ctx._proxy_url == "http://127.0.0.1:9999"
 
     def test_doctor_required_checks_include_httpcloak(self) -> None:
-        result = runner.invoke(app, ["doctor"])
+        result = runner.invoke(app, ["--json", "doctor"])
         data = json.loads(result.stdout)
         required_names = [c["name"] for c in data["data"]["checks"]]
         assert "httpcloak" in required_names

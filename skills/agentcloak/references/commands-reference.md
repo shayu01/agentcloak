@@ -41,12 +41,12 @@ Read this file when you need full parameter detail. For the common path, the qui
 - CLI: `cloak snapshot`
 - MCP: `agentcloak_snapshot`
 - Query:
-  - `mode` (string, default: "accessible")
+  - `mode` (string, default: "compact")
   - `max_nodes` (integer, default: 0)
   - `max_chars` (integer, default: 0)
   - `focus` (integer, default: 0)
   - `offset` (integer, default: 0)
-  - `include_selector_map` (boolean, default: true)
+  - `include_selector_map` (boolean, default: false)
   - `frames` (boolean, default: false)
   - `diff` (boolean, default: false)
 
