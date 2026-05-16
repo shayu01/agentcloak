@@ -209,20 +209,7 @@ graph TD
 
 ## 致谢
 
-**核心依赖：**
-
-- [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) -- 搭载 57 个 C++ 补丁 Chromium 的隐身浏览器，支持行为拟人化
-- [httpcloak](https://github.com/sardanioss/httpcloak) -- TLS 指纹保护代理
-
-**设计参考：**
-
-- [bb-browser](https://github.com/epiral/bb-browser) -- seq+since 状态追踪，三字段错误信封
-- [OpenCLI](https://github.com/jackwener/OpenCLI) -- Strategy 枚举，spell 管道 DSL
-- [GenericAgent](https://github.com/lsdefine/GenericAgent) -- WebSocket+HTTP 双传输远程桥接
-- [pinchtab](https://github.com/pinchtab/pinchtab) -- IDPI 安全模型
-- [browser-use](https://github.com/browser-use/browser-use) -- 多动作 agent 交互模式
-- [open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use) -- calls-file 批量调用
-- [Scrapling](https://github.com/D4Vinci/Scrapling) -- 反爬绕过策略
+基于 [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)（隐身 Chromium）和 [httpcloak](https://github.com/sardanioss/httpcloak)（TLS 指纹代理）构建。设计参考了 [bb-browser](https://github.com/epiral/bb-browser)、[browser-use](https://github.com/browser-use/browser-use)、[OpenCLI](https://github.com/jackwener/OpenCLI)、[GenericAgent](https://github.com/lsdefine/GenericAgent)、[pinchtab](https://github.com/pinchtab/pinchtab)、[open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use) 和 [Scrapling](https://github.com/D4Vinci/Scrapling)。
 
 ## 许可证
 

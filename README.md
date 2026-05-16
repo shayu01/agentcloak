@@ -209,20 +209,7 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for developmen
 
 ## Acknowledgments
 
-**Core dependencies:**
-
-- [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) -- stealth browser with 57 C++ patched Chromium + behavioral humanization
-- [httpcloak](https://github.com/sardanioss/httpcloak) -- TLS fingerprint protection proxy
-
-**Design references:**
-
-- [bb-browser](https://github.com/epiral/bb-browser) -- seq+since state tracking, three-field error envelope
-- [OpenCLI](https://github.com/jackwener/OpenCLI) -- Strategy enum, pipeline DSL for spells
-- [GenericAgent](https://github.com/lsdefine/GenericAgent) -- WebSocket+HTTP dual-transport remote bridge model
-- [pinchtab](https://github.com/pinchtab/pinchtab) -- IDPI security model
-- [browser-use](https://github.com/browser-use/browser-use) -- multi-action agent interaction patterns
-- [open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use) -- batch invocation via calls-file
-- [Scrapling](https://github.com/D4Vinci/Scrapling) -- anti-bot bypass strategies
+Built on [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) (stealth Chromium) and [httpcloak](https://github.com/sardanioss/httpcloak) (TLS fingerprint proxy). Design informed by [bb-browser](https://github.com/epiral/bb-browser), [browser-use](https://github.com/browser-use/browser-use), [OpenCLI](https://github.com/jackwener/OpenCLI), [GenericAgent](https://github.com/lsdefine/GenericAgent), [pinchtab](https://github.com/pinchtab/pinchtab), [open-codex-computer-use](https://github.com/iFurySt/open-codex-computer-use), and [Scrapling](https://github.com/D4Vinci/Scrapling).
 
 ## License
 
