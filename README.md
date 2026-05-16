@@ -2,9 +2,9 @@
 
 # agentcloak
 
-Agent-native stealth browser -- see, interact, and automate the web.
+Stealth browser for AI agents -- 57 C++ patches, 300-token context, zero config.
 
-You need a browser. Your agents do too.
+Your agents need a browser. This one won't get caught.
 
 [![PyPI](https://img.shields.io/pypi/v/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![Python](https://img.shields.io/pypi/pyversions/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
@@ -19,7 +19,7 @@ You need a browser. Your agents do too.
 
 ## Highlights
 
-- **Accessibility-tree snapshots** -- pages become structured text with `[N]` indexed elements; agents interact by index, not fragile CSS selectors
+- **Pages as structured text** -- every page becomes an accessibility tree with `[N]` indexed elements; agents interact by index, not fragile CSS selectors
 - **CLI + Skill on-demand loading** -- agents call `cloak` via Bash; the Skill lazy-loads at ~300 tokens (vs ~6,000 for MCP tool definitions)
 - **CloakBrowser built-in stealth** -- 57 C++ patches on Chromium, Cloudflare bypass out of the box
 - **Session reuse** -- save/restore login profiles + RemoteBridge to operate your real Chrome browser
@@ -155,6 +155,16 @@ See the full [MCP setup guide](docs/en/guides/mcp-setup.md) for details.
 | **RemoteBridge** | Real browser fingerprint | Operate your own Chrome on another machine |
 
 See the [backends guide](docs/en/guides/backends.md) for configuration details and trade-offs.
+
+## Why agentcloak?
+
+| | agentcloak | Playwright / Puppeteer | Selenium | browser-use |
+|---|---|---|---|---|
+| **Anti-bot stealth** | 57 C++ patches + Cloudflare bypass | None (detected) | None (detected) | Partial (Python patches) |
+| **Agent context cost** | ~300 tokens (Skill on-demand) | N/A (library, not agent tool) | N/A | ~8,000 tokens |
+| **Page addressing** | `[N]` a11y index | CSS selectors | CSS / XPath | Vision + coordinates |
+| **Zero-config daemon** | Auto-starts, seq tracking | Manual setup | Manual setup + driver | Manual setup |
+| **Login reuse** | Profiles + RemoteBridge | Manual cookies | Manual cookies | No |
 
 ## Architecture
 
