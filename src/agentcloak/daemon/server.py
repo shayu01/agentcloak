@@ -318,11 +318,21 @@ async def start(
         try:
             from httpcloak import LocalProxy  # pyright: ignore[reportMissingImports,reportMissingTypeStubs,reportUnknownVariableType]  # noqa: I001
 
-            local_proxy = LocalProxy(  # pyright: ignore[reportUnknownVariableType]
-                port=0, preset="chrome-146", tls_only=True
-            )
+            import cloakbrowser  # pyright: ignore[reportMissingTypeStubs]
+
+            chrome_major = cloakbrowser.CHROMIUM_VERSION.split(".")[0]
+            preset = f"chrome-{chrome_major}"
+            try:
+                local_proxy = LocalProxy(  # pyright: ignore[reportUnknownVariableType]
+                    port=0, preset=preset, tls_only=True
+                )
+            except (ValueError, KeyError):
+                logger.warning("httpcloak_preset_fallback", wanted=preset)
+                local_proxy = LocalProxy(  # pyright: ignore[reportUnknownVariableType]
+                    port=0, preset="chrome-latest", tls_only=True
+                )
             proxy_url = str(local_proxy.proxy_url)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType]
-            logger.info("local_proxy_started", url=proxy_url)
+            logger.info("local_proxy_started", url=proxy_url, preset=preset)
         except ImportError:
             logger.warning(
                 "httpcloak_not_installed",
