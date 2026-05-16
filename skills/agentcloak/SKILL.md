@@ -110,16 +110,30 @@ All actions use `--target N` from the most recent snapshot.
 | `cloak bridge start` / `claim` / `finalize` | RemoteBridge (real browser) |
 | `cloak bridge token` / `--reset` | Show or rotate the persistent bridge auth token |
 
-## Output Format
+## Response Convention
 
-Every command returns JSON on stdout:
+Every command returns JSON on stdout with a consistent envelope:
 
 ```json
 {"ok": true, "seq": 3, "data": {...}}
 {"ok": false, "error": "element_not_found", "hint": "...", "action": "..."}
 ```
 
-`seq` is a monotonic counter for state changes. Error `action` field tells you what to try next. Parse with jq: `cloak snapshot | jq -r '.data.tree_text'`
+`seq` is a monotonic counter for state changes. Error `action` field tells you what to try next.
+
+**Data shapes by operation type:**
+
+| Type | `data` structure | Example |
+|------|-----------------|---------|
+| Single result | `{field1, field2, ...}` | `navigate` → `{url, title, status, seq}` |
+| List | `{<items>: [...], count: N}` | `tab list` → `{tabs: [...], count: 38}` |
+| Action | `{action, seq, <feedback>}` | `click` → `{action: "click", seq: 5, clicked: true}` |
+| Snapshot | `{url, title, tree_text, mode, total_nodes, ...}` | compact tree + metadata |
+
+**MCP tools** strip the envelope — they return only the `data` payload directly (no `ok`/`seq` wrapper).
+
+**CLI** outputs the full envelope as JSON. Parse with jq or Python:
+`cloak snapshot --mode compact | jq -r '.data.tree_text'`
 
 ## Smart Behaviors
 
