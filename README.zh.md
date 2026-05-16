@@ -156,16 +156,6 @@ claude mcp add agentcloak -- agentcloak-mcp
 
 详情参见[后端指南](docs/zh/guides/backends.md)。
 
-## 为什么选 agentcloak？
-
-| | agentcloak | Playwright / Puppeteer | Selenium | browser-use |
-|---|---|---|---|---|
-| **反检测隐身** | CloakBrowser 后端（C++ 补丁 Chromium） | 无（会被检测） | 无（会被检测） | 部分（Python 层补丁） |
-| **Agent 上下文开销** | ~300 tokens（按需加载） | 不适用（库，非 agent 工具） | 不适用 | ~8,000 tokens |
-| **页面寻址方式** | `[N]` 无障碍树索引 | CSS 选择器 | CSS / XPath | 视觉 + 坐标 |
-| **配置成本** | 零配置 daemon，自动启动 | 手动配置 | 手动配置 + 驱动管理 | 手动配置 |
-| **登录态复用** | Profile + RemoteBridge | 手动管理 cookies | 手动管理 cookies | 无 |
-
 ## 架构
 
 ```mermaid

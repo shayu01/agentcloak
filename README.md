@@ -156,16 +156,6 @@ See the full [MCP setup guide](docs/en/guides/mcp-setup.md) for details.
 
 See the [backends guide](docs/en/guides/backends.md) for configuration details and trade-offs.
 
-## Why agentcloak?
-
-| | agentcloak | Playwright / Puppeteer | Selenium | browser-use |
-|---|---|---|---|---|
-| **Anti-bot stealth** | CloakBrowser backend (C++ patched Chromium) | None (detected) | None (detected) | Partial (Python patches) |
-| **Agent context cost** | ~300 tokens (Skill on-demand) | N/A (library, not agent tool) | N/A | ~8,000 tokens |
-| **Page addressing** | `[N]` a11y tree index | CSS selectors | CSS / XPath | Vision + coordinates |
-| **Setup** | Zero-config daemon, auto-starts | Manual setup | Manual setup + driver mgmt | Manual setup |
-| **Login reuse** | Profiles + RemoteBridge | Manual cookies | Manual cookies | No |
-
 ## Architecture
 
 ```mermaid
