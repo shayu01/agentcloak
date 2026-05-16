@@ -1,7 +1,139 @@
 # Remote Bridge
 
-Remote Bridge 允许你控制另一台机器上的真实 Chrome 浏览器 -- 例如从 Linux 服务器操控 Windows 桌面上的 Chrome。浏览器保留其真实指纹、登录会话和已安装的扩展。
+Remote Bridge 让 agentcloak daemon 驱动运行在另一台机器上的真实 Chrome 浏览器——例如 Linux 服务器上的 agent 操控你 Windows 桌面的 Chrome，带上所有登录态、扩展、以及数月正常使用积累出的真实指纹。没有 headless 检测，无需 cookie 来回搬运。
 
-本指南将涵盖 Chrome 扩展安装、多机器网络配置、WebSocket 认证、标签页接管与会话生命周期、mDNS 自动发现，以及连接问题排查。
+## 架构
 
-详细内容将在后续更新中补充。快速概览请参见[后端指南](./backends.md)中的 RemoteBridge 部分。
+```
+┌──────────────────┐   HTTP    ┌──────────────────┐    WS     ┌─────────────────────┐
+│  cloak CLI / MCP │ ────────► │  daemon (Linux)  │ ◄──────►  │  Chrome 扩展          │
+│                  │           │  18765 + /ext WS │           │  (Windows / macOS)  │
+└──────────────────┘           └──────────────────┘           └─────────────────────┘
+```
+
+Chrome 扩展通过 `chrome.debugger` 说 CDP，把 daemon 的每条命令通过 WebSocket 隧道转发。daemon 的 `RemoteBridgeAdapter` 把 Playwright 风格的请求翻译成原始 CDP 命令并通过隧道送出。
+
+对于扩展无法直连 daemon 的网络场景（NAT、防火墙、跨子网），可以跑一个中间 `bridge` 进程做中继。
+
+## 配置步骤
+
+### 1. 安装扩展
+
+在 daemon 所在机器：
+
+```bash
+cloak bridge extension-path
+# /home/you/.local/lib/python3.13/site-packages/agentcloak/bridge/extension
+```
+
+把这个目录复制到 Chrome 所在的机器，然后在 Chrome 里：
+
+1. 打开 `chrome://extensions`
+2. 启用**开发者模式**（右上角开关）
+3. 点击**加载已解压的扩展**，选中扩展目录
+4. 工具栏会出现扩展图标，带红色"未连接"角标
+
+### 2. 连接扩展
+
+点击扩展图标，填入 daemon 地址。扩展会在配置的主机上探测 `18765-18774` 端口，自动连上第一个响应 `/ext` 的 daemon。连接成功后角标转绿。
+
+家庭网络下最简单的配置：
+
+- Linux daemon：`cloak daemon start -b --host 0.0.0.0`（绑定所有接口让 LAN 能访问）
+- 扩展选项：host = Linux 服务器 IP，port = 18765
+
+### 3. 使用 bridge
+
+扩展变绿后，所有常规命令照常工作——只是驱动的是真实浏览器：
+
+```bash
+cloak navigate "https://example.com" --backend bridge
+cloak snapshot                                   # 看到真实页面
+cloak click --target 5                           # 在真实 Chrome 里点击
+```
+
+让 bridge 成为 daemon 默认后端：
+
+```bash
+export AGENTCLOAK_DEFAULT_TIER=remote_bridge
+```
+
+## 标签页接管
+
+bridge 启动时没有被托管的标签页。两种方式把 tab 纳入 agent 控制：
+
+```bash
+# agent 自己开新 tab
+cloak tab new --url "https://github.com"
+
+# 或接管用户已经打开的 tab
+cloak bridge claim --url-pattern "github.com"     # URL 含 "github.com" 的第一个 tab
+cloak bridge claim --tab-id 1234                  # 指定 Chrome tab id
+```
+
+被接管的 tab 会加入名为 **agentcloak** 的蓝色 Chrome tab group，用户能直观地把 agent 控制的 tab 与自己的区分开。
+
+## 会话收尾
+
+agent 完成任务后，用三种模式之一收尾：
+
+```bash
+cloak bridge finalize --mode close         # 关闭所有 agent 托管的 tab
+cloak bridge finalize --mode handoff       # 解除分组，保留 tab
+cloak bridge finalize --mode deliverable   # 重命名分组为 "agentcloak results"（绿色）
+```
+
+按交接意图选择：`close` 用于全自主跑完，`handoff` 用于"接下来用户手动继续"，`deliverable` 用于标记需要用户审阅的结果。
+
+## Bridge 中继模式
+
+NAT 或防火墙让扩展无法直连 daemon 的场景下，跑一个中继：
+
+```bash
+cloak bridge start -b --port 18770
+```
+
+把扩展配置指向中继地址（而非 daemon 地址）。中继把扩展 WebSocket 流量转发到 daemon 的 `/ext` 端点。
+
+## WebSocket 认证
+
+`/ext` 和 `/bridge/ws` 端点接受 Bearer token（daemon 启动时自动生成，打印在日志里，存在 session 文件中）。扩展通过选项 UI 取到它。
+
+- **localhost 连接**绕过认证（你本来就在本机）
+- **远程连接**必须带 `Authorization: Bearer <token>`
+
+重启 daemon 即轮换——每次启动会生成新 token。
+
+## mDNS 自动发现（可选）
+
+装上可选的 `zeroconf` 依赖（`pip install agentcloak[mdns]`），daemon 会在局域网上广播自己为 `_agentcloak._tcp.local`。扩展可以列出可用 daemon，无需手输 IP。
+
+认证 token **绝不**走 mDNS 广播——客户端仍需从 session 文件取。
+
+## Cookie 导出
+
+从真实浏览器拉 cookie 用于脚本或植入 profile：
+
+```bash
+cloak cookies export                   # 全部 domain，JSON 到 stdout
+cloak cookies export --url github.com  # 只一个 domain
+cloak cookies import < cookies.json    # 注入当前上下文
+```
+
+这是把手动登录升级为可复用 profile 的最简单路径——在真实 Chrome 登录、导出、再导入到新的 agentcloak profile。
+
+## 故障排查
+
+```bash
+cloak bridge doctor
+```
+
+这会检查：扩展可达、WebSocket 已连、daemon `/ext` 端点活、扩展最近心跳时间戳。
+
+| 现象 | 第一步 |
+|------|-------|
+| 扩展角标持续红色 | 确认 daemon 用了 `--host 0.0.0.0` 并放行防火墙端口 |
+| `bridge_disconnected` 报错 | 跑 `cloak bridge doctor`；在 `chrome://extensions` 重载扩展 |
+| `navigate` 命令挂起 | Chrome 可能弹了权限框堵住——聚焦 Chrome 窗口处理掉 |
+| 远程 LAN token 不匹配 | 从 `~/.agentcloak/session.json` 重新读 token 粘到扩展选项 |
+| 重启 Chrome 后扩展掉线 | 扩展用了 `chrome.alarms` keepalive 但 Chrome 偶尔挂起 MV3 service worker——点一下扩展图标唤醒 |

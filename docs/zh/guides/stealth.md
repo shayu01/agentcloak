@@ -1,7 +1,139 @@
 # 隐身与反检测
 
-agentcloak 的隐身能力基于 CloakBrowser，一个搭载了 57 个 C++ 修改的补丁版 Chromium 二进制文件，针对指纹识别和机器人检测系统。
+agentcloak 是为主动检测和阻止自动化的站点而设计的。默认后端是 **CloakBrowser**，一个搭载 57 个 C++ 修改的补丁版 Chromium，针对常见指纹向量进行了修改，可选叠加行为拟人化。对 HTTP 流量，**httpcloak** 会把你浏览器的 TLS 指纹匹配上，让原始 `fetch` 调用也像真实 Chrome 发出的。
 
-本指南将涵盖三层隐身架构、Cloudflare Turnstile 绕过、拟人行为模拟、通过 httpcloak 的 TLS 指纹保护，以及如何使用常见检测测试验证隐身配置。
+本指南讲清楚保护了什么、怎么调旋钮、以及如何验证一切都生效了。
 
-详细内容将在后续更新中补充。目前请参见[后端指南](./backends.md)了解 CloakBrowser 配置。
+## 快速开始
+
+默认设置已经用了最强的本地隐身层级：
+
+```bash
+cloak navigate "https://example.com"     # CloakBrowser，v0.2.0 默认 headless
+```
+
+最强反检测的目标站点上，关掉 headless 并打开 humanize：
+
+```toml
+# ~/.agentcloak/config.toml
+[browser]
+headless = false   # 带头模式比 headless 更能通过 bot 检测
+humanize = true    # 拟人化鼠标曲线与打字节奏
+```
+
+然后用 bot 检测基准站点验证（见下方 [验证](#验证)）。
+
+## 三层架构
+
+| 层 | 后端 | 隐身 | 适用场景 |
+|----|------|------|---------|
+| 1（默认） | **CloakBrowser** | 57 C++ 补丁，可带头默认，可选 humanize | 大多数带反爬的站点 |
+| 2（fallback） | **PlaywrightContext** | 无 | 无检测的站点、调试 |
+| 3（real） | **RemoteBridge** | 天然（真实 Chrome） | 用长期用户历史画像的站点 |
+
+通过配置切层：
+
+```toml
+[browser]
+default_tier = "cloak"       # 或 "playwright"、"remote_bridge"
+```
+
+或 env：`AGENTCLOAK_DEFAULT_TIER=cloak`。
+
+## CloakBrowser 修了什么
+
+CloakBrowser 提供的补丁版 Chromium 二进制包含约 49 个 C++ 补丁加驱动层修复。覆盖：
+
+- **`navigator.webdriver`** 在 C++ 层移除（不是 JS 可删的——在 `WebViewImpl` 里打了补丁）
+- **自动化 flag** 剥离（`--enable-automation` / `--enable-blink-features=AutomationControlled` 从不设置）
+- **Canvas / WebGL 指纹**按会话注入噪声
+- **音频指纹**小噪声调制
+- **字体枚举**匹配一份可信的 Windows 安装字体表
+- **WebGPU + GPU 信息**伪装为常见消费级 GPU
+- **平台伪装**：Linux 服务器报告 Windows 指纹模拟典型桌面用户
+- **代理认证**包括带凭证的 SOCKS5（Playwright/Patchright 在这里坏掉）
+- **CDP 痕迹**清理（无 `cdc_` window 属性，无远程调试标记）
+
+二进制在首次使用时自动下载到 `~/.cloakbrowser/`（约 200 MB）。后台进程每小时检查更新。
+
+## Humanize 模式
+
+`humanize = true` 时，每个 action 都长出一层人形行为：
+
+- 鼠标移动从当前位置到目标走贝塞尔曲线，带真实的加减速
+- 键入在按键之间插入微延迟，偶尔有突发/停顿
+- 滚动用平滑加减速而非瞬间跳跃
+- 点击点在目标矩形内抖动，而非死中心
+
+按配置启用：
+
+```toml
+[browser]
+humanize = true
+```
+
+或按 env：`AGENTCLOAK_HUMANIZE=true`。
+
+代价是延迟——action 多花 200-1000 ms。值得在反爬强的站点上，对内部 dashboard 是杀鸡用牛刀。
+
+## Cloudflare Turnstile 绕过
+
+CloakBrowser 自带一个 Manifest V3 扩展，给 `window.screenX` / `screenY` 打补丁，挫败 Cloudflare Turnstile 的显示器位置检查（headless 配置下 Turnstile 失败的最常见原因）。扩展自动加载；无需手动配置。
+
+碰到 Turnstile 挑战时，直接 `cloak wait --selector "[data-testid='success']"`（或站点用的任何成功标识）——大多数挑战几秒内自动通过。
+
+视觉验证码（hCaptcha、滑块）仍需人在回路或付费 solver 服务。
+
+## httpcloak：为 `fetch` 匹配 TLS 指纹
+
+daemon 用 CloakBrowser 时，会通过 [`httpcloak`](https://pypi.org/project/httpcloak/) 启动一个本地 HTTP 代理，用**与捆绑 Chromium 版本匹配的 TLS 指纹**（JA3/JA4 + HTTP/2 帧顺序）重新发出 `cloak fetch` 请求。这避免了经典破绽：Python 的 `urllib`/`httpx` 发出的请求 HTTP 层看似 Chrome，但 TLS 握手暴露了 Python。
+
+```bash
+cloak fetch "https://tls.peet.ws/api/all"
+# 返回的 JA3/JA4 哈希应与相同 major 版本的真实 Chrome 一致
+```
+
+httpcloak 的 preset 自动同步 CloakBrowser 的 `CHROMIUM_VERSION`：
+
+```python
+preset = f"chrome-{chrome_major}"   # 如 "chrome-139"
+LocalProxy(port=0, preset=preset, tls_only=True)
+```
+
+精确 preset 缺失时，daemon 回退到 `chrome-latest` 并打日志告警。代理是 `tls_only=True`，只拦截 HTTPS——纯 HTTP 直连。
+
+未安装 httpcloak 时，`cloak fetch` 仍能用但走纯 httpx（TLS 指纹暴露）。`pip install agentcloak --upgrade` 重装即可。
+
+## 验证
+
+标准 bot 测试页：
+
+```bash
+cloak navigate "https://bot.sannysoft.com" --snapshot
+cloak navigate "https://abrahamjuliot.github.io/creepjs/" --snapshot
+cloak navigate "https://browserleaks.com/canvas" --snapshot
+cloak navigate "https://tls.peet.ws/api/all" --snapshot   # 给 httpcloak / fetch 用
+```
+
+`bot.sannysoft.com` 上你想要一片绿勾；headless 跑时 WebDriver flag 上一些黄色告警可接受（设 `headless = false` 即可清掉）。
+
+`creepjs` 上你想要的指纹稳定性分接近真实浏览器（50-70）。100 反而可疑——过于稳定的指纹看起来像自动化。
+
+`cloak fetch` 的验证：通过 `fetch` 访问 `https://tls.peet.ws/api/all`，再用相同 major 版本的真实 Chrome 访问，`ja4` 哈希应一致。
+
+## 隐身不够时
+
+某些类型的检测需要走 RemoteBridge 真实 Chrome 路线：
+
+- **长期积累的信任**信号（Google 账号 age、cookie 历史）
+- **硬件级指纹**补丁版 headless 伪造不了的（GPU 型号、音频设备列表）
+- **扩展存在**站点能检测的（uBlock、密码管理器）
+
+这些场景下把 daemon 切到 `remote_bridge` 层，驱动你实际桌面的 Chrome。详见 [Remote Bridge 指南](./remote-bridge.md)。
+
+## 常见陷阱
+
+- **难站点上跑 headless**——先试 `headless = false`；许多"加载不动"的站点会立刻通过
+- **headless 服务器没装 Xvfb**——CloakBrowser 会自动启动 Xvfb 但必须先安装（`sudo apt-get install xvfb` 等，见 `cloak doctor`）
+- **httpcloak preset 不匹配**——如果你把 `cloakbrowser` 钉到代理没有的 major 版本，会拿到 `chrome-latest` 回退；通常没事，但用 `tls.peet.ws` 验证一下
+- **遗留的 patchright 配置**——v0.2.0 前的配置用 `default_tier = "patchright"`，改成 `"playwright"` 或 `"cloak"`
