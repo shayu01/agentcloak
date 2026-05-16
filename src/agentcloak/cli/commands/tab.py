@@ -2,28 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 @app.command("list")
 def tab_list() -> None:
     """List all open tabs."""
     client = DaemonClient()
-    result = _run(client.tab_list())
+    result = client.tab_list_sync()
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
@@ -35,7 +28,7 @@ def tab_new(
 ) -> None:
     """Create a new tab, optionally navigating to a URL."""
     client = DaemonClient()
-    result = _run(client.tab_new(url=url))
+    result = client.tab_new_sync(url=url)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
@@ -47,7 +40,7 @@ def tab_close(
 ) -> None:
     """Close a tab by ID."""
     client = DaemonClient()
-    result = _run(client.tab_close(tab_id))
+    result = client.tab_close_sync(tab_id)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
@@ -59,7 +52,7 @@ def tab_switch(
 ) -> None:
     """Switch the active tab."""
     client = DaemonClient()
-    result = _run(client.tab_switch(tab_id))
+    result = client.tab_switch_sync(tab_id)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

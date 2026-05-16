@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, Literal
+
+import orjson
+from mcp.types import ToolAnnotations
+
+from agentcloak.core.errors import AgentBrowserError
+from agentcloak.mcp._format import error_json, format_call, format_envelope
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": True})
+def _error_envelope(error: str, hint: str, action: str) -> str:
+    """Return a local validation error in the same shape as a daemon error."""
+    return orjson.dumps({"error": error, "hint": hint, "action": action}).decode()
+
+
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_status(
         query: Literal["health", "cdp_endpoint"] = "health",
     ) -> str:
@@ -32,12 +42,10 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             cdp_endpoint: ws_endpoint URL for CDP tools.
         """
         if query == "cdp_endpoint":
-            result = await bridge.request("GET", "/cdp/endpoint")
-        else:
-            result = await bridge.request("GET", "/health")
-        return bridge.format_result(result)
+            return await format_call(client.cdp_endpoint())
+        return await format_call(client.health())
 
-    @mcp.tool(annotations={"readOnlyHint": False})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_cookies(
         action: Literal["export", "import"] = "export",
         url: str = "",
@@ -61,36 +69,29 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             import: count of imported cookies.
         """
         if action == "export":
-            json_body: dict[str, str] = {}
-            if url:
-                json_body["url"] = url
-            result = await bridge.request(
-                "POST", "/cookies/export", json_body=json_body
-            )
-            return bridge.format_result(result)
+            return await format_call(client.cookies_export(url=url or None))
 
         if action == "import":
             if not cookies_json:
-                return json.dumps(
-                    {
-                        "error": "missing_cookies",
-                        "hint": "cookies_json is required for import",
-                        "action": "pass cookies as JSON array string",
-                    }
+                return _error_envelope(
+                    error="missing_cookies",
+                    hint="cookies_json is required for import",
+                    action="pass cookies as JSON array string",
                 )
             cookies = (
-                json.loads(cookies_json)
+                orjson.loads(cookies_json)
                 if isinstance(cookies_json, str)
                 else cookies_json
             )
-            result = await bridge.request(
-                "POST", "/cookies/import", json_body={"cookies": cookies}
-            )
-            return bridge.format_result(result)
+            return await format_call(client.cookies_import(cookies=cookies))
 
-        return json.dumps({"error": "unknown_action", "hint": f"Unknown: {action}"})
+        return _error_envelope(
+            error="unknown_action",
+            hint=f"Unknown action: {action}",
+            action="use export or import",
+        )
 
-    @mcp.tool(annotations={"destructiveHint": True, "readOnlyHint": False})
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, readOnlyHint=False))
     async def agentcloak_launch(
         tier: str = "",
         profile: str = "",
@@ -112,14 +113,17 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
 
         _, cfg = load_config()
         actual_tier = tier or cfg.default_tier
-        resolved = resolve_tier(actual_tier)
-        stealth = resolved == "cloak"
-        result = await bridge.launch_daemon(
-            headless=True, stealth=stealth, profile=profile
-        )
-        return bridge.format_result(result)
+        # resolve_tier currently maps 'auto' → 'cloak'. We still resolve here so
+        # the response reflects the actual backend the daemon will use.
+        resolve_tier(actual_tier)
 
-    @mcp.tool(annotations={"readOnlyHint": False})
+        try:
+            envelope = await client.launch_daemon(headless=True, profile=profile)
+        except AgentBrowserError as exc:
+            return error_json(exc)
+        return format_envelope(envelope)
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_spell_run(
         name: str,
         args_json: str = "{}",
@@ -138,23 +142,19 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with the spell execution result.
         """
-        parsed_args: dict[str, Any] = json.loads(args_json)
-        result = await bridge.request(
-            "POST", "/spell/run", json_body={"name": name, "args": parsed_args}
-        )
-        return bridge.format_result(result)
+        parsed_args: dict[str, Any] = orjson.loads(args_json)
+        return await format_call(client.spell_run(name=name, args=parsed_args))
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_spell_list() -> str:
         """List all registered spells.
 
         Returns:
             JSON with spells array (site, name, strategy, description).
         """
-        result = await bridge.request("GET", "/spell/list")
-        return bridge.format_result(result)
+        return await format_call(client.spell_list())
 
-    @mcp.tool(annotations={"readOnlyHint": False})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_profile(
         action: Literal["create", "list", "delete"] = "list",
         name: str = "",
@@ -179,81 +179,34 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             create/delete: confirmation.
             create with from_current: {profile, renamed, cookie_count}.
         """
-        from agentcloak.core.config import load_config
-
-        paths, _ = load_config()
-        profiles_dir = paths.profiles_dir
-        profiles_dir.mkdir(parents=True, exist_ok=True)
-
+        # Profile CRUD goes through the daemon API so name validation, path
+        # traversal guards, and the from-current cookie writer all live in
+        # ``ProfileService`` (one implementation, not three).
         if action == "list":
-            names = sorted(d.name for d in profiles_dir.iterdir() if d.is_dir())
-            return json.dumps({"profiles": names, "count": len(names)})
+            return await format_call(client.profile_list())
 
         if not name:
-            return json.dumps(
-                {
-                    "error": "missing_name",
-                    "hint": "Profile name is required for create/delete",
-                    "action": "provide a name parameter",
-                }
+            return _error_envelope(
+                error="missing_name",
+                hint="Profile name is required for create/delete",
+                action="provide a name parameter",
             )
 
-        from agentcloak.core.types import PROFILE_NAME_RE
-
-        if not PROFILE_NAME_RE.match(name):
-            return json.dumps(
-                {
-                    "error": "invalid_profile_name",
-                    "hint": f"Profile name '{name}' is not valid",
-                    "action": "use lowercase alphanumeric and hyphens"
-                    ", e.g. 'work' or 'dev-testing'",
-                }
-            )
-
-        if action == "create" and from_current:
-            result = await bridge.request(
-                "POST", "/profile/create-from-current", json_body={"name": name}
-            )
-            return bridge.format_result(result)
-
-        profile_path = profiles_dir / name
         if action == "create":
-            if profile_path.exists():
-                return json.dumps(
-                    {
-                        "error": "profile_exists",
-                        "hint": f"Profile '{name}' already exists",
-                        "action": "use a different name or delete first",
-                    }
-                )
-            profile_path.mkdir(parents=True)
-            return json.dumps({"created": name})
+            if from_current:
+                return await format_call(client.profile_create_from_current(name=name))
+            return await format_call(client.profile_create(name=name))
 
         if action == "delete":
-            if not profile_path.resolve().is_relative_to(profiles_dir.resolve()):
-                return json.dumps(
-                    {
-                        "error": "invalid_profile_path",
-                        "hint": "Profile path escapes profiles directory",
-                        "action": "use a simple profile name without path separators",
-                    }
-                )
-            if not profile_path.exists():
-                return json.dumps(
-                    {
-                        "error": "profile_not_found",
-                        "hint": f"Profile '{name}' does not exist",
-                        "action": "use agentcloak_profile(action='list')",
-                    }
-                )
-            import shutil
+            return await format_call(client.profile_delete(name=name))
 
-            shutil.rmtree(profile_path)
-            return json.dumps({"deleted": name})
+        return _error_envelope(
+            error="unknown_action",
+            hint=f"Unknown: {action}",
+            action="use create, list, or delete",
+        )
 
-        return json.dumps({"error": "unknown_action", "hint": f"Unknown: {action}"})
-
-    @mcp.tool(annotations={"readOnlyHint": False})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_tab(
         action: Literal["list", "new", "close", "switch"] = "list",
         tab_id: int = -1,
@@ -279,129 +232,78 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             switch: new active tab info.
         """
         if action == "list":
-            result = await bridge.request("GET", "/tabs")
-            return bridge.format_result(result)
+            return await format_call(client.tab_list())
 
         if action == "new":
-            json_body: dict[str, Any] = {}
-            if url:
-                json_body["url"] = url
-            result = await bridge.request("POST", "/tab/new", json_body=json_body)
-            return bridge.format_result(result)
+            return await format_call(client.tab_new(url=url or None))
 
         if action == "close":
             if tab_id < 0:
-                return json.dumps(
-                    {
-                        "error": "missing_tab_id",
-                        "hint": "tab_id is required for close action",
-                        "action": "provide a valid tab_id",
-                    }
+                return _error_envelope(
+                    error="missing_tab_id",
+                    hint="tab_id is required for close action",
+                    action="provide a valid tab_id",
                 )
-            result = await bridge.request(
-                "POST", "/tab/close", json_body={"tab_id": tab_id}
-            )
-            return bridge.format_result(result)
+            return await format_call(client.tab_close(tab_id))
 
         if action == "switch":
             if tab_id < 0:
-                return json.dumps(
-                    {
-                        "error": "missing_tab_id",
-                        "hint": "tab_id is required for switch action",
-                        "action": "provide a valid tab_id",
-                    }
+                return _error_envelope(
+                    error="missing_tab_id",
+                    hint="tab_id is required for switch action",
+                    action="provide a valid tab_id",
                 )
-            result = await bridge.request(
-                "POST", "/tab/switch", json_body={"tab_id": tab_id}
-            )
-            return bridge.format_result(result)
+            return await format_call(client.tab_switch(tab_id))
 
-        return json.dumps(
-            {
-                "error": "unknown_action",
-                "hint": f"Unknown tab action: {action}",
-                "action": "use list, new, close, or switch",
-            }
+        return _error_envelope(
+            error="unknown_action",
+            hint=f"Unknown tab action: {action}",
+            action="use list, new, close, or switch",
         )
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_doctor() -> str:
         """Run diagnostic checks on agentcloak installation.
 
-        Checks Python version, CloakBrowser status,
-        daemon connectivity, and configuration.
+        Runs the same probes the CLI ``doctor`` command runs (Python version,
+        required packages, CloakBrowser binary, daemon connectivity) so both
+        surfaces stay in sync. The shared logic lives in
+        :class:`DiagnosticService`.
 
         Returns:
             JSON with diagnostic checks array.
         """
-        import sys
+        from agentcloak.core.config import load_config
+        from agentcloak.daemon.services import DiagnosticService
 
-        from agentcloak.core.config import load_config, resolve_tier
+        paths, cfg = load_config()
+        diagnostic = DiagnosticService()
+        report = diagnostic.doctor(data_dir=paths.root)
 
-        checks: list[dict[str, Any]] = []
-
-        checks.append(
-            {
-                "name": "python_version",
-                "ok": sys.version_info >= (3, 12),
-                "value": sys.version,
-            }
-        )
-
+        # MCP-specific addition: probe the daemon via the shared client.
         try:
-            import cloakbrowser as _
-
-            checks.append(
+            await client.health()
+            report["checks"].append(
                 {
-                    "name": "cloakbrowser",
+                    "name": "daemon",
                     "ok": True,
-                    "hint": "CloakBrowser available — default backend",
+                    "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
+                    "hint": "",
                 }
             )
-        except ImportError:
-            checks.append(
-                {
-                    "name": "cloakbrowser",
-                    "ok": False,
-                    "hint": "Not installed — pip install agentcloak[stealth]",
-                }
-            )
-
-        _, cfg = load_config()
-        resolved = resolve_tier(cfg.default_tier)
-        checks.append(
-            {
-                "name": "default_tier",
-                "value": f"{cfg.default_tier} → {resolved}",
-            }
-        )
-
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                base = f"http://{cfg.daemon_host}:{cfg.daemon_port}"
-                resp = await client.get(f"{base}/health")
-                checks.append(
-                    {
-                        "name": "daemon",
-                        "ok": resp.status_code == 200,
-                        "value": f"{cfg.daemon_host}:{cfg.daemon_port}",
-                    }
-                )
-        except Exception:
-            checks.append(
+        except AgentBrowserError:
+            report["checks"].append(
                 {
                     "name": "daemon",
                     "ok": False,
-                    "value": "not running",
+                    "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
+                    "hint": "run 'agentcloak daemon start' to launch",
                 }
             )
+        report["healthy"] = all(c["ok"] for c in report["checks"])
+        return orjson.dumps(report).decode()
 
-        return json.dumps({"checks": checks})
-
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_resume() -> str:
         """Get session resume snapshot for recovering context after restart.
 
@@ -413,5 +315,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with url, title, tabs, recent_actions, capture_active,
             stealth_tier, and timestamp.
         """
-        result = await bridge.request("GET", "/resume")
-        return bridge.format_result(result)
+        return await format_call(client.resume())

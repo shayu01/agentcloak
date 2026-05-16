@@ -2,21 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer(invoke_without_command=True)
-
-
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
 
 
 @app.callback(invoke_without_command=True)
@@ -36,7 +29,11 @@ def do_wait(
         None, "--js", help="JS expression that must return truthy."
     ),
     ms: int | None = typer.Option(None, "--ms", help="Milliseconds to sleep."),
-    timeout: int = typer.Option(30000, "--timeout", help="Timeout in milliseconds."),
+    timeout: int | None = typer.Option(
+        None,
+        "--timeout",
+        help="Timeout in milliseconds (default: config.action_timeout).",
+    ),
     state: str = typer.Option(
         "visible",
         "--state",
@@ -63,13 +60,11 @@ def do_wait(
         raise typer.Exit(2)
 
     client = DaemonClient()
-    result = _run(
-        client.wait(
-            condition=condition,
-            value=value,
-            timeout=timeout,
-            state=state,
-        )
+    result = client.wait_sync(
+        condition=condition,
+        value=value,
+        timeout=timeout,
+        state=state,
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))

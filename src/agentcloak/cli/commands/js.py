@@ -2,21 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
-
-
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
 
 
 @app.command("evaluate")
@@ -28,7 +21,7 @@ def js_evaluate(
 ) -> None:
     """Evaluate JavaScript in the page context."""
     client = DaemonClient()
-    result = _run(client.evaluate(code, world=world))
+    result = client.evaluate_sync(code, world=world)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

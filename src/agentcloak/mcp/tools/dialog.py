@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_dialog(
         kind: Literal["status", "accept", "dismiss"] = "status",
         text: str = "",
@@ -34,10 +38,6 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with dialog info (type, message) or handled status.
         """
         if kind == "status":
-            result = await bridge.request("GET", "/dialog/status")
-        else:
-            body = {"action": kind}
-            if text and kind == "accept":
-                body["text"] = text
-            result = await bridge.request("POST", "/dialog/handle", json_body=body)
-        return bridge.format_result(result)
+            return await format_call(client.dialog_status())
+        reply = text if text and kind == "accept" else None
+        return await format_call(client.dialog_handle(kind, text=reply))

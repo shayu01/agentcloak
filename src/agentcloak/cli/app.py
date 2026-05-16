@@ -203,5 +203,10 @@ def main() -> None:
     try:
         app()
     except AgentBrowserError as exc:
+        # We've already serialised the error envelope to stdout via
+        # ``output_error``. Use ``sys.exit`` rather than ``raise typer.Exit
+        # from exc`` so Python doesn't dump the original exception chain to
+        # stderr — agents already have the structured envelope they need
+        # and the traceback would just burn ~800 tokens per failure.
         output_error(exc)
-        raise typer.Exit(1) from exc
+        sys.exit(1)

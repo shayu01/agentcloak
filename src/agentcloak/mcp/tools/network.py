@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": True})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_network(since: str = "0") -> str:
         """List captured network requests since a given seq number.
 
@@ -26,5 +30,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with requests array (method, url, status, resource_type) and count.
         """
-        result = await bridge.request("GET", "/network", params={"since": since})
-        return bridge.format_result(result)
+        return await format_call(client.network(since=since))

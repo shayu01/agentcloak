@@ -1,6 +1,6 @@
 [project]
 name = "agentcloak"
-version = "0.1.0"
+version = "0.2.0"
 description = "Browser automation toolkit for AI agents — CLI + MCP dual interface, multi-backend stealth, remote bridge"
 requires-python = ">=3.12"
 license = "MIT"
@@ -24,7 +24,11 @@ dependencies = [
     "typer>=0.15",
     "orjson>=3.10",
     "structlog>=24.0",
-    "aiohttp>=3.9",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "starlette>=0.40",
+    "websockets>=12.0",
     "cloakbrowser>=0.3",
     "httpx>=0.27",
     "httpcloak>=1.6",

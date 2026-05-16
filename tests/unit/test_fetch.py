@@ -6,16 +6,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import orjson
 import pytest
-from aiohttp import web
-from aiohttp.test_utils import TestClient, TestServer
+from fastapi.testclient import TestClient
 
 from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.errors import BackendError, BrowserTimeoutError
 from agentcloak.core.seq import RingBuffer, SeqCounter
-from agentcloak.daemon.middleware import error_middleware
-from agentcloak.daemon.routes import setup_routes
+from agentcloak.daemon.app import create_app
 
 _HTTPX_CLIENT = "agentcloak.browser.playwright_ctx.httpx.AsyncClient"
 
@@ -107,7 +104,7 @@ def _cookie(name: str, value: str, domain: str) -> dict[str, str]:
     }
 
 
-class TestPatchrightFetch:
+class TestPlaywrightFetch:
     """Tests for PlaywrightContext.fetch() method."""
 
     @pytest.mark.asyncio
@@ -250,7 +247,7 @@ class TestFetchRoute:
     """Tests for the POST /fetch daemon route."""
 
     @pytest.fixture
-    async def client(self) -> Any:
+    def client(self) -> Any:
         page = _make_page(
             cookies=[
                 _cookie("token", "xyz", ".example.com"),
@@ -258,70 +255,59 @@ class TestFetchRoute:
         )
         ctx = _make_ctx(page=page)
 
-        app = web.Application(middlewares=[error_middleware])
-        app["browser_ctx"] = ctx
-        setup_routes(app)
-        async with TestClient(TestServer(app)) as c:
+        app = create_app()
+        app.state.browser_ctx = ctx
+        with TestClient(app) as c:
             yield c
 
-    @pytest.mark.asyncio
-    async def test_fetch_route_success(self, client: TestClient) -> None:
+    def test_fetch_route_success(self, client: TestClient) -> None:
         fake_resp = _fake_httpx_response(text='{"d": 1}')
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
-            resp = await client.post(
+            resp = client.post(
                 "/fetch",
-                data=orjson.dumps({"url": "https://api.example.com/data"}),
-                headers={"Content-Type": "application/json"},
+                json={"url": "https://api.example.com/data"},
             )
 
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["status"] == 200
         assert data["seq"] >= 1
 
-    @pytest.mark.asyncio
-    async def test_fetch_route_with_method_and_body(self, client: TestClient) -> None:
+    def test_fetch_route_with_method_and_body(self, client: TestClient) -> None:
         fake_resp = _fake_httpx_response(status_code=201)
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
-            resp = await client.post(
+            resp = client.post(
                 "/fetch",
-                data=orjson.dumps(
-                    {
-                        "url": "https://api.example.com/post",
-                        "method": "POST",
-                        "body": '{"key": "val"}',
-                    }
-                ),
-                headers={"Content-Type": "application/json"},
+                json={
+                    "url": "https://api.example.com/post",
+                    "method": "POST",
+                    "body": '{"key": "val"}',
+                },
             )
 
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["status"] == 201
 
-    @pytest.mark.asyncio
-    async def test_fetch_route_with_headers(self, client: TestClient) -> None:
+    def test_fetch_route_with_headers(self, client: TestClient) -> None:
         fake_resp = _fake_httpx_response()
         cls_mock, _ = _mock_httpx(fake_resp)
 
         with patch(_HTTPX_CLIENT, cls_mock):
-            resp = await client.post(
+            resp = client.post(
                 "/fetch",
-                data=orjson.dumps(
-                    {
-                        "url": "https://api.example.com",
-                        "headers": {"Authorization": "Bearer t"},
-                    }
-                ),
-                headers={"Content-Type": "application/json"},
+                json={
+                    "url": "https://api.example.com",
+                    "headers": {"Authorization": "Bearer t"},
+                },
             )
 
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True

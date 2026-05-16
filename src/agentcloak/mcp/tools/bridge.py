@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
+
+import orjson
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": False})
+def _error_envelope(error: str, hint: str, action: str) -> str:
+    """Return a local validation error in the same shape as a daemon error."""
+    return orjson.dumps({"error": error, "hint": hint, "action": action}).decode()
+
+
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_bridge(
         action: Literal["claim", "finalize"] = "claim",
         tab_id: int = -1,
@@ -44,41 +53,31 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             finalize: {mode, tabsAffected}.
         """
         if action == "claim":
-            json_body: dict[str, Any] = {}
-            if tab_id >= 0:
-                json_body["tab_id"] = tab_id
-            if url_pattern:
-                json_body["url_pattern"] = url_pattern
-            if not json_body:
-                return json.dumps(
-                    {
-                        "error": "missing_target",
-                        "hint": "Provide tab_id or url_pattern to claim a tab",
-                        "action": "set tab_id or url_pattern parameter",
-                    }
+            if tab_id < 0 and not url_pattern:
+                return _error_envelope(
+                    error="missing_target",
+                    hint="Provide tab_id or url_pattern to claim a tab",
+                    action="set tab_id or url_pattern parameter",
                 )
-            result = await bridge.request("POST", "/bridge/claim", json_body=json_body)
-            return bridge.format_result(result)
+            return await format_call(
+                client.bridge_claim(
+                    tab_id=tab_id if tab_id >= 0 else None,
+                    url_pattern=url_pattern or None,
+                )
+            )
 
         if action == "finalize":
             valid_modes = ("close", "handoff", "deliverable")
             if mode not in valid_modes:
-                return json.dumps(
-                    {
-                        "error": "invalid_mode",
-                        "hint": f"Mode must be one of: {', '.join(valid_modes)}",
-                        "action": "use close, handoff, or deliverable",
-                    }
+                return _error_envelope(
+                    error="invalid_mode",
+                    hint=f"Mode must be one of: {', '.join(valid_modes)}",
+                    action="use close, handoff, or deliverable",
                 )
-            result = await bridge.request(
-                "POST", "/bridge/finalize", json_body={"mode": mode}
-            )
-            return bridge.format_result(result)
+            return await format_call(client.bridge_finalize(mode=mode))
 
-        return json.dumps(
-            {
-                "error": "unknown_action",
-                "hint": f"Unknown bridge action: {action}",
-                "action": "use claim or finalize",
-            }
+        return _error_envelope(
+            error="unknown_action",
+            hint=f"Unknown bridge action: {action}",
+            action="use claim or finalize",
         )

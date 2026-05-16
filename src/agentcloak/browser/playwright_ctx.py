@@ -1,4 +1,16 @@
-"""PlaywrightContext — browser backend using standard Playwright."""
+"""PlaywrightContext — browser backend implemented on top of BrowserContextBase.
+
+The class only implements the small set of atomic methods declared by the base
+class (``_navigate_impl``, ``_click_impl``, ``_get_ax_tree`` etc.). The
+orchestrators (``action()``, ``snapshot()``, ``action_batch()``, ``wait()``,
+``upload()``, ``fetch()``) all live in ``BrowserContextBase``.
+
+What stays here:
+- Playwright-specific event listeners (network, dialog, framenavigated, etc.)
+- Multi-tab bookkeeping (pages keyed by tab_id)
+- CDP-driven element resolution (backendDOMNodeId → data-cloak-ref marker)
+- Backend factory ``launch_playwright`` and the ``screenshot_to_base64`` helper
+"""
 
 from __future__ import annotations
 
@@ -15,11 +27,10 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
-from agentcloak.browser._snapshot_builder import FrameData, build_snapshot
+from agentcloak.browser._snapshot_builder import FrameData
+from agentcloak.browser.base import BrowserContextBase
 from agentcloak.browser.state import (
-    ElementRef,
     FrameInfo,
-    PageSnapshot,
     PendingDialog,
     TabInfo,
 )
@@ -33,11 +44,15 @@ from agentcloak.core.errors import (
 from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 from agentcloak.core.types import StealthTier
 
-__all__ = ["PlaywrightContext"]
+__all__ = ["PlaywrightContext", "launch_playwright", "screenshot_to_base64"]
 
 logger = structlog.get_logger()
 
 _SNAP_CHROMIUM = "/snap/chromium/current/usr/lib/chromium-browser/chrome"
+
+
+def screenshot_to_base64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
 
 
 def _find_free_port() -> int:
@@ -62,7 +77,7 @@ def _find_chromium() -> str | None:
     return None
 
 
-class PlaywrightContext:
+class PlaywrightContext(BrowserContextBase):
     """BrowserContext implementation backed by Playwright."""
 
     def __init__(
@@ -78,38 +93,31 @@ class PlaywrightContext:
         capture_store: CaptureStore | None = None,
         cdp_port: int | None = None,
     ) -> None:
+        super().__init__(
+            seq_counter=seq_counter,
+            ring_buffer=ring_buffer,
+            capture_store=capture_store,
+        )
+
         # Multi-tab state: map tab_id -> Page, initial page is tab 0
         self._tabs: dict[int, Any] = {0: page}
         self._active_tab: int = 0
         self._next_tab_id: int = 1
         self._browser = browser
         self._playwright = playwright
-        self._seq_counter = seq_counter
-        self._ring_buffer = ring_buffer
         self._browser_context = browser_context
         self._proxy_url = proxy_url
-        self._capture_store = capture_store or CaptureStore()
-        self._backend_node_map: dict[int, int] = {}
-        self._selector_map: dict[int, ElementRef] = {}
         self._pending_captures: set[asyncio.Task[None]] = set()
         self._cdp_port: int | None = cdp_port
-        # Progressive loading cache (R4)
-        self._cached_lines: list[tuple[int, str, int | None]] = []
-        self._cached_mode: str = ""
-        # R0: Proactive State Feedback — pending network request counter
-        self._pending_request_count: int = 0
-        # R1: Dialog handling — pending dialog state
-        self._pending_dialog: PendingDialog | None = None
-        self._dialog_object: Any = None  # raw Playwright Dialog for accept/dismiss
-        # R5: Frame switching — active frame (None = main frame)
-        self._active_frame: Any = None
-        # R0: Proactive feedback event capture — per-action transient state
-        self._last_navigation_event: dict[str, str] | None = None
-        self._last_new_tab_event: dict[str, Any] | None = None
-        self._last_download_event: dict[str, str] | None = None
-        self._last_auto_dialog: dict[str, str] | None = None
+        # Playwright Dialog object retained so dialog_handle can accept/dismiss.
+        self._dialog_object: Any = None
+
         self._setup_network_listeners(page)
         self._setup_feedback_listeners(page)
+
+    # ------------------------------------------------------------------
+    # Active page / target frame
+    # ------------------------------------------------------------------
 
     @property
     def _page(self) -> Any:
@@ -123,12 +131,30 @@ class PlaywrightContext:
             return self._active_frame
         return self._page
 
+    @property
+    def stealth_tier(self) -> StealthTier:
+        return StealthTier.PLAYWRIGHT
+
+    async def _get_page_info(self) -> tuple[str, str]:
+        try:
+            url = str(self._page.url)
+        except Exception:
+            url = ""
+        try:
+            title = str(await self._page.title())
+        except Exception:
+            title = ""
+        return url, title
+
+    # ------------------------------------------------------------------
+    # Event listeners
+    # ------------------------------------------------------------------
+
     def _setup_network_listeners(self, page: Any | None = None) -> None:
         target = page if page is not None else self._page
         target.on("response", self._on_response)
 
     def _setup_feedback_listeners(self, page: Any | None = None) -> None:
-        """Register R0 proactive feedback event listeners on a page."""
         target = page if page is not None else self._page
         target.on("request", self._on_request_start)
         target.on("requestfinished", self._on_request_end)
@@ -147,7 +173,6 @@ class PlaywrightContext:
     def _on_dialog(self, dialog: Any) -> None:
         dtype = dialog.type
         if dtype in ("alert", "beforeunload"):
-            # Auto-accept, record in transient state
             self._last_auto_dialog = {
                 "type": dtype,
                 "message": dialog.message,
@@ -161,7 +186,6 @@ class PlaywrightContext:
                 message=dialog.message[:100],
             )
         else:
-            # confirm / prompt — store as pending for agent
             self._pending_dialog = PendingDialog(
                 dialog_type=dtype,
                 message=dialog.message,
@@ -176,7 +200,6 @@ class PlaywrightContext:
             )
 
     def _on_frame_navigated(self, frame: Any) -> None:
-        # Only track main frame navigations for proactive feedback
         try:
             if frame == self._page.main_frame:
                 self._last_navigation_event = {
@@ -190,10 +213,6 @@ class PlaywrightContext:
             self._last_download_event = {
                 "filename": download.suggested_filename,
             }
-
-    @property
-    def capture_store(self) -> CaptureStore:
-        return self._capture_store
 
     def _on_response(self, response: Any) -> None:
         try:
@@ -276,15 +295,11 @@ class PlaywrightContext:
         except Exception:
             pass
 
-    @property
-    def seq(self) -> int:
-        return self._seq_counter.value
+    # ------------------------------------------------------------------
+    # Atomic: navigate / ax tree / page snapshots
+    # ------------------------------------------------------------------
 
-    @property
-    def stealth_tier(self) -> StealthTier:
-        return StealthTier.PLAYWRIGHT
-
-    async def navigate(self, url: str, *, timeout: float = 30.0) -> dict[str, Any]:
+    async def _navigate_impl(self, url: str, *, timeout: float) -> dict[str, Any]:
         try:
             resp = await self._page.goto(
                 url, timeout=timeout * 1000, wait_until="domcontentloaded"
@@ -302,57 +317,14 @@ class PlaywrightContext:
                 action="check URL and network connectivity",
             ) from exc
 
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(seq=new_seq, kind="navigate", data={"url": url})
-        )
-        # R6: audit logging for navigation
-        logger.info(
-            "audit_action",
-            action="navigate",
-            seq=new_seq,
-            url=url,
-        )
-
         status = resp.status if resp else 0
         return {
             "url": self._page.url,
             "title": await self._page.title(),
             "status": status,
-            "seq": new_seq,
         }
 
-    async def snapshot(
-        self,
-        *,
-        mode: str = "accessible",
-        max_nodes: int = 0,
-        max_chars: int = 0,
-        focus: int = 0,
-        offset: int = 0,
-        frames: bool = False,
-    ) -> PageSnapshot:
-        if mode in ("accessible", "compact"):
-            return await self._build_snapshot(
-                mode=mode,
-                max_nodes=max_nodes,
-                max_chars=max_chars,
-                focus=focus,
-                offset=offset,
-                frames=frames,
-            )
-        if mode == "dom":
-            return await self._snapshot_dom()
-        if mode == "content":
-            return await self._snapshot_content()
-        raise BackendError(
-            error="invalid_snapshot_mode",
-            hint=f"Unknown mode: {mode}",
-            action="use one of: accessible, compact, dom, content",
-        )
-
-    async def _get_ax_tree(self) -> list[dict[str, Any]]:
-        """Fetch the full accessibility tree via CDP with Shadow DOM pierce."""
+    async def _get_ax_tree(self, *, frames: bool = False) -> list[dict[str, Any]]:
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
             tree = await cdp.send("Accessibility.getFullAXTree", {"pierce": True})
@@ -360,46 +332,7 @@ class PlaywrightContext:
             await cdp.detach()
         return tree.get("nodes", [])
 
-    # ── Unified snapshot builder (R7: DRY merge of accessible + compact) ──
-
-    async def _build_snapshot(
-        self,
-        *,
-        mode: str = "accessible",
-        max_nodes: int = 0,
-        max_chars: int = 0,
-        focus: int = 0,
-        offset: int = 0,
-        frames: bool = False,
-    ) -> PageSnapshot:
-        """Build accessible or compact snapshot via shared builder."""
-        raw_nodes = await self._get_ax_tree()
-
-        # Gather child frame AX trees when requested
-        frame_trees: list[FrameData] | None = None
-        if frames:
-            frame_trees = await self._get_child_frame_trees()
-
-        result = build_snapshot(
-            raw_nodes,
-            mode=mode,
-            max_nodes=max_nodes,
-            max_chars=max_chars,
-            focus=focus,
-            offset=offset,
-            seq=self._seq_counter.value,
-            url=self._page.url,
-            title=await self._page.title(),
-            frame_trees=frame_trees,
-        )
-        self._backend_node_map = result.backend_node_map
-        self._selector_map = result.selector_map
-        self._cached_lines = result.cached_lines
-        self._cached_mode = mode
-        return result.snapshot
-
     async def _get_child_frame_trees(self) -> list[FrameData]:
-        """Fetch AX trees from child frames (one level of iframes)."""
         child_frames: list[FrameData] = []
         for frame in self._page.frames:
             if frame == self._page.main_frame:
@@ -414,10 +347,8 @@ class PlaywrightContext:
                     await cdp.detach()
                 nodes = tree.get("nodes", [])
                 if nodes:
-                    # Use frame name, falling back to URL fragment or frame object name
                     frame_name = frame.name or ""
                     frame_url = frame.url or ""
-                    # Generate a stable frame ID from the name and URL
                     frame_id = frame_name or frame_url or str(id(frame))
                     child_frames.append(
                         FrameData(
@@ -436,49 +367,29 @@ class PlaywrightContext:
                 )
         return child_frames
 
-    async def _snapshot_dom(self) -> PageSnapshot:
+    async def _snapshot_dom_impl(self) -> str:
         html = await self._page.content()
         truncated = html[:100_000]
         if len(html) > 100_000:
             truncated += "\n[...truncated...]"
-        return PageSnapshot(
-            seq=self._seq_counter.value,
-            url=self._page.url,
-            title=await self._page.title(),
-            mode="dom",
-            tree_text=truncated,
-        )
+        return truncated
 
-    async def _snapshot_content(self) -> PageSnapshot:
+    async def _snapshot_content_impl(self) -> str:
         text: str = await self._page.evaluate("document.body?.innerText || ''")
-        return PageSnapshot(
-            seq=self._seq_counter.value,
-            url=self._page.url,
-            title=await self._page.title(),
-            mode="content",
-            tree_text=text,
-        )
+        return text
+
+    async def _network_entries(self, *, since_seq: int) -> list[dict[str, Any]]:
+        # Playwright back-end records via on_response → ring buffer; base class
+        # already pulls them. Nothing extra here.
+        return []
+
+    # ------------------------------------------------------------------
+    # Element resolution
+    # ------------------------------------------------------------------
 
     async def _resolve_element(self, index: int) -> Any:
-        """Resolve a selector_map index to a Playwright ElementHandle.
-
-        Uses backendDOMNodeId from the last snapshot for exact matching.
-        Falls back to role+name locator if CDP resolve fails.
-        """
-        if not self._selector_map:
-            raise ElementNotFoundError(
-                error="no_snapshot",
-                hint="No snapshot taken yet — selector_map is empty",
-                action="run 'snapshot' first to populate the selector_map",
-            )
-        if index not in self._selector_map:
-            count = len(self._selector_map)
-            raise ElementNotFoundError(
-                error="element_not_found",
-                hint=f"Index [{index}] not in selector_map ({count} entries)",
-                action="run 'snapshot' to refresh the "
-                "selector_map, then retry with a valid index",
-            )
+        """Resolve a selector_map index to a Playwright ElementHandle/Locator."""
+        self._require_snapshot(index)
 
         backend_node_id = self._backend_node_map.get(index)
         if backend_node_id is not None:
@@ -524,7 +435,6 @@ class PlaywrightContext:
         return locator.first
 
     async def _resolve_by_role(self, index: int) -> Any:
-        """Fallback: resolve via role + name from cached selector_map."""
         ref = self._selector_map[index]
         role_name = ref.role.lower()
 
@@ -576,141 +486,26 @@ class PlaywrightContext:
             action="the page may have changed — run 'snapshot' to refresh, then retry",
         )
 
-    def _collect_feedback(self, result: dict[str, Any]) -> None:
-        """R0: Attach proactive state feedback fields to action result."""
-        if self._pending_request_count > 0:
-            result["pending_requests"] = self._pending_request_count
-        if self._pending_dialog is not None:
-            result["dialog"] = {
-                "type": self._pending_dialog.dialog_type,
-                "message": self._pending_dialog.message,
-            }
-            if self._pending_dialog.default_value:
-                result["dialog"]["default_value"] = self._pending_dialog.default_value
-        if self._last_navigation_event is not None:
-            result["navigation"] = self._last_navigation_event
-            self._last_navigation_event = None
-        if self._last_new_tab_event is not None:
-            result["new_tab"] = self._last_new_tab_event
-            self._last_new_tab_event = None
-        if self._last_download_event is not None:
-            result["download"] = self._last_download_event
-            self._last_download_event = None
+    # ------------------------------------------------------------------
+    # Atomic: actions
+    # ------------------------------------------------------------------
 
-    def _check_dialog_blocked(self) -> dict[str, Any] | None:
-        """R1: If a pending dialog exists, return blocked error dict."""
-        if self._pending_dialog is not None:
-            d = self._pending_dialog
-            return {
-                "ok": False,
-                "error": "blocked_by_dialog",
-                "seq": self._seq_counter.value,
-                "dialog": {
-                    "type": d.dialog_type,
-                    "message": d.message,
-                    **({"default_value": d.default_value} if d.default_value else {}),
-                },
-                "hint": "A dialog is pending — handle it before continuing",
-                "action": "use 'dialog accept' or 'dialog dismiss'",
-            }
-        return None
-
-    async def action(self, kind: str, target: str, **kw: Any) -> dict[str, Any]:
-        # R1: block if there is a pending dialog
-        blocked = self._check_dialog_blocked()
-        if blocked is not None:
-            return blocked
-
-        pre_url = self._page.url
-        valid_kinds = {
-            "click",
-            "fill",
-            "type",
-            "scroll",
-            "hover",
-            "select",
-            "press",
-            "keydown",
-            "keyup",
-        }
-        if kind not in valid_kinds:
-            raise BackendError(
-                error="invalid_action_kind",
-                hint=f"Unknown action kind: '{kind}'",
-                action=f"use one of: {', '.join(sorted(valid_kinds))}",
-            )
-
-        handler = {
-            "click": self._action_click,
-            "fill": self._action_fill,
-            "type": self._action_type,
-            "scroll": self._action_scroll,
-            "hover": self._action_hover,
-            "select": self._action_select,
-            "press": self._action_press,
-            "keydown": self._action_keydown,
-            "keyup": self._action_keyup,
-        }[kind]
-
-        # R0: reset per-action transient state before executing
-        self._last_navigation_event = None
-        self._last_new_tab_event = None
-        self._last_download_event = None
-
-        result = await handler(target, **kw)
-
-        with contextlib.suppress(Exception):
-            await self._page.wait_for_load_state("domcontentloaded", timeout=2000)
-        with contextlib.suppress(Exception):
-            await self._page.evaluate(
-                "document.querySelectorAll('[data-cloak-ref]')"
-                ".forEach(e=>e.removeAttribute('data-cloak-ref'))"
-            )
-
-        post_url = self._page.url
-        caused_navigation = (
-            post_url != pre_url or self._last_navigation_event is not None
-        )
-
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(
-                seq=new_seq,
-                kind="action",
-                data={"action": kind, "target": target, **kw},
-            )
-        )
-
-        # R6: audit logging for high-risk actions
-        if kind in ("fill", "select"):
-            current_val = kw.get("text") or kw.get("value") or kw.get("label")
-            if current_val is not None:
-                result["current_value"] = str(current_val)
-
-        result["ok"] = True
-        result["seq"] = new_seq
-        result["action"] = kind
-        if caused_navigation:
-            result["caused_navigation"] = True
-            result["new_url"] = post_url
-        # R0: attach proactive state feedback
-        self._collect_feedback(result)
-        return result
-
-    async def _action_click(self, target: str, **kw: Any) -> dict[str, Any]:
-        x = kw.get("x")
-        y = kw.get("y")
-        button = kw.get("button", "left")
-        click_count = kw.get("click_count", 1)
-
+    async def _click_impl(
+        self,
+        *,
+        target: str,
+        x: float | None,
+        y: float | None,
+        button: str,
+        click_count: int,
+    ) -> dict[str, Any]:
         if x is not None and y is not None:
             await self._page.mouse.click(
                 float(x), float(y), button=button, click_count=int(click_count)
             )
             return {"clicked": True, "x": x, "y": y}
 
-        index = int(target) if target else None
-        if index is None:
+        if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
                 hint="click requires a target element",
@@ -720,12 +515,13 @@ class PlaywrightContext:
                 ),
             )
 
+        index = int(target)
         element = await self._resolve_element(index)
         await element.click(button=button, click_count=int(click_count))
         ref = self._get_ref(index)
         return {"clicked": True, "index": index, "element": ref}
 
-    async def _action_fill(self, target: str, **kw: Any) -> dict[str, Any]:
+    async def _fill_impl(self, *, target: str, text: str) -> dict[str, Any]:
         if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
@@ -733,13 +529,14 @@ class PlaywrightContext:
                 action="provide 'target' as '[N]' ref from snapshot",
             )
         index = int(target)
-        text = kw.get("text", "")
         element = await self._resolve_element(index)
         await element.fill(str(text))
         ref = self._get_ref(index)
         return {"filled": True, "index": index, "text": text, "element": ref}
 
-    async def _action_type(self, target: str, **kw: Any) -> dict[str, Any]:
+    async def _type_impl(
+        self, *, target: str, text: str, delay: float
+    ) -> dict[str, Any]:
         if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
@@ -747,17 +544,18 @@ class PlaywrightContext:
                 action="provide 'target' as '[N]' ref from snapshot",
             )
         index = int(target)
-        text = kw.get("text", "")
-        delay = kw.get("delay", 0)
         element = await self._resolve_element(index)
         await element.press_sequentially(str(text), delay=float(delay))
         ref = self._get_ref(index)
         return {"typed": True, "index": index, "text": text, "element": ref}
 
-    async def _action_scroll(self, target: str, **kw: Any) -> dict[str, Any]:
-        direction = kw.get("direction", "down")
-        amount = int(kw.get("amount", 300))
-
+    async def _scroll_impl(
+        self,
+        *,
+        target: str,
+        direction: str,
+        amount: int,
+    ) -> dict[str, Any]:
         delta_x, delta_y = 0, 0
         if direction == "down":
             delta_y = amount
@@ -777,16 +575,18 @@ class PlaywrightContext:
         await self._page.mouse.wheel(delta_x, delta_y)
         return {"scrolled": True, "direction": direction, "amount": amount}
 
-    async def _action_hover(self, target: str, **kw: Any) -> dict[str, Any]:
-        x = kw.get("x")
-        y = kw.get("y")
-
+    async def _hover_impl(
+        self,
+        *,
+        target: str,
+        x: float | None,
+        y: float | None,
+    ) -> dict[str, Any]:
         if x is not None and y is not None:
             await self._page.mouse.move(float(x), float(y))
             return {"hovered": True, "x": x, "y": y}
 
-        index = int(target) if target else None
-        if index is None:
+        if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
                 hint="hover requires a target element",
@@ -796,12 +596,19 @@ class PlaywrightContext:
                 ),
             )
 
+        index = int(target)
         element = await self._resolve_element(index)
         await element.hover()
         ref = self._get_ref(index)
         return {"hovered": True, "index": index, "element": ref}
 
-    async def _action_select(self, target: str, **kw: Any) -> dict[str, Any]:
+    async def _select_impl(
+        self,
+        *,
+        target: str,
+        value: str | None,
+        label: str | None,
+    ) -> dict[str, Any]:
         if not target:
             raise ElementNotFoundError(
                 error="element_not_found",
@@ -809,20 +616,12 @@ class PlaywrightContext:
                 action="provide 'target' as '[N]' ref from snapshot",
             )
         index = int(target)
-        value = kw.get("value")
-        label = kw.get("label")
         element = await self._resolve_element(index)
 
         if value is not None:
-            await element.select_option(value=str(value))
+            await element.select_option(value=value)
         elif label is not None:
-            await element.select_option(label=str(label))
-        else:
-            raise BackendError(
-                error="select_missing_option",
-                hint="select requires 'value' or 'label' parameter",
-                action="provide 'value' (option value) or 'label' (visible text)",
-            )
+            await element.select_option(label=label)
 
         ref = self._get_ref(index)
         return {
@@ -833,14 +632,7 @@ class PlaywrightContext:
             "element": ref,
         }
 
-    async def _action_press(self, target: str, **kw: Any) -> dict[str, Any]:
-        key = kw.get("key", "")
-        if not key:
-            raise BackendError(
-                error="press_missing_key",
-                hint="press requires 'key' parameter",
-                action="provide 'key' (e.g. 'Enter', 'Tab', 'Escape', 'ArrowDown')",
-            )
+    async def _press_impl(self, *, target: str, key: str) -> dict[str, Any]:
         if target:
             index = int(target)
             element = await self._resolve_element(index)
@@ -850,378 +642,107 @@ class PlaywrightContext:
         await self._page.keyboard.press(str(key))
         return {"pressed": True, "key": key}
 
-    async def _action_keydown(self, target: str, **kw: Any) -> dict[str, Any]:
-        key = kw.get("key", "")
-        if not key:
-            raise BackendError(
-                error="keydown_missing_key",
-                hint="keydown requires 'key' parameter",
-                action="provide 'key' (e.g. 'Shift', 'Control', 'Alt')",
-            )
+    async def _keydown_impl(self, *, key: str) -> dict[str, Any]:
         await self._page.keyboard.down(str(key))
         return {"keydown": True, "key": key}
 
-    async def _action_keyup(self, target: str, **kw: Any) -> dict[str, Any]:
-        key = kw.get("key", "")
-        if not key:
-            raise BackendError(
-                error="keyup_missing_key",
-                hint="keyup requires 'key' parameter",
-                action="provide 'key' (e.g. 'Shift', 'Control', 'Alt')",
-            )
+    async def _keyup_impl(self, *, key: str) -> dict[str, Any]:
         await self._page.keyboard.up(str(key))
         return {"keyup": True, "key": key}
 
-    def _get_ref(self, index: int) -> str:
-        """Return a human-readable ref string for an element index."""
-        return f"[{index}]"
-
-    # ── R1: Dialog handling ──
-
-    async def dialog_status(self) -> PendingDialog | None:
-        return self._pending_dialog
-
-    async def dialog_handle(
-        self, action_type: str, *, text: str | None = None
-    ) -> dict[str, Any]:
-        if self._pending_dialog is None:
-            return {"ok": True, "handled": False, "message": "no pending dialog"}
-
-        dialog_info = {
-            "type": self._pending_dialog.dialog_type,
-            "message": self._pending_dialog.message,
-        }
-
-        if self._dialog_object is not None:
-            try:
-                if action_type == "accept":
-                    if text is not None:
-                        await self._dialog_object.accept(text)
-                    else:
-                        await self._dialog_object.accept()
-                else:
-                    await self._dialog_object.dismiss()
-            except Exception as exc:
-                logger.debug("dialog_handle_error", error=str(exc))
-
-        self._pending_dialog = None
-        self._dialog_object = None
-
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(
-                seq=new_seq,
-                kind="dialog",
-                data={"action": action_type, **dialog_info},
+    async def _post_action_cleanup(self) -> None:
+        with contextlib.suppress(Exception):
+            await self._page.wait_for_load_state("domcontentloaded", timeout=2000)
+        with contextlib.suppress(Exception):
+            await self._page.evaluate(
+                "document.querySelectorAll('[data-cloak-ref]')"
+                ".forEach(e=>e.removeAttribute('data-cloak-ref'))"
             )
-        )
-        return {
-            "ok": True,
-            "handled": True,
-            "action": action_type,
-            "dialog": dialog_info,
-            "seq": new_seq,
-        }
 
-    # ── R2: Conditional wait ──
+    # ------------------------------------------------------------------
+    # Atomic: wait
+    # ------------------------------------------------------------------
 
-    async def wait(
+    async def _wait_impl(
         self,
         *,
         condition: str,
-        value: str = "",
-        timeout: int = 30000,
-        state: str = "visible",
+        value: str,
+        timeout: int,
+        state: str,
     ) -> dict[str, Any]:
-        import time
-
-        t0 = time.monotonic()
         target = self._target_frame
 
-        try:
-            if condition == "selector":
-                await target.wait_for_selector(value, state=state, timeout=timeout)
-            elif condition == "url":
-                await self._page.wait_for_url(value, timeout=timeout)
-            elif condition == "load":
-                await self._page.wait_for_load_state(value, timeout=timeout)
-            elif condition == "js":
-                await self._page.wait_for_function(value, timeout=timeout)
-            elif condition == "ms":
-                await asyncio.sleep(int(value) / 1000)
-            else:
-                raise BackendError(
-                    error="invalid_wait_condition",
-                    hint=f"Unknown condition: '{condition}'",
-                    action="use one of: selector, url, load, js, ms",
-                )
-        except Exception as exc:
-            if "timeout" in str(exc).lower():
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                raise BrowserTimeoutError(
-                    error="wait_timeout",
-                    hint=f"Wait condition '{condition}' timed out after {timeout}ms",
-                    action="increase timeout or check the condition",
-                ) from exc
-            if isinstance(exc, BackendError):
-                raise
+        if condition == "selector":
+            await target.wait_for_selector(value, state=state, timeout=timeout)
+        elif condition == "url":
+            await self._page.wait_for_url(value, timeout=timeout)
+        elif condition == "load":
+            await self._page.wait_for_load_state(value, timeout=timeout)
+        elif condition == "js":
+            await self._page.wait_for_function(value, timeout=timeout)
+        elif condition == "ms":
+            await asyncio.sleep(int(value) / 1000)
+        else:
             raise BackendError(
-                error="wait_failed",
+                error="invalid_wait_condition",
+                hint=f"Unknown condition: '{condition}'",
+                action="use one of: selector, url, load, js, ms",
+            )
+
+        return {"condition": condition, "value": value}
+
+    # ------------------------------------------------------------------
+    # Atomic: upload
+    # ------------------------------------------------------------------
+
+    async def _upload_impl(self, index: int, files: list[str]) -> dict[str, Any]:
+        element = await self._resolve_element(index)
+        await element.set_input_files(files)
+        return {"uploaded": True}
+
+    # ------------------------------------------------------------------
+    # Atomic: dialog handle
+    # ------------------------------------------------------------------
+
+    async def _dialog_handle_impl(
+        self, action: str, *, text: str | None = None
+    ) -> dict[str, Any]:
+        if self._dialog_object is None:
+            return {}
+        try:
+            if action == "accept":
+                if text is not None:
+                    await self._dialog_object.accept(text)
+                else:
+                    await self._dialog_object.accept()
+            else:
+                await self._dialog_object.dismiss()
+        except Exception as exc:
+            logger.debug("dialog_handle_error", error=str(exc))
+        self._dialog_object = None
+        return {}
+
+    # ------------------------------------------------------------------
+    # Atomic: evaluate
+    # ------------------------------------------------------------------
+
+    async def _evaluate_impl(self, js: str, *, world: str) -> Any:
+        if world == "main":
+            return await self._evaluate_main_world(js)
+        try:
+            return await self._page.evaluate(js)
+        except Exception as exc:
+            raise BackendError(
+                error="evaluate_failed",
                 hint=str(exc),
-                action="check the wait condition value",
+                action="check JS syntax and page context",
             ) from exc
 
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(
-                seq=new_seq,
-                kind="wait",
-                data={"condition": condition, "value": value},
-            )
-        )
-        return {
-            "ok": True,
-            "action": "wait",
-            "condition": condition,
-            "elapsed_ms": elapsed_ms,
-            "seq": new_seq,
-        }
-
-    # ── R4: File upload ──
-
-    async def upload(self, index: int, files: list[str]) -> dict[str, Any]:
-        element = await self._resolve_element(index)
-        validated: list[str] = []
-        for f in files:
-            p = Path(f)
-            if not p.is_file():
-                raise BackendError(
-                    error="upload_file_not_found",
-                    hint=f"File not found: {f}",
-                    action="check the file path and permissions",
-                )
-            validated.append(str(p.resolve()))
-
-        await element.set_input_files(validated)
-
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(
-                seq=new_seq,
-                kind="upload",
-                data={"index": index, "files": [Path(f).name for f in validated]},
-            )
-        )
-        # R6: audit log
-        logger.info(
-            "audit_action",
-            action="upload",
-            seq=new_seq,
-            files=[Path(f).name for f in validated],
-            ref=f"[{index}]",
-            url=self._page.url,
-        )
-        return {
-            "ok": True,
-            "action": "upload",
-            "ref": f"[{index}]",
-            "files": [Path(f).name for f in validated],
-            "seq": new_seq,
-        }
-
-    # ── R5: Frame switching ──
-
-    async def frame_list(self) -> list[FrameInfo]:
-        frames = self._page.frames
-        result: list[FrameInfo] = []
-        for frame in frames:
-            is_current = frame == (
-                self._active_frame
-                if self._active_frame is not None
-                else self._page.main_frame
-            )
-            is_main = frame == self._page.main_frame
-            fname = frame.name or "(main)" if is_main else frame.name or ""
-            result.append(
-                FrameInfo(
-                    name=fname,
-                    url=frame.url,
-                    is_current=is_current,
-                )
-            )
-        return result
-
-    async def frame_focus(
-        self,
-        *,
-        name: str | None = None,
-        url: str | None = None,
-        main: bool = False,
-    ) -> dict[str, Any]:
-        if main:
-            self._active_frame = None
-            return {
-                "ok": True,
-                "action": "frame_focus",
-                "frame": "(main)",
-                "url": self._page.main_frame.url,
-            }
-
-        target_frame = None
-        if name:
-            target_frame = self._page.frame(name=name)
-        elif url:
-            for frame in self._page.frames:
-                if url in frame.url:
-                    target_frame = frame
-                    break
-
-        if target_frame is None:
-            available = [f.name or f.url[:60] for f in self._page.frames]
-            raise BackendError(
-                error="frame_not_found",
-                hint=f"No frame matching name={name!r} url={url!r}",
-                action=f"available frames: {available}",
-            )
-
-        self._active_frame = target_frame
-        return {
-            "ok": True,
-            "action": "frame_focus",
-            "frame": target_frame.name or "(unnamed)",
-            "url": target_frame.url,
-        }
-
-    async def action_batch(
-        self,
-        actions: list[dict[str, Any]],
-        *,
-        sleep: float = 0.0,
-        settle_timeout: int = 5000,
-    ) -> dict[str, Any]:
-        """Execute a batch of actions with R7 enhancements."""
-        results: list[dict[str, Any]] = []
-        total = len(actions)
-
-        if total == 0:
-            return {"results": [], "completed": 0, "total": 0}
-
-        for i, act in enumerate(actions):
-            kind = act.get("kind", act.get("action", ""))
-            index = act.get("index")
-            target = str(index) if index is not None else act.get("target", "")
-            extra = {
-                k: v
-                for k, v in act.items()
-                if k not in ("kind", "action", "index", "target")
-            }
-
-            # R7: handle 'wait' as batch step
-            if kind == "wait":
-                try:
-                    result = await self.wait(
-                        condition=extra.get("condition", "ms"),
-                        value=str(extra.get("value", "1000")),
-                        timeout=int(extra.get("timeout", 30000)),
-                        state=str(extra.get("state", "visible")),
-                    )
-                except Exception as exc:
-                    result = {"ok": False, "error": str(exc), "action": "wait"}
-                results.append(result)
-                continue
-
-            # R7: read-after-write settle — if previous action had pending
-            # requests and this is a read operation, wait for settle
-            if (
-                i > 0
-                and kind == "snapshot"
-                and results
-                and results[-1].get("pending_requests", 0) > 0
-            ):
-                await self._settle_pending_requests(settle_timeout)
-
-            result = await self.action(str(kind), str(target), **extra)
-            results.append(result)
-
-            # R7: dialog interruption
-            if result.get("error") == "blocked_by_dialog":
-                remaining = [
-                    {
-                        "index": j,
-                        "kind": actions[j].get("kind", actions[j].get("action", "")),
-                    }
-                    for j in range(i + 1, total)
-                ]
-                return {
-                    "results": results,
-                    "completed": i,
-                    "total": total,
-                    "aborted_reason": "dialog_pending",
-                    "dialog": result.get("dialog"),
-                    "remaining": remaining,
-                }
-
-            if result.get("caused_navigation"):
-                return {
-                    "results": results,
-                    "completed": i + 1,
-                    "total": total,
-                    "aborted_reason": "url_changed",
-                }
-
-            if sleep > 0 and i < total - 1:
-                await asyncio.sleep(sleep)
-
-        return {"results": results, "completed": total, "total": total}
-
-    async def _settle_pending_requests(self, timeout_ms: int) -> None:
-        """R7: Wait until pending request count drops to 0 or timeout."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_ms / 1000
-        while self._pending_request_count > 0:
-            if loop.time() >= deadline:
-                break
-            await asyncio.sleep(0.1)
-
-    async def evaluate(self, js: str, *, world: str = "main") -> Any:
-        if world == "main":
-            result = await self._evaluate_main_world(js)
-        else:
-            try:
-                result = await self._page.evaluate(js)
-            except Exception as exc:
-                raise BackendError(
-                    error="evaluate_failed",
-                    hint=str(exc),
-                    action="check JS syntax and page context",
-                ) from exc
-
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(seq=new_seq, kind="evaluate", data={"js": js[:200]})
-        )
-        # R6: audit logging
-        logger.info(
-            "audit_action",
-            action="evaluate",
-            seq=new_seq,
-            js_length=len(js),
-            url=self._page.url,
-        )
-        return result
-
     async def _evaluate_main_world(self, js: str) -> Any:
-        """Evaluate JS in the page's main execution context via CDP.
-
-        The CDP session created by Playwright defaults to Playwright's utility
-        world, not the page's main world.  We call Runtime.enable to discover
-        execution contexts, pick the one with auxData.isDefault == True (the
-        page's main world), and pass its contextId to Runtime.evaluate.
-        """
+        """Evaluate JS in the page's main execution context via CDP."""
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
-            # Collect execution contexts reported by Runtime.enable.
             contexts: list[dict[str, Any]] = []
 
             def _on_ctx(params: dict[str, Any]) -> None:
@@ -1230,7 +751,6 @@ class PlaywrightContext:
             cdp.on("Runtime.executionContextCreated", _on_ctx)
             await cdp.send("Runtime.enable")
 
-            # Find the page's main world (isDefault == True).
             main_ctx_id: int | None = None
             for ec in contexts:
                 aux: dict[str, Any] = ec.get("auxData", {})
@@ -1281,41 +801,33 @@ class PlaywrightContext:
             return None
         return result_obj.get("value")
 
-    async def network(
-        self, *, since: int | str = "last_action"
-    ) -> list[dict[str, Any]]:
-        if since == "last_action":
-            since_seq = self._seq_counter.last_action_seq
-        else:
-            since_seq = int(since)
-        events = self._ring_buffer.since(since_seq)
-        return [e.data for e in events if e.kind == "network"]
+    # ------------------------------------------------------------------
+    # Atomic: screenshot
+    # ------------------------------------------------------------------
 
-    async def screenshot(
-        self,
-        *,
-        full_page: bool = False,
-        format: str = "jpeg",
-        quality: int = 80,
+    async def _screenshot_impl(
+        self, *, full_page: bool, fmt: str, quality: int
     ) -> bytes:
-        kwargs: dict[str, Any] = {"full_page": full_page, "type": format}
-        if format == "jpeg":
+        kwargs: dict[str, Any] = {"full_page": full_page, "type": fmt}
+        if fmt == "jpeg":
             kwargs["quality"] = quality
         return await self._page.screenshot(**kwargs)
 
-    async def fetch(
+    # ------------------------------------------------------------------
+    # Atomic: fetch (HTTP via browser cookies + UA)
+    # ------------------------------------------------------------------
+
+    async def _fetch_impl(
         self,
         url: str,
         *,
-        method: str = "GET",
-        body: str | None = None,
-        headers: dict[str, str] | None = None,
-        timeout: float = 30.0,
+        method: str,
+        body: str | None,
+        headers: dict[str, str] | None,
+        timeout: float,
     ) -> dict[str, Any]:
-        """HTTP fetch using browser cookies and user agent."""
         context = self._page.context
 
-        # Extract cookies from the browser context
         cookies_raw: list[dict[str, Any]] = await context.cookies()
         cookie_jar = httpx.Cookies()
         for c in cookies_raw:
@@ -1326,15 +838,11 @@ class PlaywrightContext:
                 path=c.get("path", "/"),
             )
 
-        # Extract user agent from the page
         ua: str = await self._page.evaluate("navigator.userAgent")
-
-        # Build headers: UA first, then any user-provided overrides
         req_headers: dict[str, str] = {"User-Agent": ua}
         if headers:
             req_headers.update(headers)
 
-        # Make the request (route through LocalProxy when available)
         client_kwargs: dict[str, Any] = {
             "cookies": cookie_jar,
             "timeout": httpx.Timeout(timeout),
@@ -1364,7 +872,6 @@ class PlaywrightContext:
                 action="check URL and network connectivity",
             ) from exc
 
-        # Determine if response is text or binary
         content_type = resp.headers.get("content-type", "")
         is_binary = not (
             "text/" in content_type
@@ -1391,7 +898,6 @@ class PlaywrightContext:
                 resp_body = resp_body[:max_body] + "\n[...truncated...]"
             body_encoding = "text"
 
-        # Count how many cookies were sent
         parsed = urlparse(url)
         cookies_used = [
             c["name"]
@@ -1402,15 +908,6 @@ class PlaywrightContext:
                 or parsed.hostname.endswith(c.get("domain", ""))
             )
         ]
-
-        new_seq = self._seq_counter.increment_action()
-        self._ring_buffer.append(
-            SeqEvent(
-                seq=new_seq,
-                kind="fetch",
-                data={"method": method.upper(), "url": url, "status": resp.status_code},
-            )
-        )
 
         _useful_headers = {
             "content-type",
@@ -1430,13 +927,11 @@ class PlaywrightContext:
 
         parsed_body: Any = resp_body
         if body_encoding == "text" and "json" in content_type:
-            import contextlib
+            import contextlib as _ctxlib
             import json as _json
 
-            with contextlib.suppress(Exception):
-                parsed_body = _json.loads(
-                    resp_body if isinstance(resp_body, str) else resp.text
-                )
+            with _ctxlib.suppress(Exception):
+                parsed_body = _json.loads(resp_body)
 
         return {
             "status": resp.status_code,
@@ -1449,15 +944,17 @@ class PlaywrightContext:
             "url": str(resp.url),
         }
 
+    # ------------------------------------------------------------------
+    # Atomic: tabs
+    # ------------------------------------------------------------------
+
     def _get_browser_context(self) -> Any:
         """Return the Playwright BrowserContext, whether persistent or ephemeral."""
         if self._browser_context is not None:
             return self._browser_context
-        # Ephemeral mode: get context from the active page
         return self._page.context
 
-    async def tab_list(self) -> list[TabInfo]:
-        """Return metadata for all open tabs."""
+    async def _tab_list_impl(self) -> list[TabInfo]:
         result: list[TabInfo] = []
         for tid, page in self._tabs.items():
             try:
@@ -1478,15 +975,14 @@ class PlaywrightContext:
             )
         return result
 
-    async def tab_new(self, url: str | None = None) -> dict[str, Any]:
-        """Create a new tab, optionally navigating to a URL."""
+    async def _tab_new_impl(self, url: str | None) -> dict[str, Any]:
         pw_ctx = self._get_browser_context()
         new_page = await pw_ctx.new_page()
         new_id = self._next_tab_id
         self._next_tab_id += 1
         self._tabs[new_id] = new_page
         self._active_tab = new_id
-        self._active_frame = None  # reset frame on tab switch
+        self._active_frame = None
         self._setup_network_listeners(new_page)
         self._setup_feedback_listeners(new_page)
 
@@ -1503,8 +999,7 @@ class PlaywrightContext:
                 result["title"] = ""
         return result
 
-    async def tab_close(self, tab_id: int) -> dict[str, Any]:
-        """Close a tab by ID. Auto-creates blank tab if closing the last one."""
+    async def _tab_close_impl(self, tab_id: int) -> dict[str, Any]:
         if tab_id not in self._tabs:
             raise ElementNotFoundError(
                 error="tab_not_found",
@@ -1515,7 +1010,6 @@ class PlaywrightContext:
                 action="use 'tab list' to see available tab IDs",
             )
         page = self._tabs.pop(tab_id)
-        # Grab browser context BEFORE closing (ephemeral needs page.context)
         if self._browser_context is not None:
             pw_ctx = self._browser_context
         else:
@@ -1523,7 +1017,6 @@ class PlaywrightContext:
         await page.close()
 
         if not self._tabs:
-            # Auto-create blank tab so daemon always has an operable page
             new_page = await pw_ctx.new_page()
             new_id = self._next_tab_id
             self._next_tab_id += 1
@@ -1535,14 +1028,12 @@ class PlaywrightContext:
             return {"closed": tab_id, "auto_created": new_id}
 
         if self._active_tab == tab_id:
-            # Switch to the most recent remaining tab
             self._active_tab = max(self._tabs.keys())
             self._active_frame = None
 
         return {"closed": tab_id}
 
-    async def tab_switch(self, tab_id: int) -> dict[str, Any]:
-        """Switch the active tab."""
+    async def _tab_switch_impl(self, tab_id: int) -> dict[str, Any]:
         if tab_id not in self._tabs:
             raise ElementNotFoundError(
                 error="tab_not_found",
@@ -1553,7 +1044,7 @@ class PlaywrightContext:
                 action="use 'tab list' to see available tab IDs",
             )
         self._active_tab = tab_id
-        self._active_frame = None  # reset frame on tab switch
+        self._active_frame = None
         page = self._tabs[tab_id]
         try:
             url = page.url
@@ -1565,7 +1056,72 @@ class PlaywrightContext:
             title = ""
         return {"tab_id": tab_id, "url": url, "title": title}
 
-    async def raw_cdp(self, method: str, params: dict[str, Any] | None = None) -> Any:
+    # ------------------------------------------------------------------
+    # Atomic: frames
+    # ------------------------------------------------------------------
+
+    async def _frame_list_impl(self) -> list[FrameInfo]:
+        frames = self._page.frames
+        result: list[FrameInfo] = []
+        for frame in frames:
+            is_current = frame == (
+                self._active_frame
+                if self._active_frame is not None
+                else self._page.main_frame
+            )
+            is_main = frame == self._page.main_frame
+            fname = frame.name or "(main)" if is_main else frame.name or ""
+            result.append(
+                FrameInfo(
+                    name=fname,
+                    url=frame.url,
+                    is_current=is_current,
+                )
+            )
+        return result
+
+    async def _frame_focus_impl(
+        self, *, name: str | None, url: str | None, main: bool
+    ) -> dict[str, Any]:
+        if main:
+            self._active_frame = None
+            return {
+                "ok": True,
+                "action": "frame_focus",
+                "frame": "(main)",
+                "url": self._page.main_frame.url,
+            }
+
+        target_frame = None
+        if name:
+            target_frame = self._page.frame(name=name)
+        elif url:
+            for frame in self._page.frames:
+                if url in frame.url:
+                    target_frame = frame
+                    break
+
+        if target_frame is None:
+            available = [f.name or f.url[:60] for f in self._page.frames]
+            raise BackendError(
+                error="frame_not_found",
+                hint=f"No frame matching name={name!r} url={url!r}",
+                action=f"available frames: {available}",
+            )
+
+        self._active_frame = target_frame
+        return {
+            "ok": True,
+            "action": "frame_focus",
+            "frame": target_frame.name or "(unnamed)",
+            "url": target_frame.url,
+        }
+
+    # ------------------------------------------------------------------
+    # Atomic: raw CDP / close
+    # ------------------------------------------------------------------
+
+    async def _raw_cdp_impl(self, method: str, params: dict[str, Any] | None) -> Any:
         cdp = await self._page.context.new_cdp_session(self._page)
         try:
             return await cdp.send(method, params or {})
@@ -1578,17 +1134,13 @@ class PlaywrightContext:
         finally:
             await cdp.detach()
 
-    async def close(self) -> None:
+    async def _close_impl(self) -> None:
         if self._browser is not None:
             await self._browser.close()
         elif self._browser_context is not None:
             await self._browser_context.close()
         if self._playwright is not None:
             await self._playwright.stop()
-
-
-def screenshot_to_base64(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii")
 
 
 async def launch_playwright(
@@ -1605,12 +1157,10 @@ async def launch_playwright(
     pw = await async_playwright().start()
     executable = _find_chromium()
 
-    # Allocate a free port for CDP; Chrome 90+ supports pipe+port coexistence.
     cdp_port = _find_free_port()
     chrome_args = ["--no-sandbox", f"--remote-debugging-port={cdp_port}"]
 
     if profile_dir is not None:
-        # Persistent context: cookies/localStorage/etc. persist to disk
         launch_kwargs: dict[str, Any] = {
             "headless": headless,
             "args": chrome_args,
@@ -1649,7 +1199,6 @@ async def launch_playwright(
             cdp_port=cdp_port,
         )
 
-    # Ephemeral context: no persistent state
     launch_args: dict[str, Any] = {"headless": headless, "args": chrome_args}
     if executable:
         launch_args["executable_path"] = executable

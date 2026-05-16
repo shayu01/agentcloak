@@ -1,126 +1,115 @@
-"""Scenario G: daemon HTTP API — full endpoint chain via aiohttp TestServer."""
+"""Scenario G: daemon HTTP API — full endpoint chain via FastAPI TestClient.
+
+Migrated to FastAPI/httpx (TestClient is the sync httpx-based client provided
+by Starlette) so the test stack matches what the daemon ships in production.
+The browser context behind the fixture is real (PlaywrightContext) — only
+the HTTP transport is in-process.
+"""
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
-import orjson
+import pytest
 import pytest_asyncio
-from aiohttp import web
-from aiohttp.test_utils import TestClient, TestServer
+from fastapi.testclient import TestClient
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-from agentcloak.daemon.middleware import error_middleware
-from agentcloak.daemon.routes import setup_routes
+from agentcloak.daemon.app import configure_app_state, create_app
 
 
 @pytest_asyncio.fixture
 async def daemon_test_client(
     fresh_context: Any,
 ) -> AsyncGenerator[TestClient, None]:
-    """Create an aiohttp TestClient with real browser context."""
+    """Build a FastAPI TestClient backed by a real browser context."""
     from agentcloak.core.config import load_config
     from agentcloak.core.resume import ResumeWriter
 
-    paths, _ = load_config()
-
-    app = web.Application(middlewares=[error_middleware])
-    app["browser_ctx"] = fresh_context
-    app["local_proxy"] = None
-    app["bridge_token"] = "test-token"
-    app["last_request_time"] = 0.0
-
+    paths, cfg = load_config()
     resume_writer = ResumeWriter(paths)
-    app["resume_writer"] = resume_writer
 
-    setup_routes(app)
-    client = TestClient(TestServer(app))
-    await client.start_server()
-    yield client
-    await client.close()
+    app = create_app()
+    configure_app_state(
+        app,
+        browser_ctx=fresh_context,
+        local_proxy=None,
+        resume_writer=resume_writer,
+        bridge_token="test-token",
+        config=cfg,
+    )
+    app.state.shutdown_event = asyncio.Event()
+
+    with TestClient(app) as client:
+        yield client
 
 
-async def test_health_endpoint(
-    daemon_test_client: TestClient, local_server: str
-) -> None:
+def test_health_endpoint(daemon_test_client: TestClient, local_server: str) -> None:
     """GET /health should return ok."""
-    resp = await daemon_test_client.get("/health")
-    assert resp.status == 200
-    data = await resp.json()
+    resp = daemon_test_client.get("/health")
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["ok"] is True
     assert "stealth_tier" in data
 
 
-async def test_navigate_via_http(
-    daemon_test_client: TestClient, local_server: str
-) -> None:
+def test_navigate_via_http(daemon_test_client: TestClient, local_server: str) -> None:
     """POST /navigate should navigate and return structured response."""
-    resp = await daemon_test_client.post(
+    resp = daemon_test_client.post(
         "/navigate",
-        data=orjson.dumps({"url": f"{local_server}/index.html", "timeout": 10.0}),
-        headers={"Content-Type": "application/json"},
+        json={"url": f"{local_server}/index.html", "timeout": 10.0},
     )
-    assert resp.status == 200
-    data = await resp.json()
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["ok"] is True
     assert data["data"]["url"].endswith("/index.html")
     assert data["data"]["title"] == "Test Page"
     assert "seq" in data
 
 
-async def test_snapshot_via_http(
-    daemon_test_client: TestClient, local_server: str
-) -> None:
+def test_snapshot_via_http(daemon_test_client: TestClient, local_server: str) -> None:
     """GET /snapshot should return page tree."""
     # Navigate first
-    await daemon_test_client.post(
+    daemon_test_client.post(
         "/navigate",
-        data=orjson.dumps({"url": f"{local_server}/index.html"}),
-        headers={"Content-Type": "application/json"},
+        json={"url": f"{local_server}/index.html"},
     )
-    resp = await daemon_test_client.get("/snapshot?mode=accessible")
-    assert resp.status == 200
-    data = await resp.json()
+    resp = daemon_test_client.get("/snapshot", params={"mode": "accessible"})
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["ok"] is True
     assert "tree_text" in data["data"]
     assert "selector_map" in data["data"]
 
 
-async def test_action_via_http(
-    daemon_test_client: TestClient, local_server: str
-) -> None:
+def test_action_via_http(daemon_test_client: TestClient, local_server: str) -> None:
     """POST /action should execute and return result."""
-    await daemon_test_client.post(
+    daemon_test_client.post(
         "/navigate",
-        data=orjson.dumps({"url": f"{local_server}/index.html"}),
-        headers={"Content-Type": "application/json"},
+        json={"url": f"{local_server}/index.html"},
     )
     # Scroll action doesn't need a target index
-    resp = await daemon_test_client.post(
+    resp = daemon_test_client.post(
         "/action",
-        data=orjson.dumps({"kind": "scroll", "direction": "down", "amount": 100}),
-        headers={"Content-Type": "application/json"},
+        json={"kind": "scroll", "direction": "down", "amount": 100},
     )
-    assert resp.status == 200
-    data = await resp.json()
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["ok"] is True
 
 
-async def test_resume_endpoint(
-    daemon_test_client: TestClient, local_server: str
-) -> None:
+def test_resume_endpoint(daemon_test_client: TestClient, local_server: str) -> None:
     """GET /resume should return snapshot structure."""
-    # Navigate to trigger resume update
-    await daemon_test_client.post(
+    daemon_test_client.post(
         "/navigate",
-        data=orjson.dumps({"url": f"{local_server}/index.html"}),
-        headers={"Content-Type": "application/json"},
+        json={"url": f"{local_server}/index.html"},
     )
-    resp = await daemon_test_client.get("/resume")
-    assert resp.status == 200
-    data = await resp.json()
+    resp = daemon_test_client.get("/resume")
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["ok"] is True
     snap = data["data"]
     assert "url" in snap
@@ -130,59 +119,53 @@ async def test_resume_endpoint(
     assert "stealth_tier" in snap
 
 
-async def test_error_envelope_via_http(daemon_test_client: TestClient) -> None:
+def test_error_envelope_via_http(daemon_test_client: TestClient) -> None:
     """Invalid request should return proper error envelope."""
-    resp = await daemon_test_client.post(
+    resp = daemon_test_client.post(
         "/action",
-        data=orjson.dumps({"kind": "nonexistent_action"}),
-        headers={"Content-Type": "application/json"},
+        json={"kind": "nonexistent_action"},
     )
-    assert resp.status == 400
-    data = await resp.json()
+    assert resp.status_code == 400
+    data = resp.json()
     assert data["ok"] is False
     assert "error" in data
     assert "hint" in data
     assert "action" in data
 
 
-async def test_tab_endpoints(daemon_test_client: TestClient, local_server: str) -> None:
+def test_tab_endpoints(daemon_test_client: TestClient, local_server: str) -> None:
     """Tab CRUD via HTTP endpoints."""
-    # Navigate first
-    await daemon_test_client.post(
+    daemon_test_client.post(
         "/navigate",
-        data=orjson.dumps({"url": f"{local_server}/index.html"}),
-        headers={"Content-Type": "application/json"},
+        json={"url": f"{local_server}/index.html"},
     )
 
     # List tabs
-    resp = await daemon_test_client.get("/tabs")
-    assert resp.status == 200
-    data = await resp.json()
+    resp = daemon_test_client.get("/tabs")
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["ok"] is True
     initial_count = data["data"]["count"]
 
     # New tab
-    resp = await daemon_test_client.post(
-        "/tab/new",
-        data=orjson.dumps({}),
-        headers={"Content-Type": "application/json"},
-    )
-    assert resp.status == 200
-    new_data = await resp.json()
+    resp = daemon_test_client.post("/tab/new", json={})
+    assert resp.status_code == 200
+    new_data = resp.json()
     assert new_data["ok"] is True
     new_tab_id = new_data["data"]["tab_id"]
 
     # Verify count increased
-    resp = await daemon_test_client.get("/tabs")
-    data = await resp.json()
+    resp = daemon_test_client.get("/tabs")
+    data = resp.json()
     assert data["data"]["count"] == initial_count + 1
 
     # Close the new tab
-    resp = await daemon_test_client.post(
-        "/tab/close",
-        data=orjson.dumps({"tab_id": new_tab_id}),
-        headers={"Content-Type": "application/json"},
-    )
-    assert resp.status == 200
-    close_data = await resp.json()
+    resp = daemon_test_client.post("/tab/close", json={"tab_id": new_tab_id})
+    assert resp.status_code == 200
+    close_data = resp.json()
     assert close_data["ok"] is True
+
+
+# Mark the original `pytest` import as used; tests are sync and rely on
+# pytest's discovery via name-based collection.
+_ = pytest

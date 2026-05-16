@@ -1,0 +1,96 @@
+"""FastAPI application factory for the daemon.
+
+`create_app()` is the single entry point for both production and tests. It
+wires together: middlewares, exception handlers, routers, and the app.state
+slots used by dependency providers. Long-lived resources (browser context,
+local proxy, resume writer, etc.) are attached by `server.start()` after the
+app is created — the factory itself stays free of side effects so tests can
+construct it cheaply with mocks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from fastapi import FastAPI
+
+from agentcloak.daemon.exception_handlers import register_exception_handlers
+from agentcloak.daemon.middleware import install_middlewares
+from agentcloak.daemon.routes import register_routers
+
+__all__ = ["create_app"]
+
+
+def create_app() -> FastAPI:
+    """Build a FastAPI app with all routes/middleware/handlers wired."""
+    app = FastAPI(
+        title="agentcloak-daemon",
+        description=(
+            "Browser automation HTTP API. Routes are designed for AI agents "
+            "and consumed by the agentcloak CLI and MCP server."
+        ),
+        version="0.2.0",
+    )
+
+    # app.state default slots — dependency providers expect these to exist.
+    # ``configure_app_state()`` overwrites the runtime-meaningful ones (config,
+    # batch_settle_timeout, idle_timeout) after the browser is up. Defaults
+    # here are only consumed if a test forgets to call configure_app_state(),
+    # so we pull them from the config snapshot to stay consistent with the
+    # rest of the daemon.
+    from agentcloak.core.config import load_config
+
+    _, _bootstrap_cfg = load_config()
+    app.state.browser_ctx = None
+    app.state.remote_ctx = None
+    app.state.bridge_ws = None
+    app.state.ext_ws = None
+    app.state.local_proxy = None
+    app.state.resume_writer = None
+    app.state.bridge_token = None
+    app.state.config = None
+    app.state.shutdown_event = asyncio.Event()
+    app.state.last_request_time = 0.0
+    app.state.batch_settle_timeout = _bootstrap_cfg.batch_settle_timeout
+    app.state.idle_timeout = 0.0
+    app.state.prev_snapshot_lines = None
+
+    install_middlewares(app)
+    register_exception_handlers(app)
+    register_routers(app)
+
+    return app
+
+
+def configure_app_state(
+    app: FastAPI,
+    *,
+    browser_ctx: Any,
+    local_proxy: Any = None,
+    resume_writer: Any = None,
+    bridge_token: str | None = None,
+    config: Any = None,
+    batch_settle_timeout: int | None = None,
+    idle_timeout: float = 0.0,
+) -> None:
+    """Attach runtime resources to an existing app.
+
+    Called by `server.start()` after the browser is launched. Keeping this
+    separate from `create_app()` makes the factory test-friendly.
+
+    ``batch_settle_timeout=None`` resolves to ``config.batch_settle_timeout``
+    so callers don't have to repeat the config lookup.
+    """
+    app.state.browser_ctx = browser_ctx
+    app.state.local_proxy = local_proxy
+    app.state.resume_writer = resume_writer
+    app.state.bridge_token = bridge_token
+    app.state.config = config
+    if batch_settle_timeout is None:
+        from agentcloak.core.config import load_config
+
+        _, cfg = load_config()
+        batch_settle_timeout = cfg.batch_settle_timeout
+    app.state.batch_settle_timeout = batch_settle_timeout
+    app.state.idle_timeout = idle_timeout

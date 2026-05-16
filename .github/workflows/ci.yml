@@ -27,8 +27,12 @@ jobs:
         run: ruff format --check src/ tests/
       - name: Pyright
         run: pyright
-      - name: CLI/MCP consistency check
-        run: python scripts/check_consistency.py
+      - name: Daemon route ↔ DaemonClient drift check
+        run: python scripts/generate_client.py --check
+      - name: SKILL command reference is in sync with OpenAPI spec
+        run: python scripts/generate_skill.py --check
+      - name: CLI / MCP / daemon surface count consistency
+        run: python scripts/check_surface_count.py
 
   unit-tests:
     name: Unit Tests / Python ${{ matrix.python-version }}

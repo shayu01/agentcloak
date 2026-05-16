@@ -55,6 +55,9 @@ _VALUE_PROPS = frozenset(
         "level",
         "haspopup",
         "autocomplete",
+        # link href — CDP exposes it as the "url" AX property on link nodes.
+        # Surfacing it lets agents resolve targets without an extra evaluate().
+        "url",
     }
 )
 
@@ -156,6 +159,9 @@ def _format_attrs(attrs: dict[str, str]) -> str:
     ):
         if key in attrs:
             parts.append(f"{key}={attrs[key]}")
+    # Link href — emit last and quoted so the URL stays readable.
+    if "url" in attrs:
+        parts.append(f'href="{attrs["url"]}"')
     return " ".join(parts)
 
 

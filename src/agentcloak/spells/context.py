@@ -51,7 +51,9 @@ class SpellContext:
 
     # -- Convenience proxies to BrowserContext --
 
-    async def navigate(self, url: str, *, timeout: float = 30.0) -> ActionResult:
+    async def navigate(self, url: str, *, timeout: float | None = None) -> ActionResult:
+        # ``timeout=None`` lets the BrowserContext fall back to its configured
+        # navigation_timeout — keeps the spell DSL free of hard-coded numbers.
         return await self.browser.navigate(url, timeout=timeout)
 
     async def snapshot(self, *, mode: str = "accessible") -> PageSnapshot:

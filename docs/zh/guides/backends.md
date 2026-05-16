@@ -152,15 +152,17 @@ cloak navigate "https://example.com" --backend bridge
 
 ### 后端解析规则
 
-`auto`（默认）解析为 `cloak`。旧版值 `patchright` 自动映射为 `playwright`。
+`auto`（默认）解析为 `cloak`。
 
 | 设置值 | 解析为 |
 |-------|-------|
 | `auto` | `cloak` |
 | `cloak` | `cloak` |
 | `playwright` | `playwright` |
-| `patchright` | `playwright`（旧版） |
 | `remote_bridge` | `remote_bridge` |
+
+> v0.2.0 移除了旧版 `patchright` 后端值——如有旧的 `config.toml`，请改为
+> `default_tier = "playwright"`（或 `cloak`）。
 
 ## 对比
 

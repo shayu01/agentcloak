@@ -14,64 +14,67 @@ runner = CliRunner()
 
 
 class TestTokenAuth:
+    """Token gating for WS endpoints — adapted to FastAPI WebSocket signature."""
+
+    @staticmethod
+    def _mock_ws(
+        *, client_host: str, bridge_token: str | None, auth: str | None
+    ) -> MagicMock:
+        ws = MagicMock()
+        client = MagicMock()
+        client.host = client_host
+        ws.client = client
+        state = MagicMock()
+        state.bridge_token = bridge_token
+        ws.app.state = state
+        ws.headers = {"Authorization": auth} if auth else {}
+        return ws
+
     def test_check_bridge_token_localhost_bypass(self) -> None:
         from agentcloak.daemon.routes import _check_bridge_token
 
-        request = MagicMock()
-        transport = MagicMock()
-        transport.get_extra_info.return_value = ("127.0.0.1", 12345)
-        request.transport = transport
-        request.app = {"bridge_token": "secret123"}
-
-        assert _check_bridge_token(request) is True
+        ws = self._mock_ws(client_host="127.0.0.1", bridge_token="secret123", auth=None)
+        assert _check_bridge_token(ws) is True
 
     def test_check_bridge_token_valid(self) -> None:
         from agentcloak.daemon.routes import _check_bridge_token
 
-        request = MagicMock()
-        transport = MagicMock()
-        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
-        request.transport = transport
-        request.app = {"bridge_token": "secret123"}
-        request.headers = {"Authorization": "Bearer secret123"}
-
-        assert _check_bridge_token(request) is True
+        ws = self._mock_ws(
+            client_host="192.168.1.100",
+            bridge_token="secret123",
+            auth="Bearer secret123",
+        )
+        assert _check_bridge_token(ws) is True
 
     def test_check_bridge_token_invalid(self) -> None:
         from agentcloak.daemon.routes import _check_bridge_token
 
-        request = MagicMock()
-        transport = MagicMock()
-        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
-        request.transport = transport
-        request.app = {"bridge_token": "secret123"}
-        request.headers = {"Authorization": "Bearer wrong_token"}
-
-        assert _check_bridge_token(request) is False
+        ws = self._mock_ws(
+            client_host="192.168.1.100",
+            bridge_token="secret123",
+            auth="Bearer wrong_token",
+        )
+        assert _check_bridge_token(ws) is False
 
     def test_check_bridge_token_missing(self) -> None:
         from agentcloak.daemon.routes import _check_bridge_token
 
-        request = MagicMock()
-        transport = MagicMock()
-        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
-        request.transport = transport
-        request.app = {"bridge_token": "secret123"}
-        request.headers = {}
-
-        assert _check_bridge_token(request) is False
+        ws = self._mock_ws(
+            client_host="192.168.1.100",
+            bridge_token="secret123",
+            auth=None,
+        )
+        assert _check_bridge_token(ws) is False
 
     def test_check_bridge_token_no_token_set(self) -> None:
         from agentcloak.daemon.routes import _check_bridge_token
 
-        request = MagicMock()
-        transport = MagicMock()
-        transport.get_extra_info.return_value = ("192.168.1.100", 12345)
-        request.transport = transport
-        request.app = {}
-        request.headers = {}
-
-        assert _check_bridge_token(request) is True
+        ws = self._mock_ws(
+            client_host="192.168.1.100",
+            bridge_token=None,
+            auth=None,
+        )
+        assert _check_bridge_token(ws) is True
 
 
 class TestCookiesCLI:

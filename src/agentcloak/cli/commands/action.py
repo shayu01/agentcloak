@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path  # noqa: TC003 — Typer needs runtime access
 from typing import Any
 
 import orjson
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
-
-
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
 
 
 @app.command("click")
@@ -46,13 +41,11 @@ def do_click(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    result = _run(
-        client.action(
-            "click",
-            index=resolved,
-            include_snapshot=include_snapshot,
-            **kwargs,
-        )
+    result = client.action_sync(
+        "click",
+        index=resolved,
+        include_snapshot=include_snapshot,
+        **kwargs,
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -76,10 +69,8 @@ def do_fill(
         typer.echo("Error: provide --target or --index", err=True)
         raise typer.Exit(2)
     client = DaemonClient()
-    result = _run(
-        client.action(
-            "fill", index=resolved, include_snapshot=include_snapshot, text=text
-        )
+    result = client.action_sync(
+        "fill", index=resolved, include_snapshot=include_snapshot, text=text
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -104,14 +95,12 @@ def do_type(
         typer.echo("Error: provide --target or --index", err=True)
         raise typer.Exit(2)
     client = DaemonClient()
-    result = _run(
-        client.action(
-            "type",
-            index=resolved,
-            include_snapshot=include_snapshot,
-            text=text,
-            delay=delay,
-        )
+    result = client.action_sync(
+        "type",
+        index=resolved,
+        include_snapshot=include_snapshot,
+        text=text,
+        delay=delay,
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -135,14 +124,12 @@ def do_scroll(
     """Scroll the page or an element into view."""
     resolved = target if index is None else index
     client = DaemonClient()
-    result = _run(
-        client.action(
-            "scroll",
-            index=resolved,
-            include_snapshot=include_snapshot,
-            direction=direction,
-            amount=amount,
-        )
+    result = client.action_sync(
+        "scroll",
+        index=resolved,
+        include_snapshot=include_snapshot,
+        direction=direction,
+        amount=amount,
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -169,13 +156,11 @@ def do_hover(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    result = _run(
-        client.action(
-            "hover",
-            index=resolved,
-            include_snapshot=include_snapshot,
-            **kwargs,
-        )
+    result = client.action_sync(
+        "hover",
+        index=resolved,
+        include_snapshot=include_snapshot,
+        **kwargs,
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -205,10 +190,8 @@ def do_select(
         kwargs["value"] = value
     if label is not None:
         kwargs["label"] = label
-    result = _run(
-        client.action(
-            "select", index=resolved, include_snapshot=include_snapshot, **kwargs
-        )
+    result = client.action_sync(
+        "select", index=resolved, include_snapshot=include_snapshot, **kwargs
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -229,8 +212,8 @@ def do_press(
 ) -> None:
     """Press a keyboard key."""
     client = DaemonClient()
-    result = _run(
-        client.action("press", index=target, include_snapshot=include_snapshot, key=key)
+    result = client.action_sync(
+        "press", index=target, include_snapshot=include_snapshot, key=key
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -248,7 +231,7 @@ def do_keydown(
 ) -> None:
     """Hold a key down (e.g. Shift, Control)."""
     client = DaemonClient()
-    result = _run(client.action("keydown", include_snapshot=include_snapshot, key=key))
+    result = client.action_sync("keydown", include_snapshot=include_snapshot, key=key)
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -265,7 +248,7 @@ def do_keyup(
 ) -> None:
     """Release a held key."""
     client = DaemonClient()
-    result = _run(client.action("keyup", include_snapshot=include_snapshot, key=key))
+    result = client.action_sync("keyup", include_snapshot=include_snapshot, key=key)
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -296,7 +279,7 @@ def do_batch(
         actions.append(orjson.loads(line))
 
     client = DaemonClient()
-    result = _run(client.action_batch(actions, sleep=sleep))
+    result = client.action_batch_sync(actions, sleep=sleep)
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)

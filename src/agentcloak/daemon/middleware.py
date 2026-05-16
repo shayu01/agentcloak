@@ -1,64 +1,64 @@
-"""Error handling middleware for the daemon HTTP server."""
+"""HTTP middleware — localhost gating and request-time tracking.
+
+Responsibilities are split: error envelopes live in ``exception_handlers.py``
+and this file only enforces localhost-only access plus records
+``last_request_time`` for the idle watchdog.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import time
+from typing import TYPE_CHECKING
 
-import structlog
-from aiohttp import web
-
-from agentcloak.core.errors import AgentBrowserError
+from fastapi.responses import JSONResponse
 
 if TYPE_CHECKING:
-    from aiohttp.web import Request, StreamResponse
+    from collections.abc import Awaitable, Callable
 
-__all__ = ["error_middleware"]
+    from fastapi import FastAPI, Request
+    from starlette.responses import Response
 
-logger = structlog.get_logger()
-
-
-_LOCALHOST_BYPASS_PATHS = frozenset({"/health", "/bridge/ws"})
+__all__ = ["install_middlewares"]
 
 
-@web.middleware
-async def error_middleware(
-    request: Request,
-    handler: Any,
-) -> StreamResponse:
-    """Catch AgentBrowserError and return JSON envelope; log unexpected errors."""
-    import time
+# WebSocket endpoints handle their own localhost gating via the bridge token.
+# Health is intentionally open so monitoring tools can probe it from anywhere.
+_LOCALHOST_BYPASS_PATHS = frozenset(
+    {"/health", "/bridge/ws", "/ext", "/openapi.json", "/docs", "/redoc"}
+)
+# `testclient` is the synthetic client.host that Starlette's TestClient sets
+# on its requests. Keeping it in the local set lets the standard test suite
+# bypass the localhost gate without having to override the middleware.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
 
-    # Localhost-only check: reject non-local requests (except /health and /bridge/ws)
-    if request.path not in _LOCALHOST_BYPASS_PATHS:
-        peername = request.transport and request.transport.get_extra_info("peername")
-        if not peername or peername[0] not in ("127.0.0.1", "::1"):
-            return web.json_response(
-                {
+
+def _is_localhost(request: Request) -> bool:
+    client = request.client
+    if not client:
+        return True
+    return client.host in _LOCAL_HOSTS
+
+
+def install_middlewares(app: FastAPI) -> None:
+    """Attach the localhost gate + request-time recorder."""
+
+    @app.middleware("http")
+    async def _localhost_and_activity(  # type: ignore[reportUnusedFunction]
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        # Localhost gate
+        if request.url.path not in _LOCALHOST_BYPASS_PATHS and not _is_localhost(
+            request
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={
                     "ok": False,
                     "error": "forbidden",
                     "hint": "Only localhost connections are allowed",
                     "action": "connect from 127.0.0.1 or ::1",
                 },
-                status=403,
             )
 
-    request.app["last_request_time"] = time.monotonic()
-    try:
-        resp: StreamResponse = await handler(request)
-        return resp
-    except AgentBrowserError as exc:
-        logger.warning("agent_error", error=exc.error, hint=exc.hint)
-        return web.json_response(exc.to_dict(), status=400)
-    except web.HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("unhandled_error")
-        return web.json_response(
-            {
-                "ok": False,
-                "error": "internal_error",
-                "hint": str(exc),
-                "action": "retry the request, or run 'snapshot' to refresh page state",
-            },
-            status=500,
-        )
+        app.state.last_request_time = time.monotonic()
+        return await call_next(request)

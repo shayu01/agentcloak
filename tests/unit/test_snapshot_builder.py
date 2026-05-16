@@ -55,6 +55,24 @@ class TestBuildSnapshotBasic:
         assert result.backend_node_map[1] == 42
         assert result.snapshot.total_interactive == 1
 
+    def test_link_emits_href(self) -> None:
+        """Link nodes should surface the AX 'url' property as href=."""
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "link",
+                "Docs",
+                backend_dom_id=11,
+                properties=[
+                    {"name": "url", "value": {"value": "https://example.com/docs"}}
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes, seq=1)
+        assert "[1] link" in result.snapshot.tree_text
+        assert 'href="https://example.com/docs"' in result.snapshot.tree_text
+
     def test_compact_mode_prunes(self) -> None:
         nodes = [
             _make_node("1", "WebArea", child_ids=["2", "3"]),

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import subprocess
-import sys
 
 import typer
 
@@ -30,13 +27,6 @@ def daemon_start(
     profile: str | None = typer.Option(
         None, "--profile", "-p", help="Browser profile name."
     ),
-    stealth: bool = typer.Option(
-        False,
-        "--stealth",
-        "-s",
-        help="[Deprecated] CloakBrowser is now the default.",
-        hidden=True,
-    ),
     humanize: bool = typer.Option(
         False, "--humanize", help="Enable humanize behavioral layer."
     ),
@@ -48,16 +38,6 @@ def daemon_start(
     ),
 ) -> None:
     """Start the agentcloak daemon."""
-    import warnings
-
-    if stealth:
-        warnings.warn(
-            "--stealth is deprecated: CloakBrowser is now the default backend. "
-            "This flag will be removed in a future version.",
-            DeprecationWarning,
-            stacklevel=1,
-        )
-
     resolved_humanize: bool | None = None
     if humanize:
         resolved_humanize = True
@@ -65,37 +45,22 @@ def daemon_start(
         resolved_humanize = False
 
     if background:
-        cmd = [sys.executable, "-m", "agentcloak.daemon"]
-        if host:
-            cmd.extend(["--host", host])
-        if port:
-            cmd.extend(["--port", str(port)])
-        if headless is True:
-            cmd.append("--headless")
-        elif headless is False:
-            cmd.append("--headed")
-        if profile:
-            cmd.extend(["--profile", profile])
-        if resolved_humanize is True:
-            cmd.append("--humanize")
-        elif resolved_humanize is False:
-            cmd.append("--no-humanize")
-        env = os.environ.copy()
-        env.setdefault("AGENTCLOAK_LOG_TO_FILE", "true")
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
+        from agentcloak.client import DaemonClient
         from agentcloak.core.config import load_config, resolve_tier
 
+        client = DaemonClient(host=host, port=port, auto_start=False)
+        pid = client.spawn_background(
+            host=host,
+            port=port,
+            headless=headless,
+            profile=profile,
+            humanize=resolved_humanize,
+        )
         _, cfg = load_config()
         resolved_tier = resolve_tier(cfg.default_tier)
         output_json(
             {
-                "pid": proc.pid,
+                "pid": pid,
                 "background": True,
                 "profile": profile,
                 "tier": resolved_tier,
@@ -112,7 +77,6 @@ def daemon_start(
             port=port,
             headless=headless,
             profile=profile,
-            stealth=stealth,
             humanize=resolved_humanize,
         )
     )
@@ -124,10 +88,10 @@ def daemon_stop(
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
     """Stop the running daemon."""
-    from agentcloak.cli.client import DaemonClient
+    from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port, auto_start=False)
-    asyncio.run(client.shutdown())
+    client.shutdown_sync()
     output_json({"stopped": True}, seq=0)
 
 
@@ -137,10 +101,10 @@ def daemon_cdp_endpoint(
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
     """Get the CDP WebSocket URL for the current browser."""
-    from agentcloak.cli.client import DaemonClient
+    from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port)
-    result = asyncio.run(client.cdp_endpoint())
+    result = client.cdp_endpoint_sync()
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
@@ -149,23 +113,23 @@ def daemon_health(
     host: str | None = typer.Option(None, "--host"),
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
-    """Check daemon connectivity."""
-    from agentcloak.cli.client import DaemonClient
+    """Show daemon health including stealth tier, current URL, capture state.
+
+    Mirrors MCP ``agentcloak_status(query='health')`` so both surfaces report
+    the same diagnostic detail (F4 from dogfood-v0.2.0-pre-release).
+    """
+    from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port, auto_start=False)
     try:
-        result = asyncio.run(client.health())
-        if result.get("ok"):
-            output_json({"daemon": "running"}, seq=0)
-        else:
-            output_error(
-                DaemonConnectionError(
-                    error="daemon_unreachable",
-                    hint="Cannot connect to daemon",
-                    action="run 'agentcloak daemon start' first",
-                )
-            )
-            raise typer.Exit(1)
+        result = client.health_sync()
     except DaemonConnectionError as e:
         output_error(e)
         raise typer.Exit(1) from e
+
+    # ``/health`` is a flat dict (DiagnosticService.health does not wrap in
+    # ``_ok``). Strip ``ok`` from the data payload since the envelope already
+    # carries it; surface ``seq`` and the rest of the rich health details.
+    seq = int(result.get("seq", 0) or 0)
+    payload = {k: v for k, v in result.items() if k != "ok"}
+    output_json(payload, seq=seq)

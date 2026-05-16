@@ -1,4 +1,17 @@
-"""Bridge server — WS hub between Chrome extension and remote daemon."""
+"""Bridge server — WS hub between Chrome extension and remote daemon.
+
+The bridge sits between a user's Chrome browser (via a custom extension) and
+the agentcloak daemon running on a different machine. It exposes:
+
+- A WebSocket endpoint at ``/ext`` for the Chrome extension to connect to.
+- A health endpoint at ``/health`` for monitoring.
+- A long-lived WebSocket client that connects to the daemon's ``/bridge/ws``
+  and relays commands between the two sides.
+
+The transport stack is **Starlette + uvicorn** (server side) and the
+``websockets`` library (client side). One WebSocket toolchain ships across
+the whole project — daemon, bridge, and remote backend all share it.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +23,20 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from aiohttp import ClientSession, WSMsgType, web
+import uvicorn
+import websockets
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route, WebSocketRoute
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from agentcloak.bridge.config import BridgeConfig, load_bridge_config
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
 
 __all__ = ["start_bridge"]
 
@@ -24,6 +45,8 @@ logger = structlog.get_logger()
 RECONNECT_BASE = 2.0
 RECONNECT_MAX = 30.0
 _PORT_RANGE_SIZE = 10
+_EXTENSION_COMMAND_TIMEOUT = 60.0
+_DAEMON_PING_INTERVAL = 30.0
 
 
 def _is_localhost(remote: str | None) -> bool:
@@ -34,23 +57,42 @@ def _is_localhost(remote: str | None) -> bool:
 
 
 class BridgeHub:
-    """Routes commands between daemon and Chrome extension."""
+    """Routes commands between daemon and Chrome extension.
+
+    The hub holds two long-lived WebSocket handles:
+
+    - ``_ext_ws``: a Starlette :class:`WebSocket` accepted from the Chrome
+      extension. Lifecycle is owned by the request handler.
+    - ``_daemon_ws``: a ``websockets`` client connection to the daemon.
+      Lifecycle is owned by :func:`_connect_to_daemon`.
+    """
 
     def __init__(self, cfg: BridgeConfig) -> None:
         self._cfg = cfg
-        self._ext_ws: web.WebSocketResponse | None = None
-        self._daemon_ws: Any = None
+        self._ext_ws: WebSocket | None = None
+        self._daemon_ws: Any = None  # websockets.ClientConnection
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._connected_event = asyncio.Event()
         self._ext_authenticated = False
 
     @property
     def extension_connected(self) -> bool:
-        return self._ext_ws is not None and not self._ext_ws.closed
+        return self._ext_ws is not None
 
     @property
     def daemon_connected(self) -> bool:
-        return self._daemon_ws is not None and not self._daemon_ws.closed
+        if self._daemon_ws is None:
+            return False
+        # websockets exposes a ``state`` enum; OPEN == 1.
+        state = getattr(self._daemon_ws, "state", None)
+        if state is None:
+            return True
+        try:
+            from websockets.protocol import State as _State
+
+            return state is _State.OPEN
+        except Exception:
+            return True
 
     def set_daemon_ws(self, ws: Any) -> None:
         self._daemon_ws = ws
@@ -59,37 +101,43 @@ class BridgeHub:
         """Wait until the extension connects and authenticates."""
         await self._connected_event.wait()
 
-    async def handle_extension_ws(self, request: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
+    async def handle_extension_ws(self, websocket: WebSocket) -> None:
+        await websocket.accept()
 
-        if self._ext_ws and not self._ext_ws.closed:
-            await self._ext_ws.close()
+        # Replace any prior connection (extension reconnects).
+        if self._ext_ws is not None:
+            with contextlib.suppress(Exception):
+                await self._ext_ws.close()
 
-        self._ext_ws = ws
+        self._ext_ws = websocket
         self._ext_authenticated = False
-        is_local = _is_localhost(request.remote)
 
-        # If no token configured, or connection is from localhost, skip auth
+        client = websocket.client
+        remote = client.host if client else None
+        is_local = _is_localhost(remote)
+
+        # If no token configured, or connection is from localhost, skip auth.
         if not self._cfg.token or is_local:
             self._ext_authenticated = True
             self._connected_event.set()
             logger.info(
                 "extension_connected",
-                remote=request.remote,
+                remote=remote,
                 auth="bypass" if is_local and self._cfg.token else "none",
             )
         else:
-            logger.info("extension_connected_pending_auth", remote=request.remote)
+            logger.info("extension_connected_pending_auth", remote=remote)
 
         try:
-            async for msg in ws:
-                if msg.type == WSMsgType.TEXT:
-                    should_close = await self._handle_ext_message(msg.data, is_local)
-                    if should_close:
-                        await ws.close(code=4001, message=b"invalid token")
-                        break
-                elif msg.type == WSMsgType.ERROR:
+            while True:
+                try:
+                    data = await websocket.receive_text()
+                except WebSocketDisconnect:
+                    break
+                should_close = await self._handle_ext_message(data, is_local)
+                if should_close:
+                    with contextlib.suppress(Exception):
+                        await websocket.close(code=4001, reason="invalid token")
                     break
         finally:
             self._ext_ws = None
@@ -97,12 +145,10 @@ class BridgeHub:
             self._connected_event.clear()
             logger.info("extension_disconnected")
 
-        return ws
-
     async def _handle_ext_message(self, data: str, is_local: bool) -> bool:
         """Handle a message from the extension.
 
-        Returns True if the connection should be closed (auth failure).
+        Returns ``True`` if the connection should be closed (auth failure).
         """
         try:
             msg = json.loads(data)
@@ -152,8 +198,8 @@ class BridgeHub:
         try:
             if self._ext_ws is None:
                 raise RuntimeError("extension WebSocket is not connected")
-            await self._ext_ws.send_str(json.dumps(message))
-            result = await asyncio.wait_for(fut, timeout=60.0)
+            await self._ext_ws.send_text(json.dumps(message))
+            result = await asyncio.wait_for(fut, timeout=_EXTENSION_COMMAND_TIMEOUT)
             return result
         except TimeoutError:
             return {"ok": False, "error": "extension command timeout"}
@@ -213,6 +259,7 @@ def _build_candidates(cfg: BridgeConfig) -> list[str]:
 
 
 async def _connect_to_daemon(hub: BridgeHub, cfg: BridgeConfig) -> None:
+    """Maintain a long-lived WS connection to the daemon with backoff retry."""
     delay = RECONNECT_BASE
 
     while True:
@@ -220,27 +267,30 @@ async def _connect_to_daemon(hub: BridgeHub, cfg: BridgeConfig) -> None:
         for candidate in candidates:
             try:
                 logger.info("daemon_connecting", url=candidate)
-                async with ClientSession() as session:
-                    headers: dict[str, str] = {}
-                    if cfg.token:
-                        headers["Authorization"] = f"Bearer {cfg.token}"
+                headers: list[tuple[str, str]] = []
+                if cfg.token:
+                    headers.append(("Authorization", f"Bearer {cfg.token}"))
 
-                    async with session.ws_connect(
-                        candidate, headers=headers, heartbeat=30.0
-                    ) as ws:
-                        logger.info("daemon_connected", url=candidate)
-                        delay = RECONNECT_BASE
-                        hub.set_daemon_ws(ws)
+                async with websockets.connect(
+                    candidate,
+                    additional_headers=headers or None,
+                    ping_interval=_DAEMON_PING_INTERVAL,
+                    open_timeout=10.0,
+                ) as ws:
+                    logger.info("daemon_connected", url=candidate)
+                    delay = RECONNECT_BASE
+                    hub.set_daemon_ws(ws)
 
-                        async for msg in ws:
-                            if msg.type == WSMsgType.TEXT:
-                                response = await hub.handle_daemon_command(msg.data)
-                                await ws.send_str(response)
-                            elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
-                                break
+                    try:
+                        async for raw in ws:
+                            text = raw if isinstance(raw, str) else raw.decode()
+                            response = await hub.handle_daemon_command(text)
+                            await ws.send(response)
+                    except websockets.ConnectionClosed:
+                        pass
 
-                        hub.set_daemon_ws(None)
-                        logger.info("daemon_disconnected", url=candidate)
+                    hub.set_daemon_ws(None)
+                    logger.info("daemon_disconnected", url=candidate)
 
             except Exception as exc:
                 logger.debug("daemon_connect_failed", url=candidate, error=str(exc))
@@ -304,16 +354,9 @@ def _print_bridge_info(host: str, port: int, token: str | None) -> None:
     sys.stderr.flush()  # ensure output visible in background processes (BUG-9)
 
 
-async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> None:
-    """Start the bridge process (blocking)."""
-    cfg = load_bridge_config()
-
-    actual_host = host
-    base_port = port or cfg.bridge_port
-    hub = BridgeHub(cfg)
-
-    async def handle_health(_: web.Request) -> web.Response:
-        return web.json_response(
+def _build_app(hub: BridgeHub) -> Starlette:
+    async def handle_health(_: Request) -> JSONResponse:
+        return JSONResponse(
             {
                 "ok": True,
                 "service": "agentcloak-bridge",
@@ -322,24 +365,25 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
             }
         )
 
-    app = web.Application()
-    app.router.add_get("/ext", hub.handle_extension_ws)
-    app.router.add_get("/health", handle_health)
+    routes = [
+        WebSocketRoute("/ext", hub.handle_extension_ws),
+        Route("/health", handle_health, methods=["GET"]),
+    ]
+    return Starlette(routes=routes)
 
-    runner = web.AppRunner(app)
-    await runner.setup()
 
-    # Auto-port: try base_port, then base_port+1, ..., up to base_port+9
-    actual_port = base_port
+async def _try_bind_port(
+    *, config: uvicorn.Config, host: str, base_port: int
+) -> tuple[uvicorn.Server, int]:
+    """Probe ports and return a configured uvicorn.Server bound to a free one."""
     last_error: OSError | None = None
     for offset in range(_PORT_RANGE_SIZE):
         try_port = base_port + offset
+        loop = asyncio.get_running_loop()
         try:
-            site = web.TCPSite(runner, actual_host, try_port)
-            await site.start()
-            actual_port = try_port
-            last_error = None
-            break
+            sock_server = await loop.create_server(
+                lambda: asyncio.Protocol(), host, try_port
+            )
         except OSError as exc:
             last_error = exc
             if offset < _PORT_RANGE_SIZE - 1:
@@ -349,15 +393,47 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
                     next_port=try_port + 1,
                 )
             continue
+        sock_server.close()
+        await sock_server.wait_closed()
 
-    if last_error is not None:
+        config.port = try_port
+        server = uvicorn.Server(config=config)
+        return server, try_port
+
+    assert last_error is not None
+    raise last_error
+
+
+async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> None:
+    """Start the bridge process (blocking)."""
+    cfg = load_bridge_config()
+
+    actual_host = host
+    base_port = port or cfg.bridge_port
+    hub = BridgeHub(cfg)
+    app = _build_app(hub)
+
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=actual_host,
+        port=base_port,
+        log_level="warning",
+        access_log=False,
+        loop="asyncio",
+        ws="websockets",
+    )
+
+    try:
+        server, actual_port = await _try_bind_port(
+            config=uvicorn_config, host=actual_host, base_port=base_port
+        )
+    except OSError:
         logger.error(
             "all_ports_exhausted",
             range_start=base_port,
             range_end=base_port + _PORT_RANGE_SIZE - 1,
         )
-        await runner.cleanup()
-        raise last_error
+        raise
 
     logger.info("bridge_started", host=actual_host, port=actual_port)
 
@@ -369,19 +445,22 @@ async def start_bridge(*, host: str = "127.0.0.1", port: int | None = None) -> N
 
     _print_bridge_info(actual_host, actual_port, cfg.token)
 
-    # Wait for extension connection with first-run guidance
-    await _wait_for_extension(hub)
-
+    # Background tasks: extension prompt + daemon reconnect loop
+    extension_task = asyncio.create_task(_wait_for_extension(hub))
     daemon_task = asyncio.create_task(_connect_to_daemon(hub, cfg))
 
     try:
-        await asyncio.Event().wait()
+        await server.serve()
     finally:
+        extension_task.cancel()
         daemon_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await extension_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await daemon_task
         # Clean up bridge.json on shutdown
         with contextlib.suppress(Exception):
             (Path.home() / ".agentcloak" / "bridge.json").unlink(missing_ok=True)
-        await runner.cleanup()
 
 
 async def _wait_for_extension(hub: BridgeHub) -> None:

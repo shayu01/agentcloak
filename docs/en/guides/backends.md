@@ -152,15 +152,18 @@ cloak navigate "https://example.com" --backend bridge
 
 ### Tier resolution
 
-The `auto` tier (default) resolves to `cloak`. The legacy value `patchright` is automatically mapped to `playwright`.
+The `auto` tier (default) resolves to `cloak`.
 
 | Setting | Resolves to |
 |---------|------------|
 | `auto` | `cloak` |
 | `cloak` | `cloak` |
 | `playwright` | `playwright` |
-| `patchright` | `playwright` (legacy) |
 | `remote_bridge` | `remote_bridge` |
+
+> The legacy `patchright` tier value was removed in v0.2.0 — set
+> `default_tier = "playwright"` (or `cloak`) in `config.toml` if you have an
+> older config file lying around.
 
 ## Comparison
 

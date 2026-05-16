@@ -2,28 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 @app.command("status")
 def dialog_status() -> None:
     """Check for a pending dialog."""
     client = DaemonClient()
-    result = _run(client.dialog_status())
+    result = client.dialog_status_sync()
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
@@ -37,7 +30,7 @@ def dialog_accept(
 ) -> None:
     """Accept the pending dialog."""
     client = DaemonClient()
-    result = _run(client.dialog_handle("accept", text=text))
+    result = client.dialog_handle_sync("accept", text=text)
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)
@@ -47,7 +40,7 @@ def dialog_accept(
 def dialog_dismiss() -> None:
     """Dismiss the pending dialog."""
     client = DaemonClient()
-    result = _run(client.dialog_handle("dismiss"))
+    result = client.dialog_handle_sync("dismiss")
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)

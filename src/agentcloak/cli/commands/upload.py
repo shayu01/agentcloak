@@ -2,21 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer(invoke_without_command=True)
-
-
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
 
 
 @app.callback(invoke_without_command=True)
@@ -28,7 +21,7 @@ def do_upload(
 ) -> None:
     """Upload file(s) to a file input element."""
     client = DaemonClient()
-    result = _run(client.upload(index=index, files=file))
+    result = client.upload_sync(index=index, files=file)
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)

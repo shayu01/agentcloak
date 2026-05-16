@@ -2,28 +2,24 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
+from pathlib import Path  # noqa: TC003 — Typer needs runtime access
 
+import orjson
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 @app.command("start")
 def capture_start() -> None:
     """Start recording network traffic."""
     client = DaemonClient()
-    result = _run(client.capture_start())
+    result = client.capture_start_sync()
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
@@ -31,7 +27,7 @@ def capture_start() -> None:
 def capture_stop() -> None:
     """Stop recording network traffic."""
     client = DaemonClient()
-    result = _run(client.capture_stop())
+    result = client.capture_stop_sync()
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
@@ -39,18 +35,42 @@ def capture_stop() -> None:
 def capture_status() -> None:
     """Show capture recording status."""
     client = DaemonClient()
-    result = _run(client.capture_status())
+    result = client.capture_status_sync()
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
 @app.command("export")
 def capture_export(
     format: str = typer.Option("har", help="Export format: har or json."),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write the export to a file instead of stdout (HAR can be large).",
+    ),
 ) -> None:
     """Export captured traffic as HAR or JSON."""
     client = DaemonClient()
-    result = _run(client.capture_export(fmt=format))
-    output_json(result.get("data", result), seq=result.get("seq", 0))
+    result = client.capture_export_sync(fmt=format)
+    data = result.get("data", result)
+    seq = int(result.get("seq", 0) or 0)
+
+    if output is not None:
+        # HAR exports easily blow past the agent's context window; writing to
+        # disk keeps the stdout payload small and aligns with the existing
+        # ``screenshot -o`` ergonomic (F5 from dogfood-v0.2.0-pre-release).
+        output.write_bytes(orjson.dumps(data))
+        output_json(
+            {
+                "saved": str(output),
+                "format": format,
+                "bytes": output.stat().st_size,
+            },
+            seq=seq,
+        )
+        return
+
+    output_json(data, seq=seq)
 
 
 @app.command("analyze")
@@ -59,7 +79,7 @@ def capture_analyze(
 ) -> None:
     """Analyze captured traffic for API patterns."""
     client = DaemonClient()
-    result = _run(client.capture_analyze(domain=domain))
+    result = client.capture_analyze_sync(domain=domain)
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
@@ -67,7 +87,7 @@ def capture_analyze(
 def capture_clear() -> None:
     """Clear all captured traffic data."""
     client = DaemonClient()
-    result = _run(client.capture_clear())
+    result = client.capture_clear_sync()
     output_json(result.get("data", result), seq=result.get("seq", 0))
 
 
@@ -78,5 +98,5 @@ def capture_replay(
 ) -> None:
     """Replay the most recent captured request matching url+method."""
     client = DaemonClient()
-    result = _run(client.capture_replay(url=url, method=method))
+    result = client.capture_replay_sync(url=url, method=method)
     output_json(result.get("data", result), seq=result.get("seq", 0))

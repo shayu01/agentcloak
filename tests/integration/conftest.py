@@ -1,8 +1,15 @@
-"""Integration test fixtures — browser context (dual-backend) + local HTTP server."""
+"""Integration test fixtures — browser context (dual-backend) + local HTTP server.
+
+The local HTTP server is built on Starlette/uvicorn so the test stack matches
+the production toolchain (FastAPI + Starlette + httpx + websockets).
+"""
 
 from __future__ import annotations
 
+import asyncio
 import os
+import socket
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,7 +19,13 @@ if TYPE_CHECKING:
     import pytest
 
 import pytest_asyncio
-from aiohttp import web
+import uvicorn
+from starlette.applications import Starlette
+from starlette.requests import (
+    Request,  # noqa: TC002  (runtime annotation in async route handler)
+)
+from starlette.responses import RedirectResponse, Response
+from starlette.routing import Route
 
 # Headless by default; set AGENTCLOAK_TEST_HEADED=1 to run headed
 _HEADLESS = os.environ.get("AGENTCLOAK_TEST_HEADED", "").lower() not in ("1", "true")
@@ -24,43 +37,66 @@ _HEADLESS = os.environ.get("AGENTCLOAK_TEST_HEADED", "").lower() not in ("1", "t
 _PAGES_DIR = Path(__file__).parent / "pages"
 
 
-async def _create_static_app() -> web.Application:
-    """aiohttp app that serves static files from the pages/ directory."""
-    app = web.Application()
+def _build_static_app() -> Starlette:
+    """Starlette app that serves static files from the pages/ directory."""
 
-    async def _serve(request: web.Request) -> web.Response:
-        name = request.match_info["name"]
+    async def _serve(request: Request) -> Response:
+        name = request.path_params["name"]
         path = _PAGES_DIR / name
         if not path.is_file():
-            return web.Response(text="Not Found", status=404)
-        return web.Response(
-            body=path.read_bytes(),
-            content_type="text/html",
+            return Response("Not Found", status_code=404)
+        return Response(
+            content=path.read_bytes(),
+            media_type="text/html",
         )
 
-    app.router.add_get("/{name}", _serve)
-    # Redirect root to index.html
-    app.router.add_get(
-        "/",
-        lambda _: web.HTTPFound("/index.html"),
+    async def _root(_: Request) -> Response:
+        return RedirectResponse("/index.html")
+
+    return Starlette(
+        routes=[
+            Route("/", _root, methods=["GET"]),
+            Route("/{name:path}", _serve, methods=["GET"]),
+        ]
     )
-    return app
+
+
+def _pick_free_port() -> int:
+    """Reserve a free TCP port by binding to 0 and releasing immediately."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def local_server() -> AsyncGenerator[str, None]:
     """Session-scoped local HTTP server for test pages."""
-    app = await _create_static_app()
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    # Extract the actual port
-    assert runner.addresses
-    host, port = runner.addresses[0][:2]
-    base_url = f"http://{host}:{port}"
-    yield base_url
-    await runner.cleanup()
+    app = _build_static_app()
+    port = _pick_free_port()
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        access_log=False,
+        loop="asyncio",
+    )
+    server = uvicorn.Server(config=config)
+    task = asyncio.create_task(server.serve())
+
+    # Wait until uvicorn has started accepting connections.
+    for _ in range(50):
+        if server.started:
+            break
+        await asyncio.sleep(0.05)
+
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        yield base_url
+    finally:
+        server.should_exit = True
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 # ---------------------------------------------------------------------------

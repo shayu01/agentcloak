@@ -1,33 +1,36 @@
-"""Network request monitoring command."""
+"""Network request monitoring command.
+
+Exposed as a flat ``agentcloak network`` (no nested ``network network``) via
+the same ``@app.callback(invoke_without_command=True)`` pattern used by
+``doctor`` — F3 from dogfood-v0.2.0-pre-release.
+"""
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
-app = typer.Typer()
+app = typer.Typer(invoke_without_command=True)
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
-@app.command("network")
+@app.callback(invoke_without_command=True)
 def network_list(
+    ctx: typer.Context,
     since: int = typer.Option(
         0, "--since", help="Filter requests after this seq number."
     ),
 ) -> None:
     """List captured network requests."""
+    # A registered subcommand (none today) would take precedence; otherwise we
+    # run the callback. Keep the check so future subcommands can opt out.
+    if ctx.invoked_subcommand is not None:
+        return
     client = DaemonClient()
-    result = _run(client.network(since=since))
+    result = client.network_sync(since=since)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

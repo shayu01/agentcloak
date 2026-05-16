@@ -147,3 +147,4 @@ Read these when you need deeper guidance:
 | `references/data-and-spells.md` | Capture traffic, run spells, batch operations, fetch with cookies |
 | `references/remote-bridge.md` | Operate user's real Chrome browser via extension |
 | `references/troubleshooting.md` | Error recovery, dialog handling, daemon issues |
+| `references/commands-reference.md` | Full daemon route catalog with parameters, CLI / MCP bindings (auto-generated from OpenAPI spec) |

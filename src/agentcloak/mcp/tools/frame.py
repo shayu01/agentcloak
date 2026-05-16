@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
+
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_frame(
         kind: Literal["list", "focus"] = "list",
         name: str = "",
@@ -36,12 +40,11 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with frame list or focus confirmation.
         """
         if kind == "list":
-            result = await bridge.request("GET", "/frame/list")
-        else:
-            body: dict[str, Any] = {"main": main}
-            if name:
-                body["name"] = name
-            if url:
-                body["url"] = url
-            result = await bridge.request("POST", "/frame/focus", json_body=body)
-        return bridge.format_result(result)
+            return await format_call(client.frame_list())
+        return await format_call(
+            client.frame_focus(
+                name=name or None,
+                url=url or None,
+                main=main,
+            )
+        )

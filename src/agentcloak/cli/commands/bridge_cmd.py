@@ -15,10 +15,6 @@ __all__ = ["app"]
 app = typer.Typer()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 @app.command("start")
 def bridge_start(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind host for extension WS."),
@@ -61,27 +57,27 @@ def bridge_doctor() -> None:
         }
     )
 
-    # Check aiohttp (required for bridge WS)
-    try:
-        import aiohttp
-
-        checks.append(
-            {
-                "name": "aiohttp",
-                "ok": True,
-                "detail": aiohttp.__version__,
-                "hint": "",
-            }
-        )
-    except ImportError:
-        checks.append(
-            {
-                "name": "aiohttp",
-                "ok": False,
-                "detail": "not installed",
-                "hint": "pip install aiohttp",
-            }
-        )
+    # Check the WS toolchain — Starlette (server) + websockets (client).
+    for pkg_name in ("starlette", "websockets", "uvicorn"):
+        try:
+            mod = __import__(pkg_name)
+            checks.append(
+                {
+                    "name": pkg_name,
+                    "ok": True,
+                    "detail": getattr(mod, "__version__", "unknown"),
+                    "hint": "",
+                }
+            )
+        except ImportError:
+            checks.append(
+                {
+                    "name": pkg_name,
+                    "ok": False,
+                    "detail": "not installed",
+                    "hint": f"pip install {pkg_name}",
+                }
+            )
 
     all_ok = all(c["ok"] for c in checks)
     output_json({"healthy": all_ok, "checks": checks}, seq=0)
@@ -117,10 +113,10 @@ def bridge_claim(
         typer.echo("Error: provide --tab-id or --url-pattern", err=True)
         raise typer.Exit(1)
 
-    from agentcloak.cli.client import DaemonClient
+    from agentcloak.client import DaemonClient
 
     client = DaemonClient()
-    result = _run(client.bridge_claim(tab_id=tab_id, url_pattern=url_pattern))
+    result = client.bridge_claim_sync(tab_id=tab_id, url_pattern=url_pattern)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
@@ -141,10 +137,10 @@ def bridge_finalize(
       handoff     — ungroup tabs and leave them open for the user
       deliverable — rename the tab group to 'agentcloak results' (green)
     """
-    from agentcloak.cli.client import DaemonClient
+    from agentcloak.client import DaemonClient
 
     client = DaemonClient()
-    result = _run(client.bridge_finalize(mode=mode))
+    result = client.bridge_finalize_sync(mode=mode)
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

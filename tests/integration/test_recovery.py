@@ -23,7 +23,7 @@ async def test_connection_error_structured() -> None:
 
 async def test_client_auto_start_flag() -> None:
     """DaemonClient should have auto_start capability."""
-    from agentcloak.cli.client import DaemonClient
+    from agentcloak.client import DaemonClient
 
     # With auto_start disabled, should raise immediately on connect failure
     client = DaemonClient(port=19999, auto_start=False)
@@ -34,7 +34,7 @@ async def test_client_auto_start_flag() -> None:
 
 async def test_client_auto_started_flag_prevents_loop() -> None:
     """After one auto-start attempt, should not retry indefinitely."""
-    from agentcloak.cli.client import DaemonClient
+    from agentcloak.client import DaemonClient
 
     client = DaemonClient(port=19998, auto_start=True)
     # Simulate that auto-start already happened

@@ -4,20 +4,26 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": True})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    cfg = client.config  # single shared client snapshot.
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_wait(
         condition: Literal["selector", "url", "load", "js", "ms"],
         value: str = "",
-        timeout: int = 30000,
+        timeout: int = cfg.action_timeout,
         state: str = "visible",
     ) -> str:
         """Wait for a condition before continuing.
@@ -30,18 +36,19 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
                 - js: JS expression that must return truthy
                 - ms: Sleep for N milliseconds
             value: The selector/url/state/expression/milliseconds value
-            timeout: Max wait time in milliseconds (default 30000)
+            timeout: Max wait time in milliseconds (default from
+                config.action_timeout)
             state: Element state for selector condition:
                 visible (default), hidden, attached, detached
 
         Returns:
             JSON with condition matched and elapsed_ms.
         """
-        body = {
-            "condition": condition,
-            "value": value,
-            "timeout": timeout,
-            "state": state,
-        }
-        result = await bridge.request("POST", "/wait", json_body=body)
-        return bridge.format_result(result)
+        return await format_call(
+            client.wait(
+                condition=condition,
+                value=value,
+                timeout=timeout,
+                state=state,
+            )
+        )

@@ -1,9 +1,10 @@
-"""Browser backend implementations behind a unified Protocol."""
+"""Browser backend implementations behind a unified ABC base class."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentcloak.browser.base import BrowserContextBase
 from agentcloak.browser.protocol import BrowserContext
 from agentcloak.browser.state import BrowserState, ElementRef, PageSnapshot, TabInfo
 from agentcloak.core.types import StealthTier
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BrowserContext",
+    "BrowserContextBase",
     "BrowserState",
     "ElementRef",
     "PageSnapshot",
@@ -32,7 +34,7 @@ async def create_context(
     humanize: bool = False,
     extensions: list[str] | None = None,
     proxy_url: str | None = None,
-) -> BrowserContext:
+) -> BrowserContextBase:
     """Factory: create a browser context for the given stealth tier."""
     if tier == StealthTier.PLAYWRIGHT:
         from agentcloak.browser.playwright_ctx import launch_playwright

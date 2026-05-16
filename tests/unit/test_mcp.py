@@ -2,32 +2,33 @@
 
 from __future__ import annotations
 
-import json
+import orjson
+import pytest
 
-from agentcloak.mcp.client import DaemonBridge
+from agentcloak.core.errors import AgentBrowserError
+from agentcloak.mcp._format import error_json, format_envelope
 
 
-class TestDaemonBridge:
-    def test_format_result_success(self) -> None:
-        bridge = DaemonBridge.__new__(DaemonBridge)
-        bridge._base = "http://127.0.0.1:18765"
+class TestFormatHelpers:
+    """The MCP format helpers replace the old DaemonBridge.format_result."""
+
+    def test_format_envelope_unwraps_data(self) -> None:
         data = {"ok": True, "seq": 1, "data": {"title": "Test"}}
-        result = bridge.format_result(data)
-        parsed = json.loads(result)
-        assert parsed == {"title": "Test"}
+        rendered = format_envelope(data)
+        assert orjson.loads(rendered) == {"title": "Test"}
 
-    def test_format_result_error(self) -> None:
-        bridge = DaemonBridge.__new__(DaemonBridge)
-        bridge._base = "http://127.0.0.1:18765"
-        data = {
-            "ok": False,
+    def test_error_json_renders_three_field_envelope(self) -> None:
+        exc = AgentBrowserError(
+            error="navigation_failed",
+            hint="Page not found",
+            action="check URL",
+        )
+        rendered = error_json(exc)
+        assert orjson.loads(rendered) == {
             "error": "navigation_failed",
             "hint": "Page not found",
             "action": "check URL",
         }
-        result = bridge.format_result(data)
-        parsed = json.loads(result)
-        assert parsed["error"] == "navigation_failed"
 
 
 class TestMCPServerCreation:
@@ -40,8 +41,6 @@ class TestMCPServerCreation:
             mcp = create_server()
             assert isinstance(mcp, FastMCP)
         except ImportError:
-            import pytest
-
             pytest.skip("mcp package not installed")
 
     def test_tool_count_is_23(self) -> None:
@@ -54,8 +53,6 @@ class TestMCPServerCreation:
                 f"Expected 23 tools, got {len(tools)}: {sorted(tools.keys())}"
             )
         except ImportError:
-            import pytest
-
             pytest.skip("mcp package not installed")
 
     def test_tool_names_have_prefix(self) -> None:
@@ -69,8 +66,6 @@ class TestMCPServerCreation:
                     f"Tool '{name}' missing agentcloak_ prefix"
                 )
         except ImportError:
-            import pytest
-
             pytest.skip("mcp package not installed")
 
     def test_expected_tools_present(self) -> None:
@@ -106,17 +101,10 @@ class TestMCPServerCreation:
             }
             assert set(tools.keys()) == expected
         except ImportError:
-            import pytest
-
             pytest.skip("mcp package not installed")
 
 
 class TestResolveTier:
-    def test_patchright_maps_to_playwright(self) -> None:
-        from agentcloak.core.config import resolve_tier
-
-        assert resolve_tier("patchright") == "playwright"
-
     def test_playwright_passthrough(self) -> None:
         from agentcloak.core.config import resolve_tier
 

@@ -41,6 +41,8 @@ class StepContext:
 
 
 async def _step_fetch(params: Any, data: Any, ctx: StepContext) -> Any:
+    from agentcloak.core.config import load_config
+
     rendered: Any = render_deep(params, ctx.template_context(data))
     if isinstance(rendered, str):
         rendered = {"url": rendered}
@@ -50,7 +52,9 @@ async def _step_fetch(params: Any, data: Any, ctx: StepContext) -> Any:
     headers: dict[str, str] = cast("dict[str, str]", cfg.get("headers", {}))
     body: str | None = cfg.get("body")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    _, _agent_cfg = load_config()
+    _timeout = float(_agent_cfg.navigation_timeout)
+    async with httpx.AsyncClient(timeout=_timeout) as client:
         resp = await client.request(method, url, headers=headers, content=body)
         resp.raise_for_status()
         return resp.json()

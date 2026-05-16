@@ -7,6 +7,7 @@ __all__ = [
     "BackendError",
     "BrowserTimeoutError",
     "DaemonConnectionError",
+    "DialogBlockedError",
     "ElementNotFoundError",
     "NavigationError",
     "ProfileError",
@@ -15,7 +16,15 @@ __all__ = [
 
 
 class AgentBrowserError(Exception):
-    """Base exception carrying the three-field envelope."""
+    """Base exception carrying the three-field envelope.
+
+    Subclasses can override :attr:`status_code` to tell the FastAPI exception
+    handler which HTTP status to emit (defaults to ``400``). Carrying that
+    mapping on the exception itself means routes never need ``try/except`` to
+    translate domain errors into HTTP responses — they raise, the handler maps.
+    """
+
+    status_code: int = 400
 
     def __init__(self, *, error: str, hint: str, action: str) -> None:
         self.error = error
@@ -58,3 +67,30 @@ class SecurityError(AgentBrowserError):
 
 class BackendError(AgentBrowserError):
     """Browser backend internal failure."""
+
+
+class DialogBlockedError(AgentBrowserError):
+    """A pending browser dialog is blocking new actions.
+
+    Carries the dialog metadata (``type``, ``message``, optional
+    ``default_value``) so agents can decide how to handle it. Status code is
+    409 (Conflict) because the action is valid but the page state prevents it.
+    """
+
+    status_code = 409
+
+    def __init__(
+        self,
+        *,
+        error: str,
+        hint: str,
+        action: str,
+        dialog: dict[str, Any],
+    ) -> None:
+        super().__init__(error=error, hint=hint, action=action)
+        self.dialog = dialog
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = super().to_dict()
+        payload["dialog"] = self.dialog
+        return payload

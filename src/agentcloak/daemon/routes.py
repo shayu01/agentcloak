@@ -1,878 +1,168 @@
-"""Endpoint catalog — one route per browser command."""
+"""FastAPI route definitions — thin shells over the service layer.
+
+Each route handler does three things:
+1. parse the Pydantic request body
+2. delegate to a service in :mod:`agentcloak.daemon.services`
+3. wrap the service's return value in the ``OkEnvelope`` shape
+
+Business logic (stale-ref retry, snapshot diff, profile CRUD, capture export,
+doctor checks) lives in the services. Routes intentionally avoid framework
+specifics — when something goes wrong they either raise
+:class:`AgentBrowserError` (caught by the global handler) or
+:class:`HTTPException` with a structured detail dict.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import re
+import logging
 from typing import Any
 
 import orjson
 import structlog
-from aiohttp import WSMsgType, web
-from aiohttp.web import Request, Response
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from agentcloak.browser.playwright_ctx import screenshot_to_base64
-from agentcloak.core.types import PROFILE_NAME_RE as _PROFILE_NAME_RE
+from agentcloak.core.errors import ProfileError
+
+# Annotated dependency aliases (BrowserCtxDep etc.) must be available at
+# runtime so FastAPI can resolve `Depends()` markers when registering routes —
+# placing them under TYPE_CHECKING would break the framework.
+from agentcloak.daemon.dependencies import (  # noqa: TC001
+    BrowserCtxDep,
+    ConfigDep,
+    RemoteCtxDep,
+    RequiredRemoteCtxDep,
+)
+
+# Pydantic Request *and* Response models must be runtime-resolvable so
+# FastAPI can build OpenAPI schemas at startup — keep them out of
+# TYPE_CHECKING. Each route declares ``response_model=OkEnvelope[XxxResponse]``
+# (or a flat ``HealthResponse`` for the un-enveloped endpoints), which is
+# what feeds the auto-generated OpenAPI spec consumed by T8.
+from agentcloak.daemon.models import (
+    ActionRequest,
+    ActionResponse,
+    BatchActionRequest,
+    BatchActionResponse,
+    BridgeClaimRequest,
+    BridgeFinalizeRequest,
+    BridgeOpResponse,
+    CaptureAnalyzeResponse,
+    CaptureClearResponse,
+    CaptureExportResponse,
+    CaptureReplayRequest,
+    CaptureReplayResponse,
+    CaptureStatusResponse,
+    CDPEndpointResponse,
+    CookiesExportRequest,
+    CookiesExportResponse,
+    CookiesImportRequest,
+    CookiesImportResponse,
+    DialogHandleRequest,
+    DialogHandleResponse,
+    DialogStatusResponse,
+    EvaluateRequest,
+    EvaluateResponse,
+    FetchRequest,
+    FetchResponse,
+    FrameFocusRequest,
+    FrameFocusResponse,
+    FrameListResponse,
+    HealthResponse,
+    NavigateRequest,
+    NavigateResponse,
+    NetworkResponse,
+    OkEnvelope,
+    ProfileCreateFromCurrentRequest,
+    ProfileCreateFromCurrentResponse,
+    ProfileCreateRequest,
+    ProfileCreateResponse,
+    ProfileDeleteRequest,
+    ProfileListResponse,
+    ResumeResponse,
+    ScreenshotResponse,
+    ShutdownResponse,
+    SnapshotResponse,
+    SpellListResponse,
+    SpellRunRequest,
+    SpellRunResponse,
+    TabCloseRequest,
+    TabListResponse,
+    TabNewRequest,
+    TabOpResponse,
+    TabSwitchRequest,
+    UploadRequest,
+    UploadResponse,
+    WaitRequest,
+    WaitResponse,
+)
+from agentcloak.daemon.services import (
+    ActionService,
+    CaptureService,
+    DiagnosticService,
+    ProfileService,
+    SnapshotService,
+)
 
 logger = structlog.get_logger()
 
-__all__ = ["setup_routes"]
+__all__ = [
+    "register_routers",
+    "router",
+    "setup_routes",
+]
+
+router = APIRouter()
 
 
-def _json(data: dict[str, Any], *, status: int = 200) -> Response:
-    return Response(
-        body=orjson.dumps(data),
-        status=status,
-        content_type="application/json",
-    )
+def _ok(data: Any, *, seq: int) -> dict[str, Any]:
+    """Wrap a payload in the success envelope shared with the OkEnvelope model."""
+    return {"ok": True, "seq": seq, "data": data}
 
 
-def _ok(data: dict[str, Any], *, seq: int) -> Response:
-    return _json({"ok": True, "seq": seq, "data": data})
-
-
-def setup_routes(app: web.Application) -> None:
-    app.router.add_get("/health", handle_health)
-    app.router.add_get("/ext", handle_ext_ws)
-    app.router.add_post("/navigate", handle_navigate)
-    app.router.add_get("/screenshot", handle_screenshot)
-    app.router.add_get("/snapshot", handle_snapshot)
-    app.router.add_post("/evaluate", handle_evaluate)
-    app.router.add_get("/network", handle_network)
-    app.router.add_post("/action", handle_action)
-    app.router.add_post("/action/batch", handle_action_batch)
-    app.router.add_post("/fetch", handle_fetch)
-    app.router.add_post("/shutdown", handle_shutdown)
-    app.router.add_get("/bridge/ws", handle_bridge_ws)
-    app.router.add_post("/cookies/export", handle_cookies_export)
-    app.router.add_post("/cookies/import", handle_cookies_import)
-    app.router.add_post("/capture/start", handle_capture_start)
-    app.router.add_post("/capture/stop", handle_capture_stop)
-    app.router.add_get("/capture/status", handle_capture_status)
-    app.router.add_get("/capture/export", handle_capture_export)
-    app.router.add_get("/capture/analyze", handle_capture_analyze)
-    app.router.add_post("/capture/clear", handle_capture_clear)
-    app.router.add_get("/cdp/endpoint", handle_cdp_endpoint)
-    app.router.add_get("/tabs", handle_tab_list)
-    app.router.add_post("/tab/new", handle_tab_new)
-    app.router.add_post("/tab/close", handle_tab_close)
-    app.router.add_post("/tab/switch", handle_tab_switch)
-    app.router.add_get("/resume", handle_resume)
-    app.router.add_post("/spell/run", handle_spell_run)
-    app.router.add_get("/spell/list", handle_spell_list)
-    app.router.add_post("/capture/replay", handle_capture_replay)
-    app.router.add_post(
-        "/profile/create-from-current", handle_profile_create_from_current
-    )
-    app.router.add_get("/profile/list", handle_profile_list)
-    app.router.add_post("/profile/create", handle_profile_create)
-    app.router.add_post("/profile/delete", handle_profile_delete)
-    # Phase 5g: dialog, wait, upload, frame
-    app.router.add_get("/dialog/status", handle_dialog_status)
-    app.router.add_post("/dialog/handle", handle_dialog_handle)
-    app.router.add_post("/wait", handle_wait)
-    app.router.add_post("/upload", handle_upload)
-    app.router.add_get("/frame/list", handle_frame_list)
-    app.router.add_post("/frame/focus", handle_frame_focus)
-    # Phase 5h: bridge UX — tab claiming + session lifecycle
-    app.router.add_post("/bridge/claim", handle_bridge_claim)
-    app.router.add_post("/bridge/finalize", handle_bridge_finalize)
-
-
-def _ctx(request: Request) -> Any:
-    return request.app["browser_ctx"]
-
-
-async def handle_health(request: Request) -> Response:
-    data: dict[str, Any] = {"ok": True, "service": "agentcloak-daemon"}
-    ctx = _ctx(request)
-    data["stealth_tier"] = ctx.stealth_tier.value
-    data["seq"] = ctx.seq
-    data["capture_recording"] = ctx.capture_store.recording
-    data["capture_entries"] = len(ctx.capture_store)
-
-    try:
-        snap = await ctx.snapshot(mode="accessible")
-        data["current_url"] = snap.url
-        data["current_title"] = snap.title
-    except Exception:
-        data["current_url"] = None
-        data["current_title"] = None
-
-    local_proxy = request.app.get("local_proxy")
-    if local_proxy is not None:
-        try:
-            data["local_proxy"] = {
-                "running": local_proxy.is_running,
-                "url": local_proxy.proxy_url,
-            }
-        except Exception:
-            data["local_proxy"] = {"running": False}
-    return _json(data)
-
-
-async def handle_navigate(request: Request) -> Response:
-    body = await request.json()
-    url: str = body["url"]
-    timeout: float = body.get("timeout", 30.0)
-    include_snapshot: bool = body.get("include_snapshot", False)
-    snapshot_mode: str = body.get("snapshot_mode", "compact")
-    ctx = _ctx(request)
-    result = await ctx.navigate(url, timeout=timeout)
-    await _update_resume(request, action_summary={"kind": "navigate", "url": url})
-
-    if include_snapshot:
-        try:
-            snap = await ctx.snapshot(mode=snapshot_mode)
-            result["snapshot"] = {
-                "tree_text": snap.tree_text,
-                "mode": snap.mode,
-                "total_nodes": snap.total_nodes,
-                "total_interactive": snap.total_interactive,
-            }
-        except Exception:
-            logger.debug("include_snapshot_failed", exc_info=True)
-
-    return _ok(result, seq=ctx.seq)
-
-
-async def handle_screenshot(request: Request) -> Response:
-    ctx = _ctx(request)
-    full_page = request.query.get("full_page", "false") == "true"
-    fmt = request.query.get("format", "jpeg")
-    quality_raw = request.query.get("quality", "80")
-    try:
-        quality = int(quality_raw)
-    except ValueError:
-        quality = 80
-    raw = await ctx.screenshot(full_page=full_page, format=fmt, quality=quality)
-    b64 = screenshot_to_base64(raw)
-    return _ok(
-        {"base64": b64, "size": len(raw), "format": fmt},
-        seq=ctx.seq,
-    )
-
-
-async def handle_snapshot(request: Request) -> Response:
-    ctx = _ctx(request)
-    mode = request.query.get("mode", "accessible")
-
-    # Parse progressive loading params
-    max_nodes_raw = request.query.get("max_nodes", "0")
-    max_nodes = int(max_nodes_raw) if max_nodes_raw.isdigit() else 0
-    max_chars_raw = request.query.get("max_chars", "0")
-    max_chars = int(max_chars_raw) if max_chars_raw.isdigit() else 0
-    focus_raw = request.query.get("focus", "0")
-    focus = int(focus_raw) if focus_raw.isdigit() else 0
-    offset_raw = request.query.get("offset", "0")
-    offset = int(offset_raw) if offset_raw.isdigit() else 0
-
-    include_sm = request.query.get("include_selector_map", "true").lower() != "false"
-    frames = request.query.get("frames", "false").lower() in ("true", "1", "yes")
-    diff = request.query.get("diff", "false").lower() in ("true", "1", "yes")
-
-    snap = await ctx.snapshot(
-        mode=mode,
-        max_nodes=max_nodes,
-        max_chars=max_chars,
-        focus=focus,
-        offset=offset,
-        frames=frames,
-    )
-
-    # Snapshot diff: compare with previous cached_lines for this tab
-    diff_applied = False
-    if diff:
-        from agentcloak.browser._snapshot_builder import (
-            diff_snapshots,
-            render_diff_tree,
-        )
-
-        prev_cache = request.app.get("_prev_snapshot_lines")
-        cur_cache = getattr(ctx, "_cached_lines", None)
-        if prev_cache is not None and cur_cache is not None:
-            diff_lines = diff_snapshots(prev_cache, cur_cache)
-            snap = type(snap)(
-                seq=snap.seq,
-                url=snap.url,
-                title=snap.title,
-                mode=snap.mode,
-                tree_text=render_diff_tree(diff_lines),
-                selector_map=snap.selector_map,
-                security_warnings=snap.security_warnings,
-                total_nodes=snap.total_nodes,
-                total_interactive=snap.total_interactive,
-                truncated_at=snap.truncated_at,
-            )
-            diff_applied = True
-
-    # Cache current cached_lines for next diff
-    cur_cache = getattr(ctx, "_cached_lines", None)
-    if cur_cache is not None:
-        request.app["_prev_snapshot_lines"] = cur_cache
-
-    data: dict[str, Any] = {
-        "url": snap.url,
-        "title": snap.title,
-        "mode": snap.mode,
-        "tree_text": snap.tree_text,
-        "tree_size": len(snap.tree_text),
-        "truncated": snap.truncated_at > 0,
-        "total_nodes": snap.total_nodes,
-        "total_interactive": snap.total_interactive,
+def _profile_error_to_http(exc: ProfileError) -> HTTPException:
+    """Translate a ProfileError into a FastAPI HTTPException with the right status."""
+    status_map = {
+        "missing_name": 400,
+        "invalid_profile_name": 400,
+        "invalid_profile_path": 400,
+        "profile_exists": 409,
+        "profile_not_found": 404,
+        "profile_writer_failed": 500,
     }
-    if diff:
-        data["diff"] = diff_applied
-    if snap.truncated_at > 0:
-        data["truncated_at"] = snap.truncated_at
-    if include_sm:
-        data["selector_map"] = {
-            str(k): {
-                "index": v.index,
-                "tag": v.tag,
-                "role": v.role,
-                "text": v.text,
-                "attributes": v.attributes,
-            }
-            for k, v in snap.selector_map.items()
-        }
-    if snap.security_warnings:
-        data["security_warnings"] = snap.security_warnings
-    return _ok(data, seq=ctx.seq)
-
-
-async def handle_evaluate(request: Request) -> Response:
-    body = await request.json()
-    js: str = body["js"]
-    world: str = body.get("world", "main")
-    max_return_size: int = int(body.get("max_return_size", 50_000))
-    ctx = _ctx(request)
-    result = await ctx.evaluate(js, world=world)
-
-    # Truncate large results before they exceed MCP token limits.
-    result_bytes = orjson.dumps(result)
-    total_size = len(result_bytes)
-    if total_size > max_return_size:
-        result_repr = (
-            result_bytes[:max_return_size].decode("utf-8", errors="replace")
-            + "\n[...truncated...]"
-        )
-        return _ok(
-            {"result": result_repr, "truncated": True, "total_size": total_size},
-            seq=ctx.seq,
-        )
-
-    return _ok(
-        {"result": result, "truncated": False, "total_size": total_size}, seq=ctx.seq
+    return HTTPException(
+        status_code=status_map.get(exc.error, 400),
+        detail=exc.to_dict(),
     )
 
 
-async def handle_network(request: Request) -> Response:
-    ctx = _ctx(request)
-    since_raw = request.query.get("since", "0")
-    since: int | str = int(since_raw) if since_raw.isdigit() else since_raw
-    reqs = await ctx.network(since=since)
-    return _ok({"requests": reqs, "count": len(reqs)}, seq=ctx.seq)
+def _profiles_dir():  # type: ignore[no-untyped-def]
+    """Load the profiles directory from the daemon config snapshot."""
+    from agentcloak.core.config import load_config
 
+    paths, _ = load_config()
+    return paths.profiles_dir
 
-async def handle_action(request: Request) -> Response:
-    from agentcloak.core.errors import ElementNotFoundError
 
-    body = await request.json()
-    kind: str = body["kind"]
-    index = body.get("index")
-    target = str(index) if index is not None else body.get("target", "")
-    include_snapshot: bool = body.get("include_snapshot", False)
-    snapshot_mode: str = body.get("snapshot_mode", "compact")
-    extra = {
-        k: v
-        for k, v in body.items()
-        if k not in ("kind", "index", "target", "include_snapshot", "snapshot_mode")
-    }
-    ctx = _ctx(request)
-
-    # Execute action with stale ref auto-retry (R4.5)
-    try:
-        result = await ctx.action(kind, target, **extra)
-    except ElementNotFoundError:
-        # Only retry if target looks like a numeric [N] ref
-        if target and target.isdigit():
-            logger.info(
-                "stale_ref_retry",
-                kind=kind,
-                target=target,
-                reason="element_not_found",
-            )
-            await ctx.snapshot(mode="compact")
-            result = await ctx.action(kind, target, **extra)
-            result["retried"] = True
-        else:
-            raise
-
-    # R0/R1: if blocked_by_dialog, return as error response
-    if result.get("error") == "blocked_by_dialog":
-        return _json(result, status=409)
-
-    summary: dict[str, Any] = {"kind": kind, "target": target}
-    if kind in ("fill", "type"):
-        summary["text"] = extra.get("text", "")
-    elif kind in ("press", "keydown", "keyup"):
-        summary["key"] = extra.get("key", "")
-    elif kind == "scroll":
-        summary["direction"] = extra.get("direction", "down")
-    elif kind == "select":
-        summary["value"] = extra.get("value", "")
-    await _update_resume(request, action_summary=summary)
-
-    # R4.3: includeSnapshot — attach compact snapshot to action result
-    if include_snapshot:
-        try:
-            snap = await ctx.snapshot(mode=snapshot_mode)
-            result["snapshot"] = {
-                "tree_text": snap.tree_text,
-                "mode": snap.mode,
-                "total_nodes": snap.total_nodes,
-                "total_interactive": snap.total_interactive,
-            }
-        except Exception:
-            logger.debug("include_snapshot_failed", exc_info=True)
-
-    return _ok(result, seq=ctx.seq)
-
-
-async def handle_action_batch(request: Request) -> Response:
-    body = await request.json()
-    actions: list[dict[str, Any]] = body.get("actions", [])
-    sleep_s: float = body.get("sleep", 0.0)
-    settle_timeout: int = int(
-        body.get("settle_timeout", request.app.get("batch_settle_timeout", 5000))
-    )
-    ctx = _ctx(request)
-
-    # R4.4: if any action contains $N.path references, resolve during execution
-    if _batch_has_refs(actions):
-        result = await _run_batch_with_refs(
-            ctx, actions, sleep_s=sleep_s, settle_timeout=settle_timeout
-        )
-    else:
-        result = await ctx.action_batch(
-            actions, sleep=sleep_s, settle_timeout=settle_timeout
-        )
-    return _ok(result, seq=ctx.seq)
-
-
-# -- $N batch reference resolution (R4.4) --
-
-_REF_PATTERN = re.compile(r"^\$(\d+)\.(.+)$")
-
-
-def _batch_has_refs(actions: list[dict[str, Any]]) -> bool:
-    """Check if any action param contains a $N.path reference."""
-    for act in actions:
-        for val in act.values():
-            if isinstance(val, str) and _REF_PATTERN.match(val):
-                return True
-    return False
-
-
-def _resolve_action_refs(
-    params: dict[str, Any], results: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Replace $N.path string values in params with values from prior results.
-
-    Only top-level string values matching the ``$N.dotted.path`` pattern are
-    resolved. N must be a valid index into *results* (0-based). Path
-    components are traversed with dict key lookup.
-    """
-    resolved = {}
-    for key, val in params.items():
-        if isinstance(val, str):
-            m = _REF_PATTERN.match(val)
-            if m:
-                idx = int(m.group(1))
-                path = m.group(2)
-                if 0 <= idx < len(results):
-                    resolved[key] = _traverse(results[idx], path)
-                    continue
-        resolved[key] = val
-    return resolved
-
-
-def _traverse(obj: Any, path: str) -> Any:
-    """Walk a dotted path through nested dicts."""
-    for segment in path.split("."):
-        if isinstance(obj, dict):
-            obj = obj[segment]
-        else:
-            raise KeyError(f"Cannot traverse '{segment}' on {type(obj).__name__}")
-    return obj
-
-
-async def _run_batch_with_refs(
-    ctx: Any,
-    actions: list[dict[str, Any]],
-    *,
-    sleep_s: float = 0.0,
-    settle_timeout: int = 5000,
-) -> dict[str, Any]:
-    """Execute batch actions with $N.path reference resolution between steps.
-
-    Mirrors the backend's action_batch logic but resolves references from
-    prior results before each action.
-    """
-    results: list[dict[str, Any]] = []
-    total = len(actions)
-
-    if total == 0:
-        return {"results": [], "completed": 0, "total": 0}
-
-    for i, act in enumerate(actions):
-        # Resolve $N references from prior results
-        try:
-            resolved_act = _resolve_action_refs(act, results)
-        except (KeyError, IndexError, TypeError) as exc:
-            results.append(
-                {
-                    "ok": False,
-                    "error": "ref_resolution_failed",
-                    "hint": f"Failed to resolve $N reference in action {i}: {exc}",
-                    "action": "check that $N index is valid and path exists in result",
-                }
-            )
-            return {
-                "results": results,
-                "completed": i,
-                "total": total,
-                "aborted_reason": "ref_resolution_failed",
-            }
-
-        kind = resolved_act.get("kind", resolved_act.get("action", ""))
-        idx = resolved_act.get("index")
-        target = str(idx) if idx is not None else resolved_act.get("target", "")
-        extra = {
-            k: v
-            for k, v in resolved_act.items()
-            if k not in ("kind", "action", "index", "target")
-        }
-
-        # Handle 'wait' as batch step (same as backend)
-        if kind == "wait":
-            try:
-                result = await ctx.wait(
-                    condition=extra.get("condition", "ms"),
-                    value=str(extra.get("value", "1000")),
-                    timeout=int(extra.get("timeout", 30000)),
-                    state=str(extra.get("state", "visible")),
-                )
-            except Exception as exc:
-                result = {"ok": False, "error": str(exc), "action": "wait"}
-            results.append(result)
-            continue
-
-        result = await ctx.action(str(kind), str(target), **extra)
-        results.append(result)
-
-        # Dialog interruption
-        if result.get("error") == "blocked_by_dialog":
-            remaining = [
-                {
-                    "index": j,
-                    "kind": actions[j].get("kind", actions[j].get("action", "")),
-                }
-                for j in range(i + 1, total)
-            ]
-            return {
-                "results": results,
-                "completed": i,
-                "total": total,
-                "aborted_reason": "dialog_pending",
-                "dialog": result.get("dialog"),
-                "remaining": remaining,
-            }
-
-        if result.get("caused_navigation"):
-            return {
-                "results": results,
-                "completed": i + 1,
-                "total": total,
-                "aborted_reason": "url_changed",
-            }
-
-        if sleep_s > 0 and i < total - 1:
-            await asyncio.sleep(sleep_s)
-
-    return {"results": results, "completed": total, "total": total}
-
-
-async def handle_fetch(request: Request) -> Response:
-    body = await request.json()
-    url: str = body["url"]
-    method: str = body.get("method", "GET")
-    req_body: str | None = body.get("body")
-    headers: dict[str, str] | None = body.get("headers")
-    timeout: float = body.get("timeout", 30.0)
-    ctx = _ctx(request)
-    result = await ctx.fetch(
-        url, method=method, body=req_body, headers=headers, timeout=timeout
-    )
-    return _ok(result, seq=ctx.seq)
-
-
-async def handle_shutdown(request: Request) -> Response:
-    # Localhost check is now handled by error_middleware for all endpoints.
-    request.app["shutdown_event"].set()
-    return _ok({}, seq=0)
-
-
-def _check_bridge_token(request: Request) -> bool:
-    """Verify bridge auth token. Localhost connections skip auth."""
-    peername = request.transport and request.transport.get_extra_info("peername")
-    if peername and peername[0] in ("127.0.0.1", "::1"):
-        return True
-
-    expected = request.app.get("bridge_token")
-    if not expected:
-        return True
-
-    auth = request.headers.get("Authorization", "")
-    return auth == f"Bearer {expected}"
-
-
-async def handle_bridge_ws(request: Request) -> web.WebSocketResponse:
-    """WebSocket endpoint for bridge connection."""
-    if not _check_bridge_token(request):
-        raise web.HTTPUnauthorized(text="invalid bridge token")
-
-    from agentcloak.browser.remote_ctx import RemoteBridgeContext
-
-    ws = web.WebSocketResponse(heartbeat=30.0)
-    await ws.prepare(request)
-
-    remote_ctx = RemoteBridgeContext(bridge_ws=ws)
-    request.app["bridge_ws"] = ws
-    request.app["remote_ctx"] = remote_ctx
-
-    async for msg in ws:
-        if msg.type == WSMsgType.TEXT:
-            remote_ctx.feed_message(msg.data)
-        elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
-            break
-
-    request.app.pop("bridge_ws", None)
-    request.app.pop("remote_ctx", None)
-    return ws
-
-
-async def handle_ext_ws(request: Request) -> web.WebSocketResponse:
-    """Direct WebSocket endpoint for Chrome Extension (local mode).
-
-    When the Extension connects directly to the daemon (no bridge process),
-    it uses this endpoint.  The daemon wraps the WS in a RemoteBridgeContext
-    and stores it alongside the local browser context so that bridge-style
-    commands work transparently.
-    """
-    if not _check_bridge_token(request):
-        raise web.HTTPUnauthorized(text="invalid bridge token")
-
-    from agentcloak.browser.remote_ctx import RemoteBridgeContext
-
-    ws = web.WebSocketResponse(heartbeat=30.0)
-    await ws.prepare(request)
-
-    remote_ctx = RemoteBridgeContext(bridge_ws=ws)
-    request.app["ext_ws"] = ws
-    request.app["remote_ctx"] = remote_ctx
-
-    logger.info("ext_ws_connected", remote=request.remote)
-
-    async for msg in ws:
-        if msg.type == WSMsgType.TEXT:
-            remote_ctx.feed_message(msg.data)
-        elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
-            break
-
-    request.app.pop("ext_ws", None)
-    request.app.pop("remote_ctx", None)
-    logger.info("ext_ws_disconnected")
-    return ws
-
-
-async def _require_remote_ctx(request: Request) -> Any:
-    """Get the remote bridge context or raise 400 if not connected."""
-    remote_ctx = request.app.get("remote_ctx")
-    if remote_ctx is None:
-        raise web.HTTPBadRequest(
-            text='{"ok":false,"error":"no_bridge_connected",'
-            '"hint":"No Chrome Extension connected via bridge or /ext",'
-            '"action":"ensure the Chrome Extension is connected"}',
-            content_type="application/json",
-        )
-    return remote_ctx
-
-
-async def handle_bridge_claim(request: Request) -> Response:
-    """Claim a user tab by ID or URL pattern via the Chrome Extension."""
-    body = await request.json()
-    remote_ctx = await _require_remote_ctx(request)
-
-    params: dict[str, Any] = {}
-    tab_id = body.get("tab_id")
-    url_pattern = body.get("url_pattern")
-    if tab_id is not None:
-        params["tabId"] = tab_id
-    if url_pattern is not None:
-        params["urlPattern"] = url_pattern
-
-    result = await remote_ctx.send_command("claim", params)
-    return _ok(result, seq=0)
-
-
-async def handle_bridge_finalize(request: Request) -> Response:
-    """Finalize agent session — close, handoff, or mark tabs as deliverable."""
-    body = await request.json()
-    remote_ctx = await _require_remote_ctx(request)
-
-    mode = body.get("mode", "close")
-    result = await remote_ctx.send_command("finalize", {"mode": mode})
-    return _ok(result, seq=0)
-
-
-async def handle_cookies_export(request: Request) -> Response:
-    """Export cookies from local browser or remote bridge."""
-    body = await request.json()
-    url: str | None = body.get("url")
-
-    remote_ctx = request.app.get("remote_ctx")
-    if remote_ctx is not None:
-        from agentcloak.browser.remote_ctx import RemoteBridgeContext
-
-        if not isinstance(remote_ctx, RemoteBridgeContext):
-            raise RuntimeError("remote_ctx is not a RemoteBridgeContext instance")
-        params: dict[str, Any] = {}
-        if url:
-            params["url"] = url
-        result = await remote_ctx.send_command("cookies", params)
-        return _ok({"cookies": result}, seq=0)
-
-    ctx = _ctx(request)
-    browser_context = ctx._get_browser_context()
-    if url:
-        cookies = await browser_context.cookies(url)
-    else:
-        cookies = await browser_context.cookies()
-    serializable = [
-        {
-            "name": c.get("name", ""),
-            "value": c.get("value", ""),
-            "domain": c.get("domain", ""),
-            "path": c.get("path", "/"),
-            "expires": c.get("expires", -1),
-            "httpOnly": c.get("httpOnly", False),
-            "secure": c.get("secure", False),
-            "sameSite": c.get("sameSite", "None"),
-        }
-        for c in cookies
-    ]
-    return _ok({"cookies": serializable, "count": len(serializable)}, seq=ctx.seq)
-
-
-async def handle_cookies_import(request: Request) -> Response:
-    """Import cookies into the local browser context."""
-    body = await request.json()
-    cookies: list[dict[str, Any]] = body.get("cookies", [])
-    if not cookies:
-        return _json(
-            {
-                "ok": False,
-                "error": "no_cookies",
-                "hint": "No cookies provided",
-                "action": "pass cookies as JSON array in 'cookies' field",
-            },
-            status=400,
-        )
-    ctx = _ctx(request)
-    browser_context = ctx._get_browser_context()
-    await browser_context.add_cookies(cookies)
-    return _ok({"imported": len(cookies)}, seq=ctx.seq)
-
-
-async def handle_capture_start(request: Request) -> Response:
-    ctx = _ctx(request)
-    ctx.capture_store.start()
-    return _ok({"recording": True}, seq=ctx.seq)
-
-
-async def handle_capture_stop(request: Request) -> Response:
-    ctx = _ctx(request)
-    ctx.capture_store.stop()
-    return _ok({"recording": False, "entries": len(ctx.capture_store)}, seq=ctx.seq)
-
-
-async def handle_capture_status(request: Request) -> Response:
-    ctx = _ctx(request)
-    store = ctx.capture_store
-    return _ok({"recording": store.recording, "entries": len(store)}, seq=ctx.seq)
-
-
-async def handle_capture_export(request: Request) -> Response:
-    from agentcloak.core.har import to_har
-
-    ctx = _ctx(request)
-    fmt = request.query.get("format", "har")
-    entries = ctx.capture_store.entries()
-
-    if fmt == "json":
-        return _ok(
-            {"entries": ctx.capture_store.to_dict_list(), "count": len(entries)},
-            seq=ctx.seq,
-        )
-
-    har = to_har(entries)
-    return _ok(har, seq=ctx.seq)
-
-
-async def handle_capture_analyze(request: Request) -> Response:
-    from agentcloak.spells.analyzer import PatternAnalyzer
-
-    ctx = _ctx(request)
-    domain = request.query.get("domain")
-    if domain:
-        entries = ctx.capture_store.entries_by_domain(domain)
-    else:
-        entries = ctx.capture_store.api_entries()
-
-    try:
-        analyzer = PatternAnalyzer(entries)
-        patterns = analyzer.analyze()
-    except Exception:
-        logger.exception("capture_analyze_failed")
-        return _json(
-            {
-                "ok": False,
-                "error": "analyze_failed",
-                "hint": "PatternAnalyzer raised an exception; check daemon logs",
-                "action": "try capture export --format json to inspect raw entries",
-            },
-            status=500,
-        )
-
-    patterns_data: list[dict[str, Any]] = []
-    for p in patterns:
-        # Ensure status_codes keys are strings for JSON serialization
-        status_codes = {str(k): v for k, v in p.status_codes.items()}
-        patterns_data.append(
-            {
-                "method": p.method,
-                "path": p.path,
-                "domain": p.domain,
-                "call_count": p.call_count,
-                "query_params": p.query_params,
-                "status_codes": status_codes,
-                "auth_headers": p.auth_headers,
-                "content_type": p.content_type,
-                "category": p.category,
-                "strategy": p.strategy.value,
-                "request_schema": p.request_schema,
-                "response_schema": p.response_schema,
-                "example_urls": p.example_urls,
-            }
-        )
-
-    return _ok({"patterns": patterns_data, "count": len(patterns_data)}, seq=ctx.seq)
-
-
-async def handle_capture_clear(request: Request) -> Response:
-    ctx = _ctx(request)
-    ctx.capture_store.clear()
-    return _ok({"cleared": True}, seq=ctx.seq)
-
-
-async def handle_cdp_endpoint(request: Request) -> Response:
-    """Return the CDP WebSocket URL for jshookmcp browser_attach."""
-    import aiohttp
-
-    ctx = _ctx(request)
-    cdp_port: int | None = getattr(ctx, "_cdp_port", None)
-    if not cdp_port:
-        return _json(
-            {
-                "ok": False,
-                "error": "no_cdp_port",
-                "hint": "No CDP port available",
-                "action": "restart daemon — CDP port is allocated at browser launch",
-            },
-            status=503,
-        )
-
-    http_url = f"http://127.0.0.1:{cdp_port}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{http_url}/json/version", timeout=aiohttp.ClientTimeout(total=3)
-            ) as resp:
-                info = await resp.json(content_type=None)
-        ws_endpoint: str = info.get("webSocketDebuggerUrl", "")
-    except Exception as exc:
-        return _json(
-            {
-                "ok": False,
-                "error": "cdp_unreachable",
-                "hint": f"DevTools HTTP API at port {cdp_port} unreachable: {exc}",
-                "action": "ensure browser is running and CDP port is open",
-            },
-            status=503,
-        )
-
-    return _ok(
-        {"ws_endpoint": ws_endpoint, "http_url": http_url, "port": cdp_port},
-        seq=ctx.seq,
-    )
-
-
-async def handle_tab_list(request: Request) -> Response:
-    ctx = _ctx(request)
-    tabs = await ctx.tab_list()
-    data = [
-        {"tab_id": t.tab_id, "url": t.url, "title": t.title, "active": t.active}
-        for t in tabs
-    ]
-    return _ok({"tabs": data, "count": len(data)}, seq=ctx.seq)
-
-
-async def handle_tab_new(request: Request) -> Response:
-    body = await request.json()
-    url: str | None = body.get("url")
-    ctx = _ctx(request)
-    result = await ctx.tab_new(url)
-    return _ok(result, seq=ctx.seq)
-
-
-async def handle_tab_close(request: Request) -> Response:
-    body = await request.json()
-    tab_id: int = body["tab_id"]
-    ctx = _ctx(request)
-    result = await ctx.tab_close(tab_id)
-    return _ok(result, seq=ctx.seq)
-
-
-async def handle_tab_switch(request: Request) -> Response:
-    body = await request.json()
-    tab_id: int = body["tab_id"]
-    ctx = _ctx(request)
-    result = await ctx.tab_switch(tab_id)
-    return _ok(result, seq=ctx.seq)
+# --- Helpers ----------------------------------------------------------------
 
 
 async def _update_resume(
     request: Request,
+    ctx: Any,
     *,
     action_summary: dict[str, Any] | None = None,
 ) -> None:
     """Mark resume snapshot dirty (non-blocking, background task flushes)."""
-    writer: Any = request.app.get("resume_writer")
+    writer: Any = getattr(request.app.state, "resume_writer", None)
     if writer is None:
         return
-    ctx = _ctx(request)
 
     url = ""
     title = ""
@@ -905,44 +195,615 @@ async def _update_resume(
     )
 
 
-async def handle_resume(request: Request) -> Response:
-    """Return the current resume snapshot for agent session recovery."""
-    writer = request.app.get("resume_writer")
+# --- Health -----------------------------------------------------------------
+
+
+@router.get("/health", response_model=HealthResponse)
+async def handle_health(ctx: BrowserCtxDep, request: Request) -> dict[str, Any]:
+    diagnostic = DiagnosticService()
+    local_proxy = getattr(request.app.state, "local_proxy", None)
+    return await diagnostic.health(ctx, local_proxy=local_proxy)
+
+
+# --- Navigate ---------------------------------------------------------------
+
+
+@router.post("/navigate", response_model=OkEnvelope[NavigateResponse])
+async def handle_navigate(
+    body: NavigateRequest,
+    ctx: BrowserCtxDep,
+    request: Request,
+) -> dict[str, Any]:
+    result = await ctx.navigate(body.url, timeout=body.timeout)
+    await _update_resume(
+        request, ctx, action_summary={"kind": "navigate", "url": body.url}
+    )
+
+    if body.include_snapshot:
+        try:
+            snap = await ctx.snapshot(mode=body.snapshot_mode)
+            SnapshotService.attach_snapshot_to_result(result, snap)
+        except Exception:
+            logger.debug("include_snapshot_failed", exc_info=True)
+
+    return _ok(result, seq=ctx.seq)
+
+
+# --- Screenshot -------------------------------------------------------------
+
+
+@router.get("/screenshot", response_model=OkEnvelope[ScreenshotResponse])
+async def handle_screenshot(
+    ctx: BrowserCtxDep,
+    config: ConfigDep,
+    full_page: bool = False,
+    format: str = "jpeg",
+    quality: int | None = None,
+) -> dict[str, Any]:
+    # ``quality=None`` resolves to the configured default. CLI callers leave
+    # this unset and inherit the file/env default; MCP tools pass an explicit
+    # lower value so screenshots stay under MCP token budgets.
+    if quality is None:
+        quality = config.screenshot_quality
+    raw = await ctx.screenshot(full_page=full_page, format=format, quality=quality)
+    b64 = screenshot_to_base64(raw)
+    return _ok(
+        {"base64": b64, "size": len(raw), "format": format},
+        seq=ctx.seq,
+    )
+
+
+# --- Snapshot ---------------------------------------------------------------
+
+
+@router.get("/snapshot", response_model=OkEnvelope[SnapshotResponse])
+async def handle_snapshot(
+    ctx: BrowserCtxDep,
+    request: Request,
+    mode: str = "accessible",
+    max_nodes: int = 0,
+    max_chars: int = 0,
+    focus: int = 0,
+    offset: int = 0,
+    include_selector_map: bool = True,
+    frames: bool = False,
+    diff: bool = False,
+) -> dict[str, Any]:
+    service = SnapshotService()
+    prev_cache = getattr(request.app.state, "prev_snapshot_lines", None)
+
+    data, cur_cache = await service.get(
+        ctx,
+        mode=mode,
+        max_nodes=max_nodes,
+        max_chars=max_chars,
+        focus=focus,
+        offset=offset,
+        include_selector_map=include_selector_map,
+        frames=frames,
+        diff=diff,
+        prev_cached_lines=prev_cache,
+    )
+
+    if cur_cache is not None:
+        request.app.state.prev_snapshot_lines = cur_cache
+
+    return _ok(data, seq=ctx.seq)
+
+
+# --- Evaluate ---------------------------------------------------------------
+
+
+@router.post("/evaluate", response_model=OkEnvelope[EvaluateResponse])
+async def handle_evaluate(body: EvaluateRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+    result = await ctx.evaluate(body.js, world=body.world)
+
+    # Truncate large results before they exceed MCP token limits.
+    result_bytes = orjson.dumps(result)
+    total_size = len(result_bytes)
+    if total_size > body.max_return_size:
+        result_repr = (
+            result_bytes[: body.max_return_size].decode("utf-8", errors="replace")
+            + "\n[...truncated...]"
+        )
+        return _ok(
+            {"result": result_repr, "truncated": True, "total_size": total_size},
+            seq=ctx.seq,
+        )
+
+    return _ok(
+        {"result": result, "truncated": False, "total_size": total_size}, seq=ctx.seq
+    )
+
+
+# --- Network ----------------------------------------------------------------
+
+
+@router.get("/network", response_model=OkEnvelope[NetworkResponse])
+async def handle_network(ctx: BrowserCtxDep, since: str = "0") -> dict[str, Any]:
+    since_value: int | str = int(since) if since.isdigit() else since
+    reqs = await ctx.network(since=since_value)
+    return _ok({"requests": reqs, "count": len(reqs)}, seq=ctx.seq)
+
+
+# --- Action -----------------------------------------------------------------
+
+
+@router.post("/action", response_model=OkEnvelope[ActionResponse])
+async def handle_action(
+    body: ActionRequest,
+    ctx: BrowserCtxDep,
+    request: Request,
+) -> dict[str, Any]:
+    target = str(body.index) if body.index is not None else body.target
+    extra = body.model_dump(exclude_unset=True)
+    for known in ("kind", "index", "target", "include_snapshot", "snapshot_mode"):
+        extra.pop(known, None)
+
+    service = ActionService()
+    # DialogBlockedError raised from ctx.action() bubbles up to the FastAPI
+    # exception handler (409 with dialog metadata) — no special case needed.
+    result, retried = await service.execute(ctx, body.kind, target, extra=extra)
+    if retried:
+        result["retried"] = True
+
+    summary: dict[str, Any] = {"kind": body.kind, "target": target}
+    if body.kind in ("fill", "type"):
+        summary["text"] = extra.get("text", "")
+    elif body.kind in ("press", "keydown", "keyup"):
+        summary["key"] = extra.get("key", "")
+    elif body.kind == "scroll":
+        summary["direction"] = extra.get("direction", "down")
+    elif body.kind == "select":
+        summary["value"] = extra.get("value", "")
+    await _update_resume(request, ctx, action_summary=summary)
+
+    if body.include_snapshot:
+        try:
+            snap = await ctx.snapshot(mode=body.snapshot_mode)
+            SnapshotService.attach_snapshot_to_result(result, snap)
+        except Exception:
+            logger.debug("include_snapshot_failed", exc_info=True)
+
+    return _ok(result, seq=ctx.seq)
+
+
+@router.post("/action/batch", response_model=OkEnvelope[BatchActionResponse])
+async def handle_action_batch(
+    body: BatchActionRequest,
+    ctx: BrowserCtxDep,
+    config: ConfigDep,
+    request: Request,
+) -> dict[str, Any]:
+    settle_timeout = body.settle_timeout
+    if not settle_timeout:
+        settle_timeout = getattr(
+            request.app.state, "batch_settle_timeout", config.batch_settle_timeout
+        )
+
+    service = ActionService()
+    result = await service.execute_batch(
+        ctx, body.actions, sleep_s=body.sleep, settle_timeout=settle_timeout
+    )
+    return _ok(result, seq=ctx.seq)
+
+
+# --- Fetch ------------------------------------------------------------------
+
+
+@router.post("/fetch", response_model=OkEnvelope[FetchResponse])
+async def handle_fetch(body: FetchRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+    result = await ctx.fetch(
+        body.url,
+        method=body.method,
+        body=body.body,
+        headers=body.headers,
+        timeout=body.timeout,
+    )
+    return _ok(result, seq=ctx.seq)
+
+
+# --- Shutdown ---------------------------------------------------------------
+
+
+@router.post("/shutdown", response_model=OkEnvelope[ShutdownResponse])
+async def handle_shutdown(request: Request) -> dict[str, Any]:
+    event = getattr(request.app.state, "shutdown_event", None)
+    if event is not None:
+        event.set()
+    return _ok({}, seq=0)
+
+
+# --- Bridge auth + WebSocket endpoints --------------------------------------
+
+
+def _check_bridge_token(websocket: WebSocket) -> bool:
+    """Verify bridge auth token. Localhost connections skip auth."""
+    client = websocket.client
+    if client and client.host in ("127.0.0.1", "::1", "localhost"):
+        return True
+
+    expected = getattr(websocket.app.state, "bridge_token", None)
+    if not expected:
+        return True
+
+    auth = websocket.headers.get("Authorization", "")
+    return auth == f"Bearer {expected}"
+
+
+class _BridgeWSAdapter:
+    """Adapter exposing FastAPI's :class:`WebSocket` under the narrow interface
+    consumed by :class:`agentcloak.browser.remote_ctx.RemoteBridgeContext`.
+
+    The browser layer only needs ``closed`` / ``send_str`` / ``close`` /
+    ``receive_text`` to operate, so we expose just those. Keeping this shim
+    isolates the browser code from any specific HTTP/WS framework — if the
+    daemon transport ever changes we only have to provide a new adapter, not
+    rewrite the remote backend. The contract is documented as the
+    ``_BridgeWS`` Protocol in ``browser/remote_ctx.py``.
+    """
+
+    def __init__(self, ws: WebSocket) -> None:
+        self._ws = ws
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    async def send_str(self, data: str) -> None:
+        await self._ws.send_text(data)
+
+    async def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            await self._ws.close()
+
+    async def receive_text(self) -> str:
+        return await self._ws.receive_text()
+
+    def mark_closed(self) -> None:
+        self._closed = True
+
+
+@router.websocket("/bridge/ws")
+async def handle_bridge_ws(websocket: WebSocket) -> None:
+    """WebSocket endpoint for bridge connection."""
+    if not _check_bridge_token(websocket):
+        await websocket.close(code=1008, reason="invalid bridge token")
+        return
+
+    from agentcloak.browser.remote_ctx import RemoteBridgeContext
+
+    await websocket.accept()
+    adapter = _BridgeWSAdapter(websocket)
+    remote_ctx = RemoteBridgeContext(bridge_ws=adapter)  # type: ignore[arg-type]
+    websocket.app.state.bridge_ws = adapter
+    websocket.app.state.remote_ctx = remote_ctx
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            remote_ctx.feed_message(data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        adapter.mark_closed()
+        websocket.app.state.bridge_ws = None
+        websocket.app.state.remote_ctx = None
+
+
+@router.websocket("/ext")
+async def handle_ext_ws(websocket: WebSocket) -> None:
+    """Direct WebSocket endpoint for Chrome Extension (local mode)."""
+    if not _check_bridge_token(websocket):
+        await websocket.close(code=1008, reason="invalid bridge token")
+        return
+
+    from agentcloak.browser.remote_ctx import RemoteBridgeContext
+
+    await websocket.accept()
+    adapter = _BridgeWSAdapter(websocket)
+    remote_ctx = RemoteBridgeContext(bridge_ws=adapter)  # type: ignore[arg-type]
+    websocket.app.state.ext_ws = adapter
+    websocket.app.state.remote_ctx = remote_ctx
+
+    client = websocket.client
+    logger.info("ext_ws_connected", remote=client.host if client else None)
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            remote_ctx.feed_message(data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        adapter.mark_closed()
+        websocket.app.state.ext_ws = None
+        websocket.app.state.remote_ctx = None
+        logger.info("ext_ws_disconnected")
+
+
+# --- Bridge UX --------------------------------------------------------------
+
+
+@router.post("/bridge/claim", response_model=OkEnvelope[BridgeOpResponse])
+async def handle_bridge_claim(
+    body: BridgeClaimRequest, remote_ctx: RequiredRemoteCtxDep
+) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if body.tab_id is not None:
+        params["tabId"] = body.tab_id
+    if body.url_pattern is not None:
+        params["urlPattern"] = body.url_pattern
+
+    result = await remote_ctx.send_command("claim", params)
+    return _ok(result, seq=0)
+
+
+@router.post("/bridge/finalize", response_model=OkEnvelope[BridgeOpResponse])
+async def handle_bridge_finalize(
+    body: BridgeFinalizeRequest, remote_ctx: RequiredRemoteCtxDep
+) -> dict[str, Any]:
+    result = await remote_ctx.send_command("finalize", {"mode": body.mode})
+    return _ok(result, seq=0)
+
+
+# --- Cookies ----------------------------------------------------------------
+
+
+@router.post("/cookies/export", response_model=OkEnvelope[CookiesExportResponse])
+async def handle_cookies_export(
+    body: CookiesExportRequest,
+    ctx: BrowserCtxDep,
+    remote_ctx: RemoteCtxDep,
+) -> dict[str, Any]:
+    if remote_ctx is not None:
+        from agentcloak.browser.remote_ctx import RemoteBridgeContext
+
+        if not isinstance(remote_ctx, RemoteBridgeContext):
+            raise RuntimeError("remote_ctx is not a RemoteBridgeContext instance")
+        params: dict[str, Any] = {}
+        if body.url:
+            params["url"] = body.url
+        result = await remote_ctx.send_command("cookies", params)
+        return _ok({"cookies": result}, seq=0)
+
+    browser_context = ctx._get_browser_context()
+    if body.url:
+        cookies = await browser_context.cookies(body.url)
+    else:
+        cookies = await browser_context.cookies()
+    # Field names use camelCase (httpOnly, sameSite) because these are passed
+    # straight through from the Playwright / CDP Cookie spec — re-serializing
+    # to snake_case would force agents to translate twice when feeding cookies
+    # back into ``cookies/import`` or generic devtools clients.
+    serializable = [
+        {
+            "name": c.get("name", ""),
+            "value": c.get("value", ""),
+            "domain": c.get("domain", ""),
+            "path": c.get("path", "/"),
+            "expires": c.get("expires", -1),
+            "httpOnly": c.get("httpOnly", False),
+            "secure": c.get("secure", False),
+            "sameSite": c.get("sameSite", "None"),
+        }
+        for c in cookies
+    ]
+    return _ok({"cookies": serializable, "count": len(serializable)}, seq=ctx.seq)
+
+
+@router.post("/cookies/import", response_model=OkEnvelope[CookiesImportResponse])
+async def handle_cookies_import(
+    body: CookiesImportRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    if not body.cookies:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "ok": False,
+                "error": "no_cookies",
+                "hint": "No cookies provided",
+                "action": "pass cookies as JSON array in 'cookies' field",
+            },
+        )
+    browser_context = ctx._get_browser_context()
+    await browser_context.add_cookies(body.cookies)
+    return _ok({"imported": len(body.cookies)}, seq=ctx.seq)
+
+
+# --- Capture ----------------------------------------------------------------
+
+
+@router.post("/capture/start", response_model=OkEnvelope[CaptureStatusResponse])
+async def handle_capture_start(ctx: BrowserCtxDep) -> dict[str, Any]:
+    service = CaptureService(ctx.capture_store)
+    return _ok(service.start(), seq=ctx.seq)
+
+
+@router.post("/capture/stop", response_model=OkEnvelope[CaptureStatusResponse])
+async def handle_capture_stop(ctx: BrowserCtxDep) -> dict[str, Any]:
+    service = CaptureService(ctx.capture_store)
+    return _ok(service.stop(), seq=ctx.seq)
+
+
+@router.get("/capture/status", response_model=OkEnvelope[CaptureStatusResponse])
+async def handle_capture_status(ctx: BrowserCtxDep) -> dict[str, Any]:
+    service = CaptureService(ctx.capture_store)
+    return _ok(service.status(), seq=ctx.seq)
+
+
+@router.get("/capture/export", response_model=OkEnvelope[CaptureExportResponse])
+async def handle_capture_export(
+    ctx: BrowserCtxDep, format: str = "har"
+) -> dict[str, Any]:
+    service = CaptureService(ctx.capture_store)
+    return _ok(service.export(fmt=format), seq=ctx.seq)
+
+
+@router.get("/capture/analyze", response_model=OkEnvelope[CaptureAnalyzeResponse])
+async def handle_capture_analyze(
+    ctx: BrowserCtxDep, domain: str | None = None
+) -> dict[str, Any]:
+    service = CaptureService(ctx.capture_store)
+    try:
+        return _ok(service.analyze(domain=domain), seq=ctx.seq)
+    except Exception as exc:
+        from agentcloak.daemon.services.capture_service import CaptureReplayError
+
+        if isinstance(exc, CaptureReplayError):
+            raise HTTPException(status_code=500, detail=exc.to_dict()) from exc
+        raise
+
+
+@router.post("/capture/clear", response_model=OkEnvelope[CaptureClearResponse])
+async def handle_capture_clear(ctx: BrowserCtxDep) -> dict[str, Any]:
+    service = CaptureService(ctx.capture_store)
+    return _ok(service.clear(), seq=ctx.seq)
+
+
+@router.post("/capture/replay", response_model=OkEnvelope[CaptureReplayResponse])
+async def handle_capture_replay(
+    body: CaptureReplayRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    from agentcloak.daemon.services.capture_service import CaptureReplayError
+
+    service = CaptureService(ctx.capture_store)
+    try:
+        result = await service.replay(ctx, url=body.url, method=body.method)
+    except CaptureReplayError as exc:
+        status = {
+            "missing_url": 400,
+            "capture_entry_not_found": 404,
+        }.get(exc.error, 400)
+        raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
+    return _ok(result, seq=ctx.seq)
+
+
+# --- CDP --------------------------------------------------------------------
+
+
+@router.get("/cdp/endpoint", response_model=OkEnvelope[CDPEndpointResponse])
+async def handle_cdp_endpoint(ctx: BrowserCtxDep) -> dict[str, Any]:
+    """Return the CDP WebSocket URL for jshookmcp browser_attach."""
+    import httpx
+
+    cdp_port: int | None = getattr(ctx, "_cdp_port", None)
+    if not cdp_port:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "ok": False,
+                "error": "no_cdp_port",
+                "hint": "No CDP port available",
+                "action": "restart daemon — CDP port is allocated at browser launch",
+            },
+        )
+
+    http_url = f"http://127.0.0.1:{cdp_port}"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{http_url}/json/version")
+            info = resp.json()
+        ws_endpoint: str = info.get("webSocketDebuggerUrl", "")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "ok": False,
+                "error": "cdp_unreachable",
+                "hint": f"DevTools HTTP API at port {cdp_port} unreachable: {exc}",
+                "action": "ensure browser is running and CDP port is open",
+            },
+        ) from exc
+
+    return _ok(
+        {"ws_endpoint": ws_endpoint, "http_url": http_url, "port": cdp_port},
+        seq=ctx.seq,
+    )
+
+
+# --- Tabs -------------------------------------------------------------------
+
+
+@router.get("/tabs", response_model=OkEnvelope[TabListResponse])
+async def handle_tab_list(ctx: BrowserCtxDep) -> dict[str, Any]:
+    tabs = await ctx.tab_list()
+    data = [
+        {"tab_id": t.tab_id, "url": t.url, "title": t.title, "active": t.active}
+        for t in tabs
+    ]
+    return _ok({"tabs": data, "count": len(data)}, seq=ctx.seq)
+
+
+@router.post("/tab/new", response_model=OkEnvelope[TabOpResponse])
+async def handle_tab_new(body: TabNewRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+    result = await ctx.tab_new(body.url)
+    return _ok(result, seq=ctx.seq)
+
+
+@router.post("/tab/close", response_model=OkEnvelope[TabOpResponse])
+async def handle_tab_close(body: TabCloseRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+    result = await ctx.tab_close(body.tab_id)
+    return _ok(result, seq=ctx.seq)
+
+
+@router.post("/tab/switch", response_model=OkEnvelope[TabOpResponse])
+async def handle_tab_switch(
+    body: TabSwitchRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    result = await ctx.tab_switch(body.tab_id)
+    return _ok(result, seq=ctx.seq)
+
+
+# --- Resume -----------------------------------------------------------------
+
+
+@router.get("/resume", response_model=OkEnvelope[ResumeResponse])
+async def handle_resume(ctx: BrowserCtxDep, request: Request) -> dict[str, Any]:
+    writer = getattr(request.app.state, "resume_writer", None)
     if writer is None:
-        return _json(
-            {
+        raise HTTPException(
+            status_code=503,
+            detail={
                 "ok": False,
                 "error": "resume_unavailable",
                 "hint": "Resume writer not initialized",
                 "action": "restart the daemon",
             },
-            status=503,
         )
-    snap = writer.current_snapshot
-    return _ok(snap.to_dict(), seq=_ctx(request).seq)
+    # Persisted resume snapshot only updates on navigate/action (via
+    # _update_resume). Runtime-mutable fields like ``capture_active`` and
+    # ``stealth_tier`` need to be re-read from the live context, otherwise
+    # ``resume`` returns stale values when the agent toggled capture between
+    # actions (dogfood F2).
+    data = writer.current_snapshot.to_dict()
+    data["capture_active"] = ctx.capture_store.recording
+    data["stealth_tier"] = ctx.stealth_tier.value
+    return _ok(data, seq=ctx.seq)
 
 
-async def handle_spell_run(request: Request) -> Response:
+# --- Spells -----------------------------------------------------------------
+
+
+@router.post("/spell/run", response_model=OkEnvelope[SpellRunResponse])
+async def handle_spell_run(body: SpellRunRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
     """Run a registered spell with the daemon's live browser context."""
     from agentcloak.spells.discovery import discover_spells
     from agentcloak.spells.executor import execute_spell
     from agentcloak.spells.registry import get_registry
 
-    body = await request.json()
-    name: str = body.get("name", "")
-    args: dict[str, Any] = body.get("args", {})
-    ctx = _ctx(request)
-
-    parts = name.split("/", 1)
+    parts = body.name.split("/", 1)
     if len(parts) != 2:
-        return _json(
-            {
+        raise HTTPException(
+            status_code=400,
+            detail={
                 "ok": False,
                 "error": "invalid_spell_name",
-                "hint": f"Expected 'site/command', got '{name}'",
+                "hint": f"Expected 'site/command', got '{body.name}'",
                 "action": "use format like 'httpbin/headers'",
             },
-            status=400,
         )
 
     discover_spells()
@@ -950,21 +811,22 @@ async def handle_spell_run(request: Request) -> Response:
     entry = registry.get(parts[0], parts[1])
     if entry is None:
         available = [e.meta.full_name for e in registry.list_all()]
-        return _json(
-            {
+        raise HTTPException(
+            status_code=404,
+            detail={
                 "ok": False,
                 "error": "spell_not_found",
-                "hint": f"No spell '{name}'",
+                "hint": f"No spell '{body.name}'",
                 "action": f"available: {', '.join(available[:10])}",
             },
-            status=404,
         )
 
-    result = await execute_spell(entry, args=args, browser=ctx)
+    result = await execute_spell(entry, args=body.args, browser=ctx)
     return _ok({"result": result}, seq=ctx.seq)
 
 
-async def handle_spell_list(request: Request) -> Response:
+@router.get("/spell/list", response_model=OkEnvelope[SpellListResponse])
+async def handle_spell_list(ctx: BrowserCtxDep) -> dict[str, Any]:
     """List all registered spells."""
     from agentcloak.spells.discovery import discover_spells
     from agentcloak.spells.registry import get_registry
@@ -980,245 +842,93 @@ async def handle_spell_list(request: Request) -> Response:
         }
         for e in registry.list_all()
     ]
-    return _ok({"spells": spells, "count": len(spells)}, seq=_ctx(request).seq)
+    return _ok({"spells": spells, "count": len(spells)}, seq=ctx.seq)
 
 
-_HOP_BY_HOP = frozenset(
-    {
-        "host",
-        "content-length",
-        "connection",
-        "transfer-encoding",
-        "keep-alive",
-        "te",
-        "trailer",
-        "upgrade",
-        "proxy-authorization",
-        "proxy-authenticate",
-    }
+# --- Profile ----------------------------------------------------------------
+
+
+@router.post(
+    "/profile/create-from-current",
+    response_model=OkEnvelope[ProfileCreateFromCurrentResponse],
 )
-
-
-async def handle_capture_replay(request: Request) -> Response:
-    """Replay the most recent captured entry matching url+method."""
-    body = await request.json()
-    url: str = body.get("url", "")
-    method: str = body.get("method", "GET")
-    ctx = _ctx(request)
-
-    if not url:
-        return _json(
-            {
-                "ok": False,
-                "error": "missing_url",
-                "hint": "url is required",
-                "action": "provide a URL to replay",
-            },
-            status=400,
-        )
-
-    entry = ctx.capture_store.find_latest(url, method)
-    if entry is None:
-        return _json(
-            {
-                "ok": False,
-                "error": "capture_entry_not_found",
-                "hint": f"No captured {method.upper()} {url}",
-                "action": "run 'capture start', navigate to trigger the request, then replay",  # noqa: E501
-            },
-            status=404,
-        )
-
-    replay_headers = {
-        k: v for k, v in entry.request_headers.items() if k.lower() not in _HOP_BY_HOP
-    }
-
-    result = await ctx.fetch(
-        url,
-        method=entry.method,
-        body=entry.request_body,
-        headers=replay_headers if replay_headers else None,
-    )
-    result["replayed_from"] = {
-        "url": entry.url,
-        "method": entry.method,
-        "seq": entry.seq,
-    }
-    return _ok(result, seq=ctx.seq)
-
-
-async def handle_profile_create_from_current(request: Request) -> Response:
+async def handle_profile_create_from_current(
+    body: ProfileCreateFromCurrentRequest,
+    ctx: BrowserCtxDep,
+    remote_ctx: RemoteCtxDep,
+) -> dict[str, Any]:
     """Create a profile from the current browser session's cookies."""
-    body = await request.json()
-    name: str = body.get("name", "")
-    ctx = _ctx(request)
+    service = ProfileService(_profiles_dir())
 
-    if not name:
-        return _json(
-            {
-                "ok": False,
-                "error": "missing_name",
-                "hint": "name is required",
-                "action": "provide 'name' parameter",
-            },
-            status=400,
-        )
-    if not _PROFILE_NAME_RE.match(name):
-        return _json(
-            {
-                "ok": False,
-                "error": "invalid_profile_name",
-                "hint": f"Profile name '{name}' is not valid",
-                "action": "use lowercase alphanumeric and hyphens",
-            },
-            status=400,
-        )
+    try:
+        service.validate_name(body.name)
+    except ProfileError as exc:
+        raise _profile_error_to_http(exc) from exc
 
-    from agentcloak.core.config import load_config
-
-    paths, _ = load_config()
-    profiles_dir = paths.profiles_dir
-    profiles_dir.mkdir(parents=True, exist_ok=True)
-
-    # Resolve name — auto-increment if exists
-    actual_name = name
-    renamed = False
-    if (profiles_dir / actual_name).exists():
-        counter = 2
-        while (profiles_dir / f"{name}-{counter}").exists():
-            counter += 1
-        actual_name = f"{name}-{counter}"
-        renamed = True
-
-    profile_dir = profiles_dir / actual_name
-
-    # Export cookies from current session (local or bridge)
-    remote_ctx = request.app.get("remote_ctx")
+    cookies: list[dict[str, Any]]
     if remote_ctx is not None:
         from agentcloak.browser.remote_ctx import RemoteBridgeContext
 
         if not isinstance(remote_ctx, RemoteBridgeContext):
             raise RuntimeError("remote_ctx is not a RemoteBridgeContext instance")
-        cookies: list[dict[str, Any]] = await remote_ctx.send_command("cookies", {})
+        # The bridge ``cookies`` command returns either a list of cookie dicts
+        # directly or a ``{"cookies": [...]}`` envelope depending on extension
+        # version. Normalise to a list either way.
+        raw_response: Any = await remote_ctx.send_command("cookies", {})
+        cookies = []
+        if isinstance(raw_response, list):
+            cookies = list(raw_response)  # type: ignore[arg-type]
+        elif isinstance(raw_response, dict):
+            inner = raw_response.get("cookies", [])  # type: ignore[arg-type]
+            if isinstance(inner, list):
+                cookies = list(inner)  # type: ignore[arg-type]
     else:
         browser_context = ctx._get_browser_context()
         cookies = await browser_context.cookies()
 
-    # Write cookies into a new persistent profile via subprocess (keeps daemon stable)
-    import json as _json_mod
-    import os as _os
-    import sys
-    import tempfile as _tempfile
-
-    profile_dir.mkdir(parents=True, exist_ok=True)
-
-    exec_path: str | None = None
     try:
-        import cloakbrowser as _cb
+        result = await service.create_from_cookies(body.name, cookies)
+    except ProfileError as exc:
+        raise _profile_error_to_http(exc) from exc
+    return _ok(result, seq=ctx.seq)
 
-        info = _cb.binary_info()
-        if info.get("installed"):
-            exec_path = info["binary_path"]
-    except ImportError:
-        pass
 
-    # Write cookies to a temp file (mode 0o600) to avoid leaking via /proc cmdline
-    fd, cookies_file = _tempfile.mkstemp(suffix=".json", prefix="cloak-cookies-")
+@router.get("/profile/list", response_model=OkEnvelope[ProfileListResponse])
+async def handle_profile_list(ctx: BrowserCtxDep) -> dict[str, Any]:
+    service = ProfileService(_profiles_dir())
+    names = service.list_profiles()
+    return _ok({"profiles": names, "count": len(names)}, seq=ctx.seq)
+
+
+@router.post("/profile/create", response_model=OkEnvelope[ProfileCreateResponse])
+async def handle_profile_create(
+    body: ProfileCreateRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    service = ProfileService(_profiles_dir())
     try:
-        with _os.fdopen(fd, "w") as f:
-            _json_mod.dump(cookies, f)
-        _os.chmod(cookies_file, 0o600)
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "agentcloak.browser._profile_writer",
-            "--profile-dir",
-            str(profile_dir),
-            "--cookies-file",
-            cookies_file,
-        ]
-        if exec_path:
-            cmd.extend(["--executable-path", exec_path])
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr_bytes = await proc.communicate()
-    finally:
-        # Always clean up the temp file
-        import contextlib
-
-        with contextlib.suppress(OSError):
-            _os.unlink(cookies_file)
-    if proc.returncode != 0:
-        err_msg = stderr_bytes.decode(errors="replace")[:300]
-        return _json(
-            {"ok": False, "error": "profile_writer_failed", "hint": err_msg},
-            status=500,
-        )
-
-    return _ok(
-        {"profile": actual_name, "renamed": renamed, "cookie_count": len(cookies)},
-        seq=ctx.seq,
-    )
+        name = service.create(body.name)
+    except ProfileError as exc:
+        raise _profile_error_to_http(exc) from exc
+    return _ok({"created": name}, seq=ctx.seq)
 
 
-async def handle_profile_list(request: Request) -> Response:
-    from agentcloak.core.config import load_config
-
-    paths, _ = load_config()
-    profiles_dir = paths.profiles_dir
-    profiles_dir.mkdir(parents=True, exist_ok=True)
-    names = sorted(d.name for d in profiles_dir.iterdir() if d.is_dir())
-    return _json({"ok": True, "profiles": names, "count": len(names)})
-
-
-async def handle_profile_create(request: Request) -> Response:
-    from agentcloak.core.config import load_config
-
-    body = await request.json()
-    name: str = body.get("name", "")
-    if not name:
-        return _json(
-            {
-                "ok": False,
-                "error": "missing_name",
-                "hint": "Profile name is required",
-                "action": "provide 'name' parameter",
-            },
-            status=400,
-        )
-    if not _PROFILE_NAME_RE.match(name):
-        return _json(
-            {
-                "ok": False,
-                "error": "invalid_profile_name",
-                "hint": f"Profile name '{name}' is not valid",
-                "action": "use lowercase alphanumeric and hyphens",
-            },
-            status=400,
-        )
-    paths, _ = load_config()
-    profile_path = paths.profiles_dir / name
-    if profile_path.exists():
-        return _json(
-            {
-                "ok": False,
-                "error": "profile_exists",
-                "hint": f"Profile '{name}' already exists",
-                "action": "use a different name or delete first",
-            },
-            status=409,
-        )
-    profile_path.mkdir(parents=True)
-    return _json({"ok": True, "created": name})
+@router.post("/profile/delete", response_model=OkEnvelope[ProfileCreateResponse])
+async def handle_profile_delete(
+    body: ProfileDeleteRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    service = ProfileService(_profiles_dir())
+    try:
+        name = service.delete(body.name)
+    except ProfileError as exc:
+        raise _profile_error_to_http(exc) from exc
+    return _ok({"deleted": name}, seq=ctx.seq)
 
 
-async def handle_dialog_status(request: Request) -> Response:
-    ctx = _ctx(request)
+# --- Dialog -----------------------------------------------------------------
+
+
+@router.get("/dialog/status", response_model=OkEnvelope[DialogStatusResponse])
+async def handle_dialog_status(ctx: BrowserCtxDep) -> dict[str, Any]:
     dialog = await ctx.dialog_status()
     if dialog is None:
         return _ok({"pending": False}, seq=ctx.seq)
@@ -1236,113 +946,93 @@ async def handle_dialog_status(request: Request) -> Response:
     )
 
 
-async def handle_dialog_handle(request: Request) -> Response:
-    body = await request.json()
-    action_type: str = body.get("action", "accept")
-    text: str | None = body.get("text")
-    ctx = _ctx(request)
-    result = await ctx.dialog_handle(action_type, text=text)
+@router.post("/dialog/handle", response_model=OkEnvelope[DialogHandleResponse])
+async def handle_dialog_handle(
+    body: DialogHandleRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    result = await ctx.dialog_handle(body.action, text=body.text)
     return _ok(result, seq=ctx.seq)
 
 
-async def handle_wait(request: Request) -> Response:
-    body = await request.json()
-    condition: str = body.get("condition", "ms")
-    value: str = str(body.get("value", "1000"))
-    timeout: int = int(body.get("timeout", 30000))
-    state: str = body.get("state", "visible")
-    ctx = _ctx(request)
+# --- Wait -------------------------------------------------------------------
+
+
+@router.post("/wait", response_model=OkEnvelope[WaitResponse])
+async def handle_wait(body: WaitRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
     result = await ctx.wait(
-        condition=condition, value=value, timeout=timeout, state=state
+        condition=body.condition,
+        value=body.value,
+        timeout=body.timeout,
+        state=body.state,
     )
     return _ok(result, seq=ctx.seq)
 
 
-async def handle_upload(request: Request) -> Response:
-    body = await request.json()
-    index: int = body["index"]
-    files: list[str] = body.get("files", [])
-    if not files:
-        return _json(
-            {
+# --- Upload -----------------------------------------------------------------
+
+
+@router.post("/upload", response_model=OkEnvelope[UploadResponse])
+async def handle_upload(body: UploadRequest, ctx: BrowserCtxDep) -> dict[str, Any]:
+    if not body.files:
+        raise HTTPException(
+            status_code=400,
+            detail={
                 "ok": False,
                 "error": "missing_files",
                 "hint": "No files provided for upload",
                 "action": "provide 'files' as a list of file paths",
             },
-            status=400,
         )
-    ctx = _ctx(request)
-    result = await ctx.upload(index, files)
+    result = await ctx.upload(body.index, body.files)
     return _ok(result, seq=ctx.seq)
 
 
-async def handle_frame_list(request: Request) -> Response:
-    ctx = _ctx(request)
+# --- Frame ------------------------------------------------------------------
+
+
+@router.get("/frame/list", response_model=OkEnvelope[FrameListResponse])
+async def handle_frame_list(ctx: BrowserCtxDep) -> dict[str, Any]:
     frames = await ctx.frame_list()
     data = [{"name": f.name, "url": f.url, "is_current": f.is_current} for f in frames]
     return _ok({"frames": data, "count": len(data)}, seq=ctx.seq)
 
 
-async def handle_frame_focus(request: Request) -> Response:
-    body = await request.json()
-    name: str | None = body.get("name")
-    url: str | None = body.get("url")
-    main: bool = body.get("main", False)
-    ctx = _ctx(request)
-    result = await ctx.frame_focus(name=name, url=url, main=main)
+@router.post("/frame/focus", response_model=OkEnvelope[FrameFocusResponse])
+async def handle_frame_focus(
+    body: FrameFocusRequest, ctx: BrowserCtxDep
+) -> dict[str, Any]:
+    result = await ctx.frame_focus(name=body.name, url=body.url, main=body.main)
     return _ok(result, seq=ctx.seq)
 
 
-async def handle_profile_delete(request: Request) -> Response:
-    import shutil
+# --- Registration -----------------------------------------------------------
 
-    from agentcloak.core.config import load_config
 
-    body = await request.json()
-    name: str = body.get("name", "")
-    if not name:
-        return _json(
-            {
-                "ok": False,
-                "error": "missing_name",
-                "hint": "Profile name is required",
-                "action": "provide 'name' parameter",
-            },
-            status=400,
-        )
-    if not _PROFILE_NAME_RE.match(name):
-        return _json(
-            {
-                "ok": False,
-                "error": "invalid_profile_name",
-                "hint": f"Profile name '{name}' is not valid",
-                "action": "use lowercase alphanumeric and hyphens",
-            },
-            status=400,
-        )
-    paths, _ = load_config()
-    profiles_dir = paths.profiles_dir
-    profile_path = profiles_dir / name
-    if not profile_path.resolve().is_relative_to(profiles_dir.resolve()):
-        return _json(
-            {
-                "ok": False,
-                "error": "invalid_profile_path",
-                "hint": "Profile path escapes profiles directory",
-                "action": "use a simple profile name without path separators",
-            },
-            status=400,
-        )
-    if not profile_path.exists():
-        return _json(
-            {
-                "ok": False,
-                "error": "profile_not_found",
-                "hint": f"Profile '{name}' does not exist",
-                "action": "use profile list to see available",
-            },
-            status=404,
-        )
-    shutil.rmtree(profile_path)
-    return _json({"ok": True, "deleted": name})
+def register_routers(app: Any) -> None:
+    """Register all routes on the FastAPI app."""
+    app.include_router(router)
+
+
+def setup_routes(app: Any) -> None:  # pragma: no cover - shim
+    """Backward-compatible alias for :func:`register_routers`.
+
+    Older tests imported ``setup_routes`` from this module. The FastAPI
+    rewrite renamed it but this shim keeps the legacy import working.
+    """
+    if hasattr(app, "include_router"):
+        register_routers(app)
+        return
+    logging.getLogger(__name__).warning(
+        "setup_routes called on non-FastAPI app; routes are FastAPI-only now"
+    )
+
+
+# --- Compatibility re-exports for tests -------------------------------------
+# Legacy tests import ``_batch_has_refs``, ``_resolve_action_refs``, ``_traverse``
+# from this module. The implementations live in ``ActionService`` now, but we
+# re-export the same callables here so tests that hand-build the helpers keep
+# working without modification.
+
+_batch_has_refs = ActionService.has_refs
+_resolve_action_refs = ActionService.resolve_refs
+_traverse = ActionService.traverse

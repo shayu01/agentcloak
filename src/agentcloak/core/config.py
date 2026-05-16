@@ -68,6 +68,21 @@ class AgentcloakConfig:
     humanize: bool = False
     action_timeout: int = 30000
     batch_settle_timeout: int = 5000
+    # HTTP client (CLI/MCP ↔ daemon) request timeout. Browser work can be slow
+    # (page load, full-page screenshot) so we lean generous here.
+    http_client_timeout: int = 120
+    # Maximum bytes of serialized result returned from /evaluate. Larger values
+    # are truncated with a marker — prevents MCP token blow-up.
+    max_return_size: int = 50_000
+    # Default JPEG quality for /screenshot. CLI passes through unchanged.
+    screenshot_quality: int = 80
+    # Screenshot quality used by MCP tools. Lower than the CLI default (80) so
+    # the base64 payload stays within MCP token budgets (B2 from dogfood).
+    mcp_screenshot_quality: int = 50
+    # Auto-start: total budget for waiting on /health after spawning daemon,
+    # and the poll interval between health probes.
+    auto_start_timeout: float = 15.0
+    auto_start_poll_interval: float = 0.5
     domain_whitelist: list[str] = field(default_factory=list[str])
     domain_blacklist: list[str] = field(default_factory=list[str])
     content_scan: bool = False
@@ -156,6 +171,29 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         _env("BATCH_SETTLE_TIMEOUT")
         or browser.get("batch_settle_timeout", cfg.batch_settle_timeout)
     )
+    cfg.http_client_timeout = int(
+        _env("HTTP_CLIENT_TIMEOUT")
+        or daemon.get("http_client_timeout", cfg.http_client_timeout)
+    )
+    cfg.max_return_size = int(
+        _env("MAX_RETURN_SIZE") or browser.get("max_return_size", cfg.max_return_size)
+    )
+    cfg.screenshot_quality = int(
+        _env("SCREENSHOT_QUALITY")
+        or browser.get("screenshot_quality", cfg.screenshot_quality)
+    )
+    cfg.mcp_screenshot_quality = int(
+        _env("MCP_SCREENSHOT_QUALITY")
+        or browser.get("mcp_screenshot_quality", cfg.mcp_screenshot_quality)
+    )
+    cfg.auto_start_timeout = float(
+        _env("AUTO_START_TIMEOUT")
+        or daemon.get("auto_start_timeout", cfg.auto_start_timeout)
+    )
+    cfg.auto_start_poll_interval = float(
+        _env("AUTO_START_POLL_INTERVAL")
+        or daemon.get("auto_start_poll_interval", cfg.auto_start_poll_interval)
+    )
 
     humanize_env = _env("HUMANIZE")
     if humanize_env is not None:
@@ -202,10 +240,7 @@ def resolve_tier(tier_value: str) -> str:
     """Resolve 'auto' tier to the best available backend.
 
     CloakBrowser is the default backend; 'auto' always resolves to 'cloak'.
-    Legacy value 'patchright' is mapped to 'playwright' for backward compat.
     """
-    if tier_value == "patchright":
-        return "playwright"
     if tier_value != "auto":
         return tier_value
     return "cloak"

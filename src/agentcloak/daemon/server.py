@@ -1,4 +1,16 @@
-"""Daemon lifecycle — start, stop, health check."""
+"""Daemon lifecycle — start, stop, health check.
+
+Responsibilities are split between three entry points:
+
+- ``create_app()`` (in ``app.py``) builds the FastAPI app.
+- ``start()`` launches the browser, wires ``app.state``, then drives uvicorn.
+- ``stop()`` / ``health()`` use synchronous httpx calls for cross-process
+  control.
+
+uvicorn runs in-process: we instantiate a ``Server`` and drive its
+lifecycle from coroutines so we can interleave the browser shutdown
+sequence with the HTTP server's graceful close.
+"""
 
 from __future__ import annotations
 
@@ -9,19 +21,20 @@ import os
 import secrets
 import signal
 import sys
+import time
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import orjson
 import structlog
-from aiohttp import web
+import uvicorn
 
 from agentcloak.browser import create_context
 from agentcloak.browser.cloak_ctx import TURNSTILE_PATCH_DIR
 from agentcloak.browser.xvfb import XvfbManager
 from agentcloak.core.config import Paths, load_config
 from agentcloak.core.types import StealthTier
-from agentcloak.daemon.middleware import error_middleware
-from agentcloak.daemon.routes import setup_routes
+from agentcloak.daemon.app import configure_app_state, create_app
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,6 +44,41 @@ __all__ = ["health", "start", "stop"]
 logger = structlog.get_logger()
 
 _PORT_RANGE_SIZE = 10
+
+# Anchor for the log file handle when ``log_to_file`` is enabled. Kept at
+# module scope so it survives until process exit; see ``log_target`` setup in
+# :func:`start` for the full context.
+_file_log_handle: Any = None
+
+
+def _rotate_log_if_needed(log_path: Path, max_bytes: int, backup_count: int) -> None:
+    """One-shot rotation at daemon startup.
+
+    The daemon runs long enough that the log can grow significantly between
+    restarts, so we trim once on launch. We deliberately do *not* use
+    :class:`logging.handlers.RotatingFileHandler` because it registers with
+    stdlib logging and gets closed by ``logging.shutdown()`` when uvicorn
+    reconfigures logging (see ``log_target`` block in :func:`start`).
+    """
+    if not log_path.exists():
+        return
+    try:
+        size = log_path.stat().st_size
+    except OSError:
+        return
+    if size < max_bytes:
+        return
+
+    # Shift backups: daemon.log.{N-1} -> daemon.log.N, drop the oldest.
+    for i in range(backup_count, 0, -1):
+        src = log_path.with_suffix(f".log.{i}") if i > 1 else log_path
+        dst = log_path.with_suffix(f".log.{i}")
+        if src.exists() and i < backup_count:
+            with contextlib.suppress(OSError):
+                src.replace(dst)
+        elif i == backup_count and src.exists():
+            with contextlib.suppress(OSError):
+                src.unlink()
 
 
 def _pid_file(paths: Paths) -> Path:
@@ -89,14 +137,15 @@ def _check_stale_pid(paths: Paths) -> bool:
         _clear_session(paths)
         return False
 
-    # Process exists — verify it's actually a agentcloak daemon via health endpoint
+    # Process exists — verify it's actually an agentcloak daemon via /health.
     import json
     import urllib.request
 
+    _, _stale_cfg = load_config()
     try:
         session_data = json.loads(paths.active_session_file.read_text())
-        host = session_data.get("host", "127.0.0.1")
-        port = session_data.get("port", 18765)
+        host = session_data.get("host", _stale_cfg.daemon_host)
+        port = session_data.get("port", _stale_cfg.daemon_port)
         url = f"http://{host}:{port}/health"
         with urllib.request.urlopen(url, timeout=1) as resp:
             data = json.loads(resp.read())
@@ -104,10 +153,50 @@ def _check_stale_pid(paths: Paths) -> bool:
                 return True  # genuinely running
     except Exception:
         pass
-    # Process exists but not responding as agentcloak — stale
     _clear_pid(paths)
     _clear_session(paths)
     return False
+
+
+async def _try_bind_port(
+    *,
+    config: uvicorn.Config,
+    host: str,
+    base_port: int,
+) -> tuple[uvicorn.Server, int]:
+    """Try base_port, base_port+1, ... until one binds. Return (server, port).
+
+    uvicorn handles binding internally — we probe by attempting a transient
+    asyncio listener first so failures don't leave a half-initialized server
+    behind.
+    """
+    last_error: OSError | None = None
+    for offset in range(_PORT_RANGE_SIZE):
+        try_port = base_port + offset
+        # Probe the port first with a transient asyncio server.
+        loop = asyncio.get_running_loop()
+        try:
+            sock_server = await loop.create_server(
+                lambda: asyncio.Protocol(), host, try_port
+            )
+        except OSError as exc:
+            last_error = exc
+            if offset < _PORT_RANGE_SIZE - 1:
+                logger.info(
+                    "port_in_use",
+                    port=try_port,
+                    next_port=try_port + 1,
+                )
+            continue
+        sock_server.close()
+        await sock_server.wait_closed()
+
+        config.port = try_port
+        server = uvicorn.Server(config=config)
+        return server, try_port
+
+    assert last_error is not None
+    raise last_error
 
 
 async def start(
@@ -116,18 +205,10 @@ async def start(
     port: int | None = None,
     headless: bool | None = None,
     profile: str | None = None,
-    stealth: bool = False,
     humanize: bool | None = None,
 ) -> None:
     """Start the daemon server (blocking)."""
     paths, cfg = load_config()
-
-    if stealth:
-        logger.warning(
-            "stealth_flag_deprecated",
-            hint="--stealth is deprecated and will be removed in a future version; "
-            "CloakBrowser is now the default backend",
-        )
 
     actual_host = host or cfg.daemon_host
     actual_port = port or cfg.daemon_port
@@ -155,7 +236,7 @@ async def start(
             await xvfb_mgr.ensure_display()
 
         try:
-            from httpcloak import LocalProxy  # pyright: ignore[reportMissingImports,reportUnknownVariableType]  # noqa: I001
+            from httpcloak import LocalProxy  # pyright: ignore[reportMissingImports,reportMissingTypeStubs,reportUnknownVariableType]  # noqa: I001
 
             local_proxy = LocalProxy(  # pyright: ignore[reportUnknownVariableType]
                 port=0, preset="chrome-146", tls_only=True
@@ -175,16 +256,20 @@ async def start(
     _write_pid(paths)
 
     log_target = sys.stderr
+    # Open the log file directly instead of going through ``RotatingFileHandler``.
+    # The handler gets *registered* with the stdlib ``logging`` module on
+    # construction, and ``uvicorn.Config(...)`` later calls
+    # ``logging.config.dictConfig`` which invokes ``logging.shutdown()`` on
+    # every existing handler — that closed our stream and made the very next
+    # ``logger.info`` raise ``I/O operation on closed file``. We do a single
+    # size-based rotation at startup; the daemon is long-lived but the log
+    # stays bounded across restarts.
+    global _file_log_handle
     if cfg.log_to_file:
-        from logging.handlers import RotatingFileHandler
-
         log_path = paths.logs_dir / "daemon.log"
-        _fh = RotatingFileHandler(
-            log_path,
-            maxBytes=cfg.log_max_bytes,
-            backupCount=cfg.log_backup_count,
-        )
-        log_target = _fh.stream  # type: ignore[assignment]
+        _rotate_log_if_needed(log_path, cfg.log_max_bytes, cfg.log_backup_count)
+        _file_log_handle = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
+        log_target = _file_log_handle  # type: ignore[assignment]
 
     structlog.configure(
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
@@ -197,9 +282,7 @@ async def start(
     )
 
     idle_timeout = cfg.idle_timeout_min * 60
-    app = web.Application(middlewares=[error_middleware])
 
-    # Resolve profile directory if a profile name is specified
     profile_dir: Path | None = None
     if profile:
         profile_dir = paths.profiles_dir / profile
@@ -226,9 +309,6 @@ async def start(
     from agentcloak.browser.secure_ctx import SecureBrowserContext
 
     ctx = SecureBrowserContext(raw_ctx, cfg)
-    app["browser_ctx"] = ctx
-    app["local_proxy"] = local_proxy
-    app["bridge_token"] = bridge_token
 
     logger.info("bridge_token_generated", token_suffix=bridge_token[-4:])
 
@@ -239,16 +319,90 @@ async def start(
     from agentcloak.core.resume import ResumeWriter
 
     resume_writer = ResumeWriter(paths)
-    app["resume_writer"] = resume_writer
 
-    app["idle_timeout"] = idle_timeout
-    app["batch_settle_timeout"] = cfg.batch_settle_timeout
-    import time as _time
+    # Build FastAPI app and wire runtime state.
+    app = create_app()
+    configure_app_state(
+        app,
+        browser_ctx=ctx,
+        local_proxy=local_proxy,
+        resume_writer=resume_writer,
+        bridge_token=bridge_token,
+        config=cfg,
+        batch_settle_timeout=cfg.batch_settle_timeout,
+        idle_timeout=idle_timeout,
+    )
+    app.state.last_request_time = time.monotonic()
 
-    app["last_request_time"] = _time.monotonic()
-    setup_routes(app)
+    logger.info("daemon_starting", host=actual_host, port=actual_port)
 
-    async def on_shutdown(a: web.Application) -> None:
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=actual_host,
+        port=actual_port,
+        log_level="warning",
+        access_log=False,
+        loop="asyncio",
+        ws="websockets",
+    )
+
+    try:
+        server, bound_port = await _try_bind_port(
+            config=uvicorn_config,
+            host=actual_host,
+            base_port=actual_port,
+        )
+    except OSError:
+        logger.error(
+            "all_ports_exhausted",
+            range_start=actual_port,
+            range_end=actual_port + _PORT_RANGE_SIZE - 1,
+        )
+        with contextlib.suppress(Exception):
+            await ctx.close()
+        _clear_pid(paths)
+        _clear_session(paths)
+        raise
+
+    actual_port = bound_port
+
+    _write_session(
+        paths,
+        port=actual_port,
+        tier=tier,
+        profile=profile,
+        bridge_token=bridge_token,
+    )
+
+    logger.info("daemon_ready", host=actual_host, port=actual_port, tier=tier.value)
+
+    resume_writer.start_background()
+
+    # Bridge OS signals → shutdown_event so we shut down gracefully.
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(
+            sig,
+            lambda: asyncio.ensure_future(_signal_shutdown(server, app)),
+        )
+
+    # Wire shutdown_event to stop uvicorn when /shutdown is called.
+    async def _watch_shutdown_event() -> None:
+        await app.state.shutdown_event.wait()
+        server.should_exit = True
+
+    background_tasks: list[asyncio.Task[Any]] = [
+        asyncio.ensure_future(_watch_shutdown_event())
+    ]
+
+    if idle_timeout > 0:
+        background_tasks.append(
+            asyncio.ensure_future(_idle_watchdog(app, idle_timeout, server))
+        )
+
+    try:
+        await server.serve()
+    finally:
         logger.info("shutting_down")
         from agentcloak.core.discovery import unregister_daemon
 
@@ -264,110 +418,33 @@ async def start(
         _clear_pid(paths)
         _clear_session(paths)
 
-    app.on_shutdown.append(on_shutdown)
 
-    # Shutdown signal: set by handle_shutdown route or OS signals
-    shutdown_event = asyncio.Event()
-    app["shutdown_event"] = shutdown_event
-
-    logger.info("daemon_starting", host=actual_host, port=actual_port)
-
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(
-            sig, lambda: asyncio.ensure_future(_graceful_shutdown(app))
-        )
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    # Auto-port: try base_port, then base_port+1, ..., up to base_port+9
-    base_port = actual_port
-    last_error: OSError | None = None
-    for offset in range(_PORT_RANGE_SIZE):
-        try_port = base_port + offset
-        try:
-            site = web.TCPSite(runner, actual_host, try_port)
-            await site.start()
-            actual_port = try_port
-            last_error = None
-            break
-        except OSError as exc:
-            last_error = exc
-            if offset < _PORT_RANGE_SIZE - 1:
-                logger.info(
-                    "port_in_use",
-                    port=try_port,
-                    next_port=try_port + 1,
-                )
-            continue
-
-    if last_error is not None:
-        logger.error(
-            "all_ports_exhausted",
-            range_start=base_port,
-            range_end=base_port + _PORT_RANGE_SIZE - 1,
-        )
-        await runner.cleanup()
-        raise last_error
-
-    # Record actual bound port (may differ from configured after auto-increment)
-    _write_session(
-        paths,
-        port=actual_port,
-        tier=tier,
-        profile=profile,
-        bridge_token=bridge_token,
-    )
-
-    logger.info("daemon_ready", host=actual_host, port=actual_port, tier=tier.value)
-
-    resume_writer.start_background()
-
-    if idle_timeout > 0:
-        _watchdog = asyncio.ensure_future(_idle_watchdog(app, idle_timeout))
-        app["_idle_watchdog"] = _watchdog
-
-    try:
-        await shutdown_event.wait()  # woken by handle_shutdown or _graceful_shutdown
-    finally:
-        await runner.cleanup()
-
-
-async def _idle_watchdog(app: web.Application, timeout: float) -> None:
+async def _idle_watchdog(app: Any, timeout: float, server: uvicorn.Server) -> None:
     """Shut down daemon after idle_timeout seconds of inactivity."""
-    import time as _time
-
-    while True:
+    while not server.should_exit:
         await asyncio.sleep(30)
-        elapsed = _time.monotonic() - app["last_request_time"]
+        elapsed = time.monotonic() - app.state.last_request_time
         if elapsed >= timeout:
             logger.info("idle_timeout_reached", seconds=int(elapsed))
-            await _graceful_shutdown(app)
+            app.state.shutdown_event.set()
             return
 
 
-async def _graceful_shutdown(app: web.Application) -> None:
-    event: asyncio.Event | None = app.get("shutdown_event")
-    if event is not None:
-        event.set()
-    else:
-        raise SystemExit(0)
+async def _signal_shutdown(server: uvicorn.Server, app: Any) -> None:
+    app.state.shutdown_event.set()
+    server.should_exit = True
 
 
 async def stop(*, host: str | None = None, port: int | None = None) -> bool:
     """Send shutdown request to the daemon."""
-    import aiohttp
-
     _, cfg = load_config()
     actual_host = host or cfg.daemon_host
     actual_port = port or cfg.daemon_port
     url = f"http://{actual_host}:{actual_port}/shutdown"
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, timeout=aiohttp.ClientTimeout(total=5)):
-                pass
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(url)
     except Exception:
         pass
     return True
@@ -375,17 +452,15 @@ async def stop(*, host: str | None = None, port: int | None = None) -> bool:
 
 async def health(*, host: str | None = None, port: int | None = None) -> bool:
     """Check if daemon is reachable."""
-    import aiohttp
-
     _, cfg = load_config()
     actual_host = host or cfg.daemon_host
     actual_port = port or cfg.daemon_port
     url = f"http://{actual_host}:{actual_port}/health"
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                data = await resp.json()
-                return bool(data.get("ok"))
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(url)
+            data = resp.json()
+            return bool(data.get("ok"))
     except Exception:
         return False

@@ -2,30 +2,26 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 from pathlib import Path  # noqa: TC003 — Typer needs runtime access
-from typing import Any
 
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 @app.command("navigate")
 def browser_navigate(
     url: str = typer.Argument(help="URL to navigate to."),
-    timeout: float = typer.Option(
-        30.0, "--timeout", help="Navigation timeout in seconds."
+    timeout: float | None = typer.Option(
+        None,
+        "--timeout",
+        help="Navigation timeout in seconds (default: config.navigation_timeout).",
     ),
     snapshot: bool = typer.Option(
         False,
@@ -40,13 +36,11 @@ def browser_navigate(
 ) -> None:
     """Navigate to a URL."""
     client = DaemonClient()
-    result = _run(
-        client.navigate(
-            url,
-            timeout=timeout,
-            include_snapshot=snapshot,
-            snapshot_mode=snapshot_mode,
-        )
+    result = client.navigate_sync(
+        url,
+        timeout=timeout,
+        include_snapshot=snapshot,
+        snapshot_mode=snapshot_mode,
     )
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
@@ -64,15 +58,18 @@ def browser_screenshot(
     format: str = typer.Option(
         "jpeg", "--format", "-f", help="Image format: jpeg or png."
     ),
-    quality: int = typer.Option(
-        80, "--quality", "-q", help="JPEG quality 0-100 (ignored for png)."
+    quality: int | None = typer.Option(
+        None,
+        "--quality",
+        "-q",
+        help=(
+            "JPEG quality 0-100 (default: config.screenshot_quality, ignored for png)."
+        ),
     ),
 ) -> None:
     """Take a screenshot."""
     client = DaemonClient()
-    result = _run(
-        client.screenshot(full_page=full_page, format=format, quality=quality)
-    )
+    result = client.screenshot_sync(full_page=full_page, format=format, quality=quality)
     data = result.get("data", result)
     seq = result.get("seq", 0)
 
@@ -125,16 +122,14 @@ def browser_snapshot(
 ) -> None:
     """Get page snapshot (accessible tree, DOM, or text content)."""
     client = DaemonClient()
-    result = _run(
-        client.snapshot(
-            mode=mode,
-            max_chars=max_chars,
-            max_nodes=max_nodes,
-            focus=focus,
-            offset=offset,
-            frames=frames,
-            diff=diff,
-        )
+    result = client.snapshot_sync(
+        mode=mode,
+        max_chars=max_chars,
+        max_nodes=max_nodes,
+        focus=focus,
+        offset=offset,
+        frames=frames,
+        diff=diff,
     )
     data = result.get("data", result)
     seq = result.get("seq", 0)
@@ -145,7 +140,7 @@ def browser_snapshot(
 def browser_resume() -> None:
     """Get resume snapshot for session recovery."""
     client = DaemonClient()
-    result = _run(client.resume())
+    result = client.resume_sync()
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)

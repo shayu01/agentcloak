@@ -7,8 +7,8 @@ from typing import Any
 
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 from agentcloak.core.errors import AgentBrowserError
 from agentcloak.spells.discovery import discover_spells
 from agentcloak.spells.registry import get_registry
@@ -16,10 +16,6 @@ from agentcloak.spells.registry import get_registry
 __all__ = ["app"]
 
 app = typer.Typer()
-
-
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
 
 
 def _ensure_discovered() -> None:
@@ -125,7 +121,9 @@ def spell_run(
         )
 
     parsed_args = _parse_args(args or [])
-    result = _run(_execute(entry, parsed_args))
+    # Local spell execution stays async (executor + pipeline are async); we
+    # only need asyncio.run here, not a daemon round-trip.
+    result = asyncio.run(_execute(entry, parsed_args))
     output_json({"result": result}, seq=0)
 
 
@@ -161,10 +159,7 @@ def spell_scaffold(
 ) -> None:
     """Generate spell code from captured traffic analysis."""
     client = DaemonClient()
-    params: dict[str, str] = {}
-    if domain:
-        params["domain"] = domain
-    analyze_result = _run(client.capture_analyze(domain=domain))
+    analyze_result = client.capture_analyze_sync(domain=domain)
 
     patterns_data: list[dict[str, Any]] = analyze_result.get("data", {}).get(
         "patterns", []

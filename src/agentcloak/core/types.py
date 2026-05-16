@@ -18,7 +18,7 @@ class StealthTier(StrEnum):
 
 
 class Strategy(StrEnum):
-    """Adapter interaction mode — encodes transport + auth semantics."""
+    """Spell interaction mode — encodes transport + auth semantics."""
 
     PUBLIC = "public"
     COOKIE = "cookie"

@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import contextlib
-import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import orjson
+from mcp.types import ToolAnnotations
+
+from agentcloak.core.errors import AgentBrowserError
+from agentcloak.mcp._format import error_json, format_call
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    cfg = client.config  # single shared client snapshot.
+
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, readOnlyHint=False))
     async def agentcloak_evaluate(
         js: str,
         world: str = "main",
-        max_return_size: int = 50_000,
+        max_return_size: int = cfg.max_return_size,
     ) -> str:
         """Execute JavaScript in the browser page context. Can modify page state.
 
@@ -35,33 +42,44 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             js: JavaScript code to evaluate (runs in page context with full DOM access)
             world: Execution context — 'main' (page globals visible)
                 or 'utility' (isolated)
-            max_return_size: Max bytes of serialized result to return (default 50000).
-                Large objects are truncated with a [truncated] marker.
+            max_return_size: Max bytes of serialized result to return
+                (default from config.max_return_size). Large objects are
+                truncated with a [truncated] marker.
 
         Returns:
             JSON with the evaluation result. Complex objects are serialized.
         """
-        result = await bridge.request(
-            "POST",
-            "/evaluate",
-            json_body={"js": js, "world": world, "max_return_size": max_return_size},
-        )
-        data = result.get("data", result)
-        # Auto-unwrap: if JS returned a JSON.stringify() string, parse it so agent
-        # receives the object directly instead of a double-encoded string.
-        actual = data.get("result")
-        if isinstance(actual, str) and len(actual) > 1 and actual[0] in ("{", "["):
-            with contextlib.suppress(json.JSONDecodeError, ValueError):
-                data = {**data, "result": json.loads(actual)}
-        return json.dumps(data)
+        try:
+            envelope = await client.evaluate(
+                js, world=world, max_return_size=max_return_size
+            )
+        except AgentBrowserError as exc:
+            return error_json(exc)
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+        data = envelope.get("data", envelope)
+        # Design decision (audit #10): MCP-specific auto-unwrap. The CLI
+        # surface returns the raw daemon payload verbatim, but agents on the
+        # MCP side often pass JSON.stringify(...) at the end of their snippet
+        # (so the page's response is captured as text instead of a host
+        # object). Decoding the string here gives them the parsed object in
+        # one tool call instead of forcing a second `orjson.loads(result)`
+        # round-trip through their reasoning loop. The CLI does NOT do this —
+        # CLI callers either consume JSON via ``jq`` (where escaping is fine)
+        # or pipe through their own parser.
+        actual = data.get("result") if isinstance(data, dict) else None
+        if isinstance(actual, str) and len(actual) > 1 and actual[0] in ("{", "["):
+            with contextlib.suppress(orjson.JSONDecodeError, ValueError):
+                parsed = orjson.loads(actual)
+                data = {**data, "result": parsed}
+        return orjson.dumps(data).decode()
+
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_fetch(
         url: str,
         method: str = "GET",
         body: str | None = None,
         headers_json: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = float(cfg.navigation_timeout),
     ) -> str:
         """HTTP fetch using the browser's cookies and user agent.
 
@@ -78,17 +96,18 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with status, headers, and response body text.
         """
-        json_body: dict[str, object] = {
-            "url": url,
-            "method": method,
-            "timeout": timeout,
-        }
-        if body is not None:
-            json_body["body"] = body
+        headers: dict[str, Any] | None = None
         if headers_json is not None:
             if isinstance(headers_json, str):
-                json_body["headers"] = json.loads(headers_json)
+                headers = orjson.loads(headers_json)
             else:
-                json_body["headers"] = headers_json
-        result = await bridge.request("POST", "/fetch", json_body=json_body)
-        return bridge.format_result(result)
+                headers = headers_json
+        return await format_call(
+            client.fetch(
+                url,
+                method=method,
+                body=body,
+                headers=headers,
+                timeout=timeout,
+            )
+        )

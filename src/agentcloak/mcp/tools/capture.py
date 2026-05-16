@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, readOnlyHint=False))
     async def agentcloak_capture_control(
         action: Literal["start", "stop", "clear", "replay"],
         url: str = "",
@@ -36,18 +40,14 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with recording status and entry count, or replay response.
         """
         if action == "clear":
-            result = await bridge.request("POST", "/capture/clear")
-        elif action == "stop":
-            result = await bridge.request("POST", "/capture/stop")
-        elif action == "replay":
-            result = await bridge.request(
-                "POST", "/capture/replay", json_body={"url": url, "method": method}
-            )
-        else:
-            result = await bridge.request("POST", "/capture/start")
-        return bridge.format_result(result)
+            return await format_call(client.capture_clear())
+        if action == "stop":
+            return await format_call(client.capture_stop())
+        if action == "replay":
+            return await format_call(client.capture_replay(url=url, method=method))
+        return await format_call(client.capture_start())
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_capture_query(
         action: Literal["status", "export", "analyze"] = "status",
         format: str = "har",
@@ -71,14 +71,7 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             analyze: detected API patterns with method, path, auth, schema.
         """
         if action == "export":
-            result = await bridge.request(
-                "GET", "/capture/export", params={"format": format}
-            )
-        elif action == "analyze":
-            params: dict[str, str] = {}
-            if domain:
-                params["domain"] = domain
-            result = await bridge.request("GET", "/capture/analyze", params=params)
-        else:
-            result = await bridge.request("GET", "/capture/status")
-        return bridge.format_result(result)
+            return await format_call(client.capture_export(fmt=format))
+        if action == "analyze":
+            return await format_call(client.capture_analyze(domain=domain))
+        return await format_call(client.capture_status())

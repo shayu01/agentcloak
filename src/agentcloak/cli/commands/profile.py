@@ -1,11 +1,16 @@
-"""Profile management commands — create, list, delete, launch."""
+"""Profile management commands — create, list, delete, launch.
+
+Profile CRUD is delegated to :class:`ProfileService` (the same class the
+daemon route handlers use) so name validation, path-traversal guards, and the
+profile directory layout are defined in exactly one place. The CLI surface
+adds optional metadata (``size``, ``last_modified``, ``created_at``) that's
+useful when humans are auditing local state but isn't exposed via the daemon
+API to keep the wire format minimal.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import shutil
-import subprocess
-import sys
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +21,7 @@ from agentcloak.cli.output import output_error, output_json
 from agentcloak.core.config import load_config
 from agentcloak.core.errors import ProfileError
 from agentcloak.core.types import PROFILE_NAME_RE as _NAME_RE
+from agentcloak.daemon.services import ProfileService
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,8 +31,15 @@ __all__ = ["app"]
 app = typer.Typer()
 
 
-def _validate_name(name: str) -> str:
-    """Enforce kebab-case profile naming (alphanumeric + hyphens)."""
+def _validate_name(name: str) -> str:  # pyright: ignore[reportUnusedFunction]
+    """Kebab-case validator kept for backwards compatibility with tests.
+
+    Mirrors :meth:`ProfileService.validate_name` but returns the name so
+    callers can chain it inline. Production code paths go through the
+    service; this helper exists so ``test_profile.py`` can keep importing it
+    without rewriting every assertion. Pyright can't see test-only consumers,
+    hence the ``reportUnusedFunction`` waiver.
+    """
     if not _NAME_RE.match(name):
         raise ProfileError(
             error="invalid_profile_name",
@@ -67,6 +80,11 @@ def _write_profile_meta(pdir: Path, name: str) -> None:
     meta_file.write_bytes(orjson.dumps(meta, option=orjson.OPT_INDENT_2))
 
 
+def _service() -> ProfileService:
+    paths, _ = load_config()
+    return ProfileService(paths.profiles_dir)
+
+
 @app.command("create")
 def profile_create(
     name: str = typer.Argument(help="Profile name (kebab-case)."),
@@ -75,50 +93,41 @@ def profile_create(
     ),
 ) -> None:
     """Create a new browser profile directory."""
-    _validate_name(name)
-
     if from_current:
-        from agentcloak.cli.client import DaemonClient
+        # Requires a running daemon (cookies live in the browser session).
+        from agentcloak.client import DaemonClient
 
         client = DaemonClient()
-        result = asyncio.run(client.profile_create_from_current(name=name))
+        try:
+            result = client.profile_create_from_current_sync(name=name)
+        except ProfileError as exc:
+            output_error(exc)
+            raise typer.Exit(1) from exc
         output_json(result.get("data", result), seq=result.get("seq", 0))
         return
 
-    paths, _ = load_config()
-    pdir = paths.profiles_dir / name
+    service = _service()
+    try:
+        service.create(name)
+    except ProfileError as exc:
+        output_error(exc)
+        raise typer.Exit(1) from exc
 
-    if pdir.exists():
-        output_error(
-            ProfileError(
-                error="profile_exists",
-                hint=f"Profile '{name}' already exists at {pdir}",
-                action=(
-                    "use a different name or delete with"
-                    f" 'agentcloak profile delete {name}'"
-                ),
-            )
-        )
-        raise typer.Exit(1)
-
-    pdir.mkdir(parents=True, exist_ok=True)
+    pdir = service.profiles_dir / name
     _write_profile_meta(pdir, name)
-
     output_json({"name": name, "path": str(pdir), "created": True}, seq=0)
 
 
 @app.command("list")
 def profile_list() -> None:
     """List all browser profiles."""
-    paths, _ = load_config()
-    profiles_dir = paths.profiles_dir
+    service = _service()
+    profiles_dir = service.profiles_dir
 
     profiles: list[dict[str, Any]] = []
-
     if profiles_dir.is_dir():
-        for entry in sorted(profiles_dir.iterdir()):
-            if not entry.is_dir():
-                continue
+        for entry_name in service.list_profiles():
+            entry = profiles_dir / entry_name
             meta_file = entry / "profile.json"
             meta: dict[str, Any] = {}
             if meta_file.is_file():
@@ -148,32 +157,12 @@ def profile_delete(
     name: str = typer.Argument(help="Profile name to delete."),
 ) -> None:
     """Delete a browser profile and its data."""
-    _validate_name(name)
-    paths, _ = load_config()
-    profiles_dir = paths.profiles_dir
-    pdir = profiles_dir / name
-
-    if not pdir.resolve().is_relative_to(profiles_dir.resolve()):
-        output_error(
-            ProfileError(
-                error="invalid_profile_path",
-                hint="Profile path escapes profiles directory",
-                action="use a simple profile name without path separators",
-            )
-        )
-        raise typer.Exit(1)
-
-    if not pdir.exists():
-        output_error(
-            ProfileError(
-                error="profile_not_found",
-                hint=f"Profile '{name}' does not exist",
-                action="run 'agentcloak profile list' to see available profiles",
-            )
-        )
-        raise typer.Exit(1)
-
-    shutil.rmtree(pdir)
+    service = _service()
+    try:
+        service.delete(name)
+    except ProfileError as exc:
+        output_error(exc)
+        raise typer.Exit(1) from exc
     output_json({"name": name, "deleted": True}, seq=0)
 
 
@@ -190,37 +179,31 @@ def profile_launch(
     port: int | None = typer.Option(None, "--port", help="Daemon bind port."),
 ) -> None:
     """Launch daemon with a specific profile (persistent context)."""
-    _validate_name(name)
-    paths, _ = load_config()
-    pdir = paths.profiles_dir / name
+    service = _service()
+    try:
+        service.validate_name(name)
+    except ProfileError as exc:
+        output_error(exc)
+        raise typer.Exit(1) from exc
 
+    pdir = service.profiles_dir / name
     # Auto-create the profile if it doesn't exist
     if not pdir.exists():
         pdir.mkdir(parents=True, exist_ok=True)
         _write_profile_meta(pdir, name)
 
     if background:
-        cmd = [
-            sys.executable,
-            "-m",
-            "agentcloak.daemon",
-            "--profile",
-            name,
-        ]
-        if host:
-            cmd.extend(["--host", host])
-        if port:
-            cmd.extend(["--port", str(port)])
-        if not headless:
-            cmd.append("--headed")
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+        from agentcloak.client import DaemonClient
+
+        client = DaemonClient(host=host, port=port, auto_start=False)
+        pid = client.spawn_background(
+            host=host,
+            port=port,
+            headless=headless,
+            profile=name,
         )
         output_json(
-            {"pid": proc.pid, "profile": name, "background": True},
+            {"pid": pid, "profile": name, "background": True},
             seq=0,
         )
         return

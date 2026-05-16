@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
@@ -24,8 +28,8 @@ ActionKind = Literal[
 ]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, readOnlyHint=False))
     async def agentcloak_action(
         kind: ActionKind,
         target: str = "",
@@ -77,16 +81,20 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             When include_snapshot=true, includes a 'snapshot' object with
             tree_text, mode, total_nodes, and total_interactive.
         """
-        body: dict[str, Any] = {"kind": kind, "target": target}
+        extras: dict[str, Any] = {}
         if kind in ("fill", "type") and text:
-            body["text"] = text
+            extras["text"] = text
         if kind in ("press", "keydown", "keyup") and key:
-            body["key"] = key
+            extras["key"] = key
         if kind == "select" and value:
-            body["value"] = value
+            extras["value"] = value
         if kind == "scroll":
-            body["direction"] = direction
-        if include_snapshot:
-            body["include_snapshot"] = True
-        result = await bridge.request("POST", "/action", json_body=body)
-        return bridge.format_result(result)
+            extras["direction"] = direction
+        return await format_call(
+            client.action(
+                kind,
+                target=target,
+                include_snapshot=include_snapshot,
+                **extras,
+            )
+        )

@@ -1,4 +1,10 @@
-"""Tests for daemon/routes.py — route registration and response shapes."""
+"""Tests for daemon/routes.py — route registration and response shapes.
+
+Migrated to FastAPI TestClient (httpx-based) as part of the v0.2.0 aiohttp
+→ FastAPI migration. The test surface (status codes, response envelopes,
+business-level assertions) stays the same so we don't lose regression
+coverage during the framework swap.
+"""
 
 from __future__ import annotations
 
@@ -8,17 +14,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import orjson
 import pytest
-from aiohttp import web
-from aiohttp.test_utils import TestClient, TestServer
+from fastapi.testclient import TestClient
 
 from agentcloak.browser.playwright_ctx import PlaywrightContext
 from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
-from agentcloak.daemon.middleware import error_middleware
+from agentcloak.daemon.app import create_app
 from agentcloak.daemon.routes import (
     _batch_has_refs,
     _resolve_action_refs,
     _traverse,
-    setup_routes,
 )
 
 
@@ -99,139 +103,110 @@ def _mock_ctx() -> PlaywrightContext:
 
 
 @pytest.fixture
-async def client() -> Any:
-    app = web.Application(middlewares=[error_middleware])
-    app["browser_ctx"] = _mock_ctx()
-    app["shutdown_event"] = asyncio.Event()
-    setup_routes(app)
-    async with TestClient(TestServer(app)) as c:
+def client() -> Any:
+    app = create_app()
+    app.state.browser_ctx = _mock_ctx()
+    app.state.shutdown_event = asyncio.Event()
+    with TestClient(app) as c:
         yield c
 
 
 class TestRoutes:
-    @pytest.mark.asyncio
-    async def test_health(self, client: TestClient) -> None:
-        resp = await client.get("/health")
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_health(self, client: TestClient) -> None:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
 
-    @pytest.mark.asyncio
-    async def test_navigate(self, client: TestClient) -> None:
-        resp = await client.post(
-            "/navigate",
-            data=orjson.dumps({"url": "https://test.com"}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_navigate(self, client: TestClient) -> None:
+        resp = client.post("/navigate", json={"url": "https://test.com"})
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert "data" in data
         assert data["data"]["url"] == "https://example.com"
 
-    @pytest.mark.asyncio
-    async def test_screenshot(self, client: TestClient) -> None:
-        resp = await client.get("/screenshot")
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_screenshot(self, client: TestClient) -> None:
+        resp = client.get("/screenshot")
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert "base64" in data["data"]
 
-    @pytest.mark.asyncio
-    async def test_snapshot(self, client: TestClient) -> None:
-        resp = await client.get("/snapshot?mode=accessible")
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_snapshot(self, client: TestClient) -> None:
+        resp = client.get("/snapshot?mode=accessible")
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert "tree_text" in data["data"]
         assert "selector_map" in data["data"]
 
-    @pytest.mark.asyncio
-    async def test_evaluate(self, client: TestClient) -> None:
-        resp = await client.post(
-            "/evaluate",
-            data=orjson.dumps({"js": "1+1"}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_evaluate(self, client: TestClient) -> None:
+        resp = client.post("/evaluate", json={"js": "1+1"})
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert "result" in data["data"]
 
-    @pytest.mark.asyncio
-    async def test_network(self, client: TestClient) -> None:
-        resp = await client.get("/network?since=0")
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_network(self, client: TestClient) -> None:
+        resp = client.get("/network?since=0")
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert "requests" in data["data"]
 
-    @pytest.mark.asyncio
-    async def test_evaluate_small_result(self, client: TestClient) -> None:
-        # Small result should not be truncated
-        resp = await client.post(
-            "/evaluate",
-            data=orjson.dumps({"js": "1+1"}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_evaluate_small_result(self, client: TestClient) -> None:
+        resp = client.post("/evaluate", json={"js": "1+1"})
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["truncated"] is False
         assert "total_size" in data["data"]
 
-    @pytest.mark.asyncio
-    async def test_evaluate_truncation(self, client: TestClient) -> None:
-        # Artificially low max_return_size triggers truncation
-        resp = await client.post(
-            "/evaluate",
-            data=orjson.dumps({"js": "1+1", "max_return_size": 1}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+    def test_evaluate_truncation(self, client: TestClient) -> None:
+        resp = client.post("/evaluate", json={"js": "1+1", "max_return_size": 1})
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["truncated"] is True
         assert "[...truncated...]" in data["data"]["result"]
 
-    @pytest.mark.asyncio
-    async def test_cdp_endpoint_no_port(self, client: TestClient) -> None:
+    def test_cdp_endpoint_no_port(self, client: TestClient) -> None:
         # default _mock_ctx has no _cdp_port → 503
-        resp = await client.get("/cdp/endpoint")
-        assert resp.status == 503
-        data = orjson.loads(await resp.read())
+        resp = client.get("/cdp/endpoint")
+        assert resp.status_code == 503
+        data = resp.json()
         assert data["error"] == "no_cdp_port"
 
-    @pytest.mark.asyncio
-    async def test_cdp_endpoint_ok(self) -> None:
-        # Build a ctx with a cdp_port set
+    def test_cdp_endpoint_ok(self) -> None:
         ctx = _mock_ctx()
         ctx._cdp_port = 19222
 
-        app = web.Application(middlewares=[error_middleware])
-        app["browser_ctx"] = ctx
-        setup_routes(app)
+        app = create_app()
+        app.state.browser_ctx = ctx
+        app.state.shutdown_event = asyncio.Event()
 
-        # Mock the aiohttp GET to /json/version
-        mock_get_resp = MagicMock()
-        mock_get_resp.__aenter__ = AsyncMock(return_value=mock_get_resp)
-        mock_get_resp.__aexit__ = AsyncMock(return_value=None)
-        mock_get_resp.json = AsyncMock(
+        # httpx.AsyncClient is used by /cdp/endpoint to probe the DevTools API.
+        # Patch it to return our stub.
+        mock_resp = MagicMock()
+        mock_resp.json = MagicMock(
             return_value={
                 "webSocketDebuggerUrl": "ws://127.0.0.1:19222/devtools/browser/abc"
             }
         )
 
-        mock_session = MagicMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
-        mock_session.get = MagicMock(return_value=mock_get_resp)
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_resp)
 
-        with patch("aiohttp.ClientSession", return_value=mock_session):
-            async with TestClient(TestServer(app)) as c:
-                resp = await c.get("/cdp/endpoint")
-                assert resp.status == 200
-                data = orjson.loads(await resp.read())
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            TestClient(app) as c,
+        ):
+            resp = c.get("/cdp/endpoint")
+            assert resp.status_code == 200
+            data = resp.json()
 
         assert data["ok"] is True
         assert (
@@ -240,24 +215,21 @@ class TestRoutes:
         assert data["data"]["port"] == 19222
         assert data["data"]["http_url"] == "http://127.0.0.1:19222"
 
-    @pytest.mark.asyncio
-    async def test_capture_replay_entry_not_found(self, client: TestClient) -> None:
-        resp = await client.post(
+    def test_capture_replay_entry_not_found(self, client: TestClient) -> None:
+        resp = client.post(
             "/capture/replay",
-            data=orjson.dumps({"url": "https://example.com/api", "method": "GET"}),
-            headers={"Content-Type": "application/json"},
+            json={"url": "https://example.com/api", "method": "GET"},
         )
-        assert resp.status == 404
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 404
+        data = resp.json()
         assert data["error"] == "capture_entry_not_found"
 
-    @pytest.mark.asyncio
-    async def test_capture_replay_ok(self, client: TestClient) -> None:
+    def test_capture_replay_ok(self, client: TestClient) -> None:
         from datetime import UTC, datetime
 
         from agentcloak.core.capture import CaptureEntry
 
-        ctx = client.app["browser_ctx"]
+        ctx = client.app.state.browser_ctx
         ctx._capture_store.start()
         entry = CaptureEntry(
             seq=1,
@@ -275,27 +247,24 @@ class TestRoutes:
         fetch_result = {"status": 200, "body": '{"ok":true}', "headers": {}}
         ctx.fetch = AsyncMock(return_value=fetch_result)
 
-        resp = await client.post(
+        resp = client.post(
             "/capture/replay",
-            data=orjson.dumps({"url": "https://example.com/api/data", "method": "GET"}),
-            headers={"Content-Type": "application/json"},
+            json={"url": "https://example.com/api/data", "method": "GET"},
         )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["replayed_from"]["url"] == "https://example.com/api/data"
         assert data["data"]["replayed_from"]["seq"] == 1
-        # hop-by-hop header 'host' must be filtered out
         call_kwargs = ctx.fetch.call_args
         passed_headers = call_kwargs.kwargs.get("headers") or {}
         assert "host" not in passed_headers
         assert "authorization" in passed_headers
 
-    @pytest.mark.asyncio
-    async def test_profile_create_from_current_ok(
+    def test_profile_create_from_current_ok(
         self, tmp_path: Any, client: TestClient
     ) -> None:
-        ctx = client.app["browser_ctx"]
+        ctx = client.app.state.browser_ctx
         mock_bctx = MagicMock()
         mock_bctx.cookies = AsyncMock(return_value=[{"name": "sid", "value": "abc"}])
         ctx._get_browser_context = MagicMock(return_value=mock_bctx)
@@ -316,24 +285,22 @@ class TestRoutes:
                 "asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)
             ),
         ):
-            resp = await client.post(
+            resp = client.post(
                 "/profile/create-from-current",
-                data=orjson.dumps({"name": "my-profile"}),
-                headers={"Content-Type": "application/json"},
+                json={"name": "my-profile"},
             )
 
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["profile"] == "my-profile"
         assert data["data"]["renamed"] is False
         assert data["data"]["cookie_count"] == 1
 
-    @pytest.mark.asyncio
-    async def test_profile_create_from_current_renamed(
+    def test_profile_create_from_current_renamed(
         self, tmp_path: Any, client: TestClient
     ) -> None:
-        ctx = client.app["browser_ctx"]
+        ctx = client.app.state.browser_ctx
         mock_bctx = MagicMock()
         mock_bctx.cookies = AsyncMock(return_value=[])
         ctx._get_browser_context = MagicMock(return_value=mock_bctx)
@@ -358,33 +325,30 @@ class TestRoutes:
                 "asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)
             ),
         ):
-            resp = await client.post(
+            resp = client.post(
                 "/profile/create-from-current",
-                data=orjson.dumps({"name": "my-site"}),
-                headers={"Content-Type": "application/json"},
+                json={"name": "my-site"},
             )
 
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["profile"] == "my-site-2"
         assert data["data"]["renamed"] is True
 
-    @pytest.mark.asyncio
-    async def test_shutdown_sets_event(self, client: TestClient) -> None:
+    def test_shutdown_sets_event(self, client: TestClient) -> None:
         """POST /shutdown must set shutdown_event without raising."""
-        event: asyncio.Event = client.app["shutdown_event"]
+        event: asyncio.Event = client.app.state.shutdown_event
         assert not event.is_set()
-        resp = await client.post("/shutdown")
-        assert resp.status == 200
+        resp = client.post("/shutdown")
+        assert resp.status_code == 200
         assert event.is_set()
 
-    @pytest.mark.asyncio
-    async def test_profile_create_from_current_writer_error(
+    def test_profile_create_from_current_writer_error(
         self, tmp_path: Any, client: TestClient
     ) -> None:
         """Subprocess failure returns 500 with error info."""
-        ctx = client.app["browser_ctx"]
+        ctx = client.app.state.browser_ctx
         mock_bctx = MagicMock()
         mock_bctx.cookies = AsyncMock(return_value=[])
         ctx._get_browser_context = MagicMock(return_value=mock_bctx)
@@ -405,14 +369,13 @@ class TestRoutes:
                 "asyncio.create_subprocess_exec", new=AsyncMock(return_value=mock_proc)
             ),
         ):
-            resp = await client.post(
+            resp = client.post(
                 "/profile/create-from-current",
-                data=orjson.dumps({"name": "my-profile"}),
-                headers={"Content-Type": "application/json"},
+                json={"name": "my-profile"},
             )
 
-        assert resp.status == 500
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 500
+        data = resp.json()
         assert data["ok"] is False
         assert data["error"] == "profile_writer_failed"
 
@@ -508,30 +471,19 @@ class TestBatchRefResolution:
 class TestIncludeSnapshot:
     """Tests for includeSnapshot action parameter (R4.3)."""
 
-    @pytest.mark.asyncio
-    async def test_action_include_snapshot(self, client: TestClient) -> None:
-        """Action with include_snapshot=true should attach snapshot data."""
-        ctx = client.app["browser_ctx"]
-        # Mock action to return a simple click result
+    def test_action_include_snapshot(self, client: TestClient) -> None:
+        ctx = client.app.state.browser_ctx
         ctx.action = AsyncMock(
             return_value={"ok": True, "clicked": True, "seq": 1, "action": "click"}
         )
 
-        resp = await client.post(
+        resp = client.post(
             "/action",
-            data=orjson.dumps(
-                {
-                    "kind": "click",
-                    "target": "5",
-                    "include_snapshot": True,
-                }
-            ),
-            headers={"Content-Type": "application/json"},
+            json={"kind": "click", "target": "5", "include_snapshot": True},
         )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
-        # Snapshot should be included in the action result
         assert "snapshot" in data["data"]
         snap = data["data"]["snapshot"]
         assert "tree_text" in snap
@@ -539,21 +491,18 @@ class TestIncludeSnapshot:
         assert "total_nodes" in snap
         assert "total_interactive" in snap
 
-    @pytest.mark.asyncio
-    async def test_action_without_include_snapshot(self, client: TestClient) -> None:
-        """Action without include_snapshot should NOT attach snapshot."""
-        ctx = client.app["browser_ctx"]
+    def test_action_without_include_snapshot(self, client: TestClient) -> None:
+        ctx = client.app.state.browser_ctx
         ctx.action = AsyncMock(
             return_value={"ok": True, "clicked": True, "seq": 1, "action": "click"}
         )
 
-        resp = await client.post(
+        resp = client.post(
             "/action",
-            data=orjson.dumps({"kind": "click", "target": "5"}),
-            headers={"Content-Type": "application/json"},
+            json={"kind": "click", "target": "5"},
         )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert "snapshot" not in data["data"]
 
@@ -561,14 +510,10 @@ class TestIncludeSnapshot:
 class TestStaleRefRetry:
     """Tests for stale ref auto-retry (R4.5)."""
 
-    @pytest.mark.asyncio
-    async def test_stale_ref_retries_on_numeric_target(
-        self, client: TestClient
-    ) -> None:
-        """ElementNotFoundError with numeric target triggers retry."""
+    def test_stale_ref_retries_on_numeric_target(self, client: TestClient) -> None:
         from agentcloak.core.errors import ElementNotFoundError
 
-        ctx = client.app["browser_ctx"]
+        ctx = client.app.state.browser_ctx
         call_count = 0
 
         async def action_side_effect(kind: str, target: str, **kw: Any) -> Any:
@@ -584,23 +529,20 @@ class TestStaleRefRetry:
 
         ctx.action = AsyncMock(side_effect=action_side_effect)
 
-        resp = await client.post(
+        resp = client.post(
             "/action",
-            data=orjson.dumps({"kind": "click", "target": "5"}),
-            headers={"Content-Type": "application/json"},
+            json={"kind": "click", "target": "5"},
         )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         assert data["data"]["retried"] is True
         assert call_count == 2
 
-    @pytest.mark.asyncio
-    async def test_stale_ref_no_retry_on_non_numeric(self, client: TestClient) -> None:
-        """ElementNotFoundError with non-numeric target propagates (no retry)."""
+    def test_stale_ref_no_retry_on_non_numeric(self, client: TestClient) -> None:
         from agentcloak.core.errors import ElementNotFoundError
 
-        ctx = client.app["browser_ctx"]
+        ctx = client.app.state.browser_ctx
         ctx.action = AsyncMock(
             side_effect=ElementNotFoundError(
                 error="element_not_found",
@@ -609,24 +551,21 @@ class TestStaleRefRetry:
             )
         )
 
-        resp = await client.post(
+        resp = client.post(
             "/action",
-            data=orjson.dumps({"kind": "fill", "target": ""}),
-            headers={"Content-Type": "application/json"},
+            json={"kind": "fill", "target": ""},
         )
-        # Should return 400 from middleware (ElementNotFoundError is AgentBrowserError)
-        assert resp.status == 400
-        data = orjson.loads(await resp.read())
+        # AgentBrowserError → 400 via exception handler
+        assert resp.status_code == 400
+        data = resp.json()
         assert data["error"] == "element_not_found"
 
 
 class TestBatchWithRefs:
-    """Integration tests for $N batch references in handle_action_batch (R4.4)."""
+    """Integration tests for $N batch references in handle_action_batch."""
 
-    @pytest.mark.asyncio
-    async def test_batch_with_refs_resolves(self, client: TestClient) -> None:
-        """Batch with $N.path references resolves correctly."""
-        ctx = client.app["browser_ctx"]
+    def test_batch_with_refs_resolves(self, client: TestClient) -> None:
+        ctx = client.app.state.browser_ctx
         call_count = 0
 
         async def action_side_effect(kind: str, target: str, **kw: Any) -> Any:
@@ -656,25 +595,19 @@ class TestBatchWithRefs:
             {"kind": "click", "target": "5"},
             {"kind": "fill", "target": "3", "text": "$0.result_url"},
         ]
-        resp = await client.post(
+        resp = client.post(
             "/action/batch",
-            data=orjson.dumps({"actions": actions, "sleep": 0}),
-            headers={"Content-Type": "application/json"},
+            json={"actions": actions, "sleep": 0},
         )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["ok"] is True
         results = data["data"]["results"]
         assert len(results) == 2
-        # Second action should have received the resolved URL as text
         assert results[1]["text"] == "https://clicked.com"
 
-    @pytest.mark.asyncio
-    async def test_batch_without_refs_delegates_to_backend(
-        self, client: TestClient
-    ) -> None:
-        """Batch without $N refs uses the backend's action_batch directly."""
-        ctx = client.app["browser_ctx"]
+    def test_batch_without_refs_delegates_to_backend(self, client: TestClient) -> None:
+        ctx = client.app.state.browser_ctx
         ctx.action_batch = AsyncMock(
             return_value={"results": [], "completed": 0, "total": 0}
         )
@@ -683,19 +616,15 @@ class TestBatchWithRefs:
             {"kind": "click", "target": "5"},
             {"kind": "fill", "target": "3", "text": "hello"},
         ]
-        resp = await client.post(
+        resp = client.post(
             "/action/batch",
-            data=orjson.dumps({"actions": actions, "sleep": 0}),
-            headers={"Content-Type": "application/json"},
+            json={"actions": actions, "sleep": 0},
         )
-        assert resp.status == 200
-        # Backend's action_batch should have been called
+        assert resp.status_code == 200
         ctx.action_batch.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_batch_ref_resolution_failure(self, client: TestClient) -> None:
-        """Invalid $N reference path aborts batch with error."""
-        ctx = client.app["browser_ctx"]
+    def test_batch_ref_resolution_failure(self, client: TestClient) -> None:
+        ctx = client.app.state.browser_ctx
         ctx.action = AsyncMock(
             return_value={
                 "ok": True,
@@ -709,15 +638,17 @@ class TestBatchWithRefs:
             {"kind": "click", "target": "5"},
             {"kind": "fill", "target": "3", "text": "$0.nonexistent.path"},
         ]
-        resp = await client.post(
+        resp = client.post(
             "/action/batch",
-            data=orjson.dumps({"actions": actions, "sleep": 0}),
-            headers={"Content-Type": "application/json"},
+            json={"actions": actions, "sleep": 0},
         )
-        assert resp.status == 200
-        data = orjson.loads(await resp.read())
+        assert resp.status_code == 200
+        data = resp.json()
         results = data["data"]["results"]
-        # First action succeeded, second failed during ref resolution
         assert results[0]["ok"] is True
         assert results[1]["error"] == "ref_resolution_failed"
         assert data["data"]["aborted_reason"] == "ref_resolution_failed"
+
+
+# Re-export orjson so the old TestClient body assertions continue to work.
+_ = orjson

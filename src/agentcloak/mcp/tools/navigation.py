@@ -2,21 +2,30 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"destructiveHint": False, "readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    # All defaults shown in the tool docstrings are sourced from
+    # AgentcloakConfig at request time, so flipping a value in config.toml
+    # propagates without redeploying the MCP server.
+    cfg = client.config  # single shared client snapshot.
+
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, readOnlyHint=False))
     async def agentcloak_navigate(
         url: str,
-        timeout: float = 30.0,
+        timeout: float = float(cfg.navigation_timeout),
         include_snapshot: bool = False,
         snapshot_mode: str = "compact",
     ) -> str:
@@ -37,14 +46,16 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             When include_snapshot=true, includes a 'snapshot' object with
             tree_text, mode, total_nodes, and total_interactive.
         """
-        body: dict[str, Any] = {"url": url, "timeout": timeout}
-        if include_snapshot:
-            body["include_snapshot"] = True
-            body["snapshot_mode"] = snapshot_mode
-        result = await bridge.request("POST", "/navigate", json_body=body)
-        return bridge.format_result(result)
+        return await format_call(
+            client.navigate(
+                url,
+                timeout=timeout,
+                include_snapshot=include_snapshot,
+                snapshot_mode=snapshot_mode,
+            )
+        )
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_snapshot(
         mode: str = "accessible",
         max_chars: int = 0,
@@ -88,49 +99,45 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
             JSON with url, title, tree_text, tree_size, truncated,
             total_nodes, total_interactive, and diff (bool, when requested).
         """
-        params: dict[str, str] = {
-            "mode": mode,
-            "include_selector_map": "false",
-        }
-        if max_chars:
-            params["max_chars"] = str(max_chars)
-        if max_nodes:
-            params["max_nodes"] = str(max_nodes)
-        if focus:
-            params["focus"] = str(focus)
-        if offset:
-            params["offset"] = str(offset)
-        if frames:
-            params["frames"] = "true"
-        if diff:
-            params["diff"] = "true"
-        result = await bridge.request("GET", "/snapshot", params=params)
-        return bridge.format_result(result)
+        return await format_call(
+            client.snapshot(
+                mode=mode,
+                max_chars=max_chars,
+                max_nodes=max_nodes,
+                focus=focus,
+                offset=offset,
+                frames=frames,
+                diff=diff,
+                # MCP omits selector_map by default to save tokens — agents
+                # work with [N] refs from the tree, not the raw map.
+                include_selector_map=False,
+            )
+        )
 
-    @mcp.tool(annotations={"readOnlyHint": True})
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     async def agentcloak_screenshot(
         full_page: bool = False,
         format: str = "jpeg",
-        quality: int = 80,
+        quality: int = cfg.mcp_screenshot_quality,
     ) -> str:
         """Take a screenshot of the current page.
 
         For understanding page layout or verifying visual state.
         For element interaction, prefer agentcloak_snapshot (a11y tree).
 
-        Default format is JPEG at quality 80, which is ~75-85% smaller than
-        PNG. Use format='png' when pixel-perfect fidelity is needed.
+        Default format is JPEG at a lower quality than the CLI default to keep
+        the base64 payload under MCP token budgets. Use format='png' when
+        pixel-perfect fidelity is needed.
 
         Args:
             full_page: Capture the full scrollable page instead of viewport
             format: Image format — 'jpeg' (default, smaller) or 'png' (lossless)
-            quality: JPEG quality 0-100 (default 80, ignored for png)
+            quality: JPEG quality 0-100 (default from config.mcp_screenshot_quality,
+                ignored for png)
 
         Returns:
             JSON with base64-encoded screenshot, size in bytes, and format.
         """
-        params: dict[str, str] = {"format": format, "quality": str(quality)}
-        if full_page:
-            params["full_page"] = "true"
-        result = await bridge.request("GET", "/screenshot", params=params)
-        return bridge.format_result(result)
+        return await format_call(
+            client.screenshot(full_page=full_page, format=format, quality=quality)
+        )

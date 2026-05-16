@@ -2,28 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
-
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
 
 
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
-
-
 @app.command("list")
 def frame_list() -> None:
     """List all frames on the current page."""
     client = DaemonClient()
-    result = _run(client.frame_list())
+    result = client.frame_list_sync()
     data = result.get("data", result)
     seq = result.get("seq", 0)
     output_json(data, seq=seq)
@@ -46,7 +39,7 @@ def frame_focus(
         raise typer.Exit(2)
 
     client = DaemonClient()
-    result = _run(client.frame_focus(name=name, url=url, main=main))
+    result = client.frame_focus_sync(name=name, url=url, main=main)
     data = result.get("data", result)
     seq = result.get("seq", data.get("seq", 0))
     output_json(data, seq=seq)

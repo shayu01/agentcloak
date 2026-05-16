@@ -25,7 +25,7 @@ def create_server() -> object:
     """Create and configure the FastMCP server with all tools."""
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
     from agentcloak.mcp.tools import (
         bridge,
         capture,
@@ -56,19 +56,21 @@ def create_server() -> object:
         ),
     )
 
-    daemon_bridge = DaemonBridge()
+    # Single shared client instance — auto-start state lives on this object,
+    # so reusing one prevents redundant subprocess spawns across tools.
+    client = DaemonClient()
 
-    navigation.register(mcp, daemon_bridge)
-    interaction.register(mcp, daemon_bridge)
-    content.register(mcp, daemon_bridge)
-    network.register(mcp, daemon_bridge)
-    capture.register(mcp, daemon_bridge)
-    management.register(mcp, daemon_bridge)
-    dialog.register(mcp, daemon_bridge)
-    wait.register(mcp, daemon_bridge)
-    upload.register(mcp, daemon_bridge)
-    frame.register(mcp, daemon_bridge)
-    bridge.register(mcp, daemon_bridge)
+    navigation.register(mcp, client)
+    interaction.register(mcp, client)
+    content.register(mcp, client)
+    network.register(mcp, client)
+    capture.register(mcp, client)
+    management.register(mcp, client)
+    dialog.register(mcp, client)
+    wait.register(mcp, client)
+    upload.register(mcp, client)
+    frame.register(mcp, client)
+    bridge.register(mcp, client)
 
     return mcp
 

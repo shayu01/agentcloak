@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mcp.types import ToolAnnotations
+
+from agentcloak.mcp._format import format_call
+
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
-    from agentcloak.mcp.client import DaemonBridge
+    from agentcloak.client import DaemonClient
 
 __all__ = ["register"]
 
 
-def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
-    @mcp.tool(annotations={"readOnlyHint": False})
+def register(mcp: FastMCP, client: DaemonClient) -> None:
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False))
     async def agentcloak_upload(
         index: int,
         files: list[str],
@@ -29,6 +33,4 @@ def register(mcp: FastMCP, bridge: DaemonBridge) -> None:
         Returns:
             JSON with upload confirmation and file names.
         """
-        body = {"index": index, "files": files}
-        result = await bridge.request("POST", "/upload", json_body=body)
-        return bridge.format_result(result)
+        return await format_call(client.upload(index=index, files=files))

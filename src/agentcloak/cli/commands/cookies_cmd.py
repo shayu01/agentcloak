@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path  # noqa: TC003 — Typer needs runtime access
-from typing import Any
 
 import typer
 
-from agentcloak.cli.client import DaemonClient
 from agentcloak.cli.output import output_json
+from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
 app = typer.Typer()
-
-
-def _run(coro: Any) -> Any:
-    return asyncio.run(coro)
 
 
 @app.command("export")
@@ -29,7 +23,7 @@ def cookies_export(
 ) -> None:
     """Export cookies from remote Chrome via bridge."""
     client = DaemonClient()
-    result = _run(client.cookies_export(url=url))
+    result = client.cookies_export_sync(url=url)
     data = result.get("data", result)
     seq = result.get("seq", 0)
 
