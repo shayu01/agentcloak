@@ -1,5 +1,5 @@
 # Reference projects (local copies, not tracked)
-reference/
+/reference/
 
 # MCP tool indexes
 .ace-tool/

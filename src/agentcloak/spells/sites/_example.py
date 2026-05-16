@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     strategy=Strategy.PUBLIC,
     description="Inspect request headers via httpbin.org",
     access="read",
-    args=(Arg("user-agent", default="agentcloak/0.1", help="Custom User-Agent"),),
+    args=(Arg("user-agent", default="agentcloak/0.2", help="Custom User-Agent"),),
     pipeline=[
         {
             "fetch": {

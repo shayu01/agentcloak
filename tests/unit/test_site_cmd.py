@@ -12,6 +12,15 @@ from agentcloak.spells.registry import get_registry
 runner = CliRunner()
 
 
+def _parse_json(stdout: str) -> dict:
+    """Extract the JSON object from CLI output, skipping any log lines."""
+    for line in reversed(stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            return json.loads(line)
+    raise ValueError(f"No JSON found in output: {stdout!r}")
+
+
 class TestSpellList:
     def setup_method(self) -> None:
         get_registry().clear()
@@ -19,7 +28,7 @@ class TestSpellList:
     def test_list_empty(self) -> None:
         result = runner.invoke(app, ["spell", "list"])
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data = _parse_json(result.stdout)
         assert data["ok"] is True
         assert data["data"]["count"] >= 0
 
@@ -29,7 +38,7 @@ class TestSpellList:
         discover_spells()
         result = runner.invoke(app, ["spell", "list"])
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data = _parse_json(result.stdout)
         assert data["data"]["count"] >= 2
 
 
@@ -43,7 +52,7 @@ class TestSpellInfo:
     def test_info_existing(self) -> None:
         result = runner.invoke(app, ["spell", "info", "httpbin/headers"])
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        data = _parse_json(result.stdout)
         assert data["ok"] is True
         assert data["data"]["site"] == "httpbin"
         assert data["data"]["name"] == "headers"

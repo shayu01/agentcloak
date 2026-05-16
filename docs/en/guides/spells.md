@@ -55,7 +55,7 @@ from agentcloak.spells.types import Arg
     name="headers",
     strategy=Strategy.PUBLIC,
     description="Inspect request headers via httpbin.org",
-    args=(Arg("user-agent", default="agentcloak/0.1", help="Custom User-Agent"),),
+    args=(Arg("user-agent", default="agentcloak/0.2", help="Custom User-Agent"),),
     pipeline=[
         {"fetch": {"url": "https://httpbin.org/headers",
                    "headers": {"User-Agent": "{args.user-agent}"}}},

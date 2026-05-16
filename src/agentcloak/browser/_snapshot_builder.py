@@ -26,6 +26,7 @@ __all__ = [
     "build_snapshot",
     "diff_snapshots",
     "render_diff_tree",
+    "truncate_diff_lines",
 ]
 
 _SKIP_ROLES = frozenset({"none", "InlineTextBox", "LineBreak"})
@@ -62,6 +63,13 @@ _VALUE_PROPS = frozenset(
 )
 
 _FALSE_MEANINGFUL = frozenset({"expanded"})
+
+# CDP AX props with type=tristate carry string values ("true"/"false"/"mixed")
+# rather than Python booleans. aria-checked + aria-pressed are spec'd as tristate
+# so an indeterminate checkbox or three-state toggle uses "mixed". A naive
+# `val is True` check silently drops every tristate property — including the
+# common case of a freshly-clicked radio button — so we normalise here.
+_TRISTATE_PROPS = frozenset({"checked", "pressed"})
 
 
 @dataclass
@@ -106,10 +114,25 @@ def _extract_props(node: dict[str, Any]) -> dict[str, str]:
             is_password = True
 
         if pname in _BOOL_PROPS:
-            if val is True:
-                attrs[pname] = ""
-            elif val is False and pname in _FALSE_MEANINGFUL:
-                attrs[pname] = "false"
+            # tristate props (checked, pressed) arrive as strings per the
+            # CDP/W3C spec ("true"/"false"/"mixed"), while boolean props
+            # arrive as real Python bools. Accept either shape so older
+            # tooling or mocks that pass True/False through tristate fields
+            # still produce the same surface output.
+            if pname in _TRISTATE_PROPS:
+                normalised = val
+                if isinstance(val, bool):
+                    normalised = "true" if val else "false"
+                if normalised == "true":
+                    attrs[pname] = ""
+                elif normalised == "mixed":
+                    attrs[pname] = "mixed"
+                # "false" / anything else → drop (clean default).
+            else:
+                if val is True:
+                    attrs[pname] = ""
+                elif val is False and pname in _FALSE_MEANINGFUL:
+                    attrs[pname] = "false"
         elif pname in _VALUE_PROPS and val is not None:
             attrs[pname] = str(val)
 
@@ -555,3 +578,42 @@ def render_diff_tree(diff_lines: list[DiffLine]) -> str:
         else:
             rendered.append(f"{prefix}{text}")
     return "\n".join(rendered)
+
+
+def truncate_diff_lines(
+    diff_lines: list[DiffLine],
+    *,
+    max_nodes: int,
+    offset: int = 0,
+) -> tuple[list[DiffLine], int]:
+    """Apply node-level truncation to a diff line list.
+
+    Mirrors ``build_snapshot`` phase 4 so ``--diff`` honours ``--max-nodes``
+    in the same shape (ref range, pagination hint) the agent already knows.
+    Returns ``(visible_lines_with_summary, truncated_at)`` where
+    ``truncated_at == 0`` means no truncation happened.
+    """
+    if not max_nodes or max_nodes <= 0 or len(diff_lines) <= max_nodes:
+        return diff_lines, 0
+
+    visible = diff_lines[:max_nodes]
+    remaining = diff_lines[max_nodes:]
+    truncated_at = max_nodes + (offset if offset > 0 else 0)
+
+    remaining_refs = [r for _, _, r, _ in remaining if r is not None]
+    if remaining_refs:
+        min_ref = min(remaining_refs)
+        max_ref = max(remaining_refs)
+        summary = (
+            f"--- not shown: [{min_ref}]-[{max_ref}]"
+            f" {len(remaining)} elements"
+            f" (--focus=N to expand subtree,"
+            f" --offset={truncated_at} to page) ---"
+        )
+    else:
+        summary = (
+            f"--- not shown: {len(remaining)} elements"
+            f" (--offset={truncated_at} to page) ---"
+        )
+    visible = [*visible, (0, summary, None, None)]
+    return visible, truncated_at

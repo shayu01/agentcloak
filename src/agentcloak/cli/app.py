@@ -72,12 +72,55 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit
 
 
+def _extract_global_flags(argv: list[str]) -> tuple[list[str], dict[str, object]]:
+    """Strip global flags from ``argv`` and return ``(cleaned, state)``.
+
+    The recognised globals are ``--pretty``, ``--verbose`` / ``-v`` (counted),
+    and ``--version``. Adding a new one means appending a branch here *and*
+    declaring it on :func:`_root_callback` so ``--help`` documents it — keep
+    the two in sync.
+
+    Click parses options per-command — a flag declared on the root callback is
+    invisible to subcommand parsers, so ``agentcloak doctor --pretty`` fails
+    with "No such option: --pretty". Rather than duplicating ``--pretty`` on
+    every subcommand (and every nested group), we lift these globals out of
+    ``argv`` before Typer ever sees it, apply their effects up-front, and pass
+    the cleaned argument list down. The root callback still declares them so
+    ``agentcloak --help`` documents them, but they never need to reach Click.
+
+    ``--version`` is honoured here too because it has to short-circuit
+    execution; if we let Typer handle it from the root callback, it would only
+    fire when placed before the subcommand.
+    """
+    cleaned: list[str] = []
+    pretty = False
+    verbose = 0
+    version = False
+    for arg in argv:
+        if arg == "--pretty":
+            pretty = True
+        elif arg in ("--verbose", "-v"):
+            verbose += 1
+        elif arg == "--version":
+            version = True
+        else:
+            cleaned.append(arg)
+    state: dict[str, object] = {
+        "pretty": pretty,
+        "verbose": verbose,
+        "version": version,
+    }
+    return cleaned, state
+
+
 @app.callback()
 def _root_callback(  # pyright: ignore[reportUnusedFunction]
     verbose: int = typer.Option(
         0, "--verbose", "-v", count=True, help="Increase log verbosity."
     ),
-    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+    pretty: bool = typer.Option(
+        False, "--pretty", help="Pretty-print JSON output."
+    ),
     _version: bool = typer.Option(
         False,
         "--version",
@@ -86,8 +129,11 @@ def _root_callback(  # pyright: ignore[reportUnusedFunction]
         help="Show version.",
     ),
 ) -> None:
-    set_pretty(enabled=pretty)
-    _configure_logging(verbosity=verbose)
+    # All effects of the declared options are applied in ``main()`` via
+    # ``_extract_global_flags`` before Typer dispatches here. Keeping the
+    # parameters listed makes ``--help`` discover them; their values are
+    # ignored because the same flags have already been stripped from argv.
+    return
 
 
 def _register_commands() -> None:
@@ -97,6 +143,7 @@ def _register_commands() -> None:
         browser,
         capture_cmd,
         cdp,
+        config_cmd,
         cookies_cmd,
         daemon_cmd,
         dialog,
@@ -112,6 +159,11 @@ def _register_commands() -> None:
         wait_cmd,
     )
 
+    app.add_typer(
+        config_cmd.app,
+        name="config",
+        help="Show merged configuration with sources.",
+    )
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
     app.add_typer(daemon_cmd.app, name="daemon", help="Daemon lifecycle management.")
     app.add_typer(
@@ -232,8 +284,20 @@ def main() -> None:
     from agentcloak.cli.output import output_error
 
     _maybe_emit_first_run_banner()
+    # Lift ``--pretty``/``--verbose``/``--version`` out of argv before Typer
+    # sees it (see :func:`_extract_global_flags`). This is what makes these
+    # flags work in any position — including after a subcommand name.
+    cleaned_argv, state = _extract_global_flags(sys.argv[1:])
+    if state["version"]:
+        typer.echo(f"agentcloak {__version__}")
+        return
+    verbose = state["verbose"]
+    pretty = state["pretty"]
+    set_pretty(enabled=bool(pretty))
+    _configure_logging(verbosity=int(verbose))  # type: ignore[arg-type]
+
     try:
-        app()
+        app(args=cleaned_argv)
     except AgentBrowserError as exc:
         # We've already serialised the error envelope to stdout via
         # ``output_error``. Use ``sys.exit`` rather than ``raise typer.Exit

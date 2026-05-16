@@ -38,11 +38,11 @@ main "Content"
   [5] button "Add to cart"
 form "Login"
   [6] textbox "Email" required
-  [7] textbox "Password" value="~~~~" required
+  [7] textbox "Password" value="••••" required
   [8] button "Submit"
 ```
 
-Numbers are `--target` values for actions. They change on navigation/DOM update -- always re-snapshot for fresh refs. ARIA states shown: `checked`, `disabled`, `expanded`, `selected`, `pressed`, `invalid`, `required`, `focused`. Passwords redacted as `~~~~`.
+Numbers are `--target` values for actions. They change on navigation/DOM update -- always re-snapshot for fresh refs. ARIA states shown: `checked`, `disabled`, `expanded`, `selected`, `pressed`, `invalid`, `required`, `focused`. Passwords redacted as `••••`.
 
 Snapshot modes: `accessible` (default, full tree) | `compact` (interactive + containers only) | `content` (text extraction) | `dom` (raw HTML).
 
@@ -102,8 +102,9 @@ All actions use `--target N` from the most recent snapshot.
 | `cloak profile list` / `create` / `launch` / `delete` | Browser profile management |
 | `cloak tab list` / `new` / `close` / `switch` | Tab management |
 | `cloak spell list` / `info` / `run NAME` / `scaffold` | Spells (reusable site automation) |
-| `cloak cookies export` | Export cookies from real Chrome via bridge (use daemon `/cookies/import` or MCP tool to import) |
+| `cloak cookies export` / `import -c '[...]'` | Export/import cookies (import supports httpOnly) |
 | `cloak cdp endpoint` | Get CDP WebSocket URL (for jshookmcp) |
+| `cloak config` | Show merged config with value sources (default/env/toml) |
 | `cloak doctor` | Self-check diagnostics |
 | `cloak bridge start` / `claim` / `finalize` | RemoteBridge (real browser) |
 
@@ -134,7 +135,7 @@ These work automatically:
 - **Handle dialogs immediately**: they block everything until dismissed
 - **Follow error `action` field**: it tells you exactly what to do next
 - **Use compact mode**: `--mode compact` for focused interaction
-- **Progressive loading**: `--focus=N` or `--offset=N` for large pages; action on any ref works even if truncated
+- **Large pages**: 100+ elements blow up token budgets. Use `--mode compact --max-nodes 80` (~1.8K tokens) as the default for big pages, then `--focus=N` or `--offset=N` to explore specific areas. Action targets work even if truncated from the tree output
 
 ## References
 

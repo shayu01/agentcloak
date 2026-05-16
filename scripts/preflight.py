@@ -310,6 +310,76 @@ def check_smoke() -> CheckResult:
     return CheckResult(True, f"{len(groups)} commands OK", "")
 
 
+def check_skill_coverage() -> CheckResult:
+    """Cross-check SKILL.md command mentions against actual CLI commands.
+
+    Extracts ``cloak <cmd>`` references from SKILL.md and compares them
+    against the registered typer groups + top-level shortcuts. Reports
+    CLI commands missing from SKILL.md (undocumented) and SKILL.md commands
+    not found in the CLI (stale).
+    """
+    skill_path = ROOT / "skills" / "agentcloak" / "SKILL.md"
+    if not skill_path.is_file():
+        return CheckResult(False, "FAIL", f"{skill_path} not found")
+
+    skill_text = skill_path.read_text(encoding="utf-8")
+
+    # Extract "cloak <word>" from SKILL.md (skip code fence language tags)
+    skill_cmds: set[str] = set()
+    for m in re.finditer(r"`cloak\s+(\w+)", skill_text):
+        cmd = m.group(1)
+        if cmd not in ("navigate", "snapshot", "screenshot"):
+            # Top-level shortcuts are aliases — map them to their group
+            skill_cmds.add(cmd)
+        else:
+            skill_cmds.add(cmd)
+
+    # Get registered CLI groups from the typer app
+    from agentcloak.cli.app import app as cli_app
+
+    cli_groups: set[str] = {g.name for g in cli_app.registered_groups if g.name}
+
+    # Top-level shortcut commands (registered directly, not as groups)
+    from agentcloak.cli.app import _register_shortcuts  # noqa: F401
+
+    cli_commands: set[str] = set()
+    for cmd_info in cli_app.registered_commands:
+        if cmd_info.name:
+            cli_commands.add(cmd_info.name)
+
+    all_cli = cli_groups | cli_commands
+
+    missing_from_skill = sorted(all_cli - skill_cmds)
+    stale_in_skill = sorted(skill_cmds - all_cli)
+
+    # SKILL.md uses shortcuts (``cloak click``) not full paths
+    # (``cloak do click``), so subcommand names appear without their
+    # parent group. Parent groups (browser/daemon/do/js) are containers
+    # that users invoke through subcommands — they don't need direct
+    # SKILL.md mentions.
+    shortcuts = {
+        "click", "fill", "type", "scroll", "hover", "select",
+        "press", "keydown", "keyup", "navigate", "snapshot",
+        "screenshot", "resume", "evaluate", "batch",
+    }
+    parent_groups = {"browser", "daemon", "do", "js"}
+    skip = shortcuts | parent_groups
+    stale_in_skill = [s for s in stale_in_skill if s not in skip]
+    missing_from_skill = [m for m in missing_from_skill if m not in skip]
+
+    issues: list[str] = []
+    if missing_from_skill:
+        issues.append(f"CLI commands not in SKILL.md: {missing_from_skill}")
+    if stale_in_skill:
+        issues.append(f"SKILL.md mentions not in CLI: {stale_in_skill}")
+
+    if issues:
+        return CheckResult(False, "FAIL", "\n".join(issues))
+
+    covered = len(skill_cmds & (all_cli | shortcuts))
+    return CheckResult(True, f"{covered} commands covered", "")
+
+
 # Order matters: cheap structural checks first so a typo fails fast before
 # we sit through pytest. Tests still go first for the "is everything sane?"
 # baseline; subsequent checks are sorted roughly by runtime.
@@ -320,6 +390,7 @@ CHECKS: dict[str, tuple[str, Callable[[], CheckResult]]] = {
     "surface": ("Surface consistency", check_surface),
     "client": ("Client drift", check_client),
     "skill": ("Skill reference sync", check_skill),
+    "skill_cov": ("Skill coverage", check_skill_coverage),
     "config": ("Config docs sync", check_config),
     "version": ("Version consistency", check_version),
     "smoke": ("CLI smoke test", check_smoke),

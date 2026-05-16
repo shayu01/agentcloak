@@ -6,7 +6,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["AgentcloakConfig", "Paths", "load_config", "resolve_tier"]
+__all__ = [
+    "AgentcloakConfig",
+    "ConfigError",
+    "Paths",
+    "dump_config",
+    "load_config",
+    "resolve_tier",
+]
 
 _ENV_PREFIX = "AGENTCLOAK_"
 
@@ -138,24 +145,35 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         _env("IDLE_TIMEOUT_MIN")
         or browser.get("idle_timeout_min", cfg.idle_timeout_min)
     )
-    cfg.stop_on_exit = (_env("STOP_ON_EXIT") or "").lower() in (
-        "true",
-        "1",
-        "yes",
-    ) or browser.get("stop_on_exit", cfg.stop_on_exit)
-    cfg.log_level = _env("LOG_LEVEL") or browser.get("log_level", cfg.log_level)
+    stop_on_exit_env = _env("STOP_ON_EXIT")
+    if stop_on_exit_env is not None:
+        cfg.stop_on_exit = stop_on_exit_env.lower() in ("true", "1", "yes")
+    else:
+        cfg.stop_on_exit = bool(browser.get("stop_on_exit", cfg.stop_on_exit))
+    # Log settings belong in [daemon] (they control daemon process logging).
+    # Fall back to [browser] for backward compat with pre-v0.2.0 configs.
+    cfg.log_level = (
+        _env("LOG_LEVEL")
+        or daemon.get("log_level", browser.get("log_level", cfg.log_level))
+    )
 
     log_to_file_env = _env("LOG_TO_FILE")
     if log_to_file_env is not None:
         cfg.log_to_file = log_to_file_env.lower() in ("true", "1", "yes")
     else:
-        cfg.log_to_file = bool(browser.get("log_to_file", cfg.log_to_file))
+        cfg.log_to_file = bool(
+            daemon.get("log_to_file", browser.get("log_to_file", cfg.log_to_file))
+        )
     cfg.log_max_bytes = int(
-        _env("LOG_MAX_BYTES") or browser.get("log_max_bytes", cfg.log_max_bytes)
+        _env("LOG_MAX_BYTES")
+        or daemon.get("log_max_bytes", browser.get("log_max_bytes", cfg.log_max_bytes))
     )
     cfg.log_backup_count = int(
         _env("LOG_BACKUP_COUNT")
-        or browser.get("log_backup_count", cfg.log_backup_count)
+        or daemon.get(
+            "log_backup_count",
+            browser.get("log_backup_count", cfg.log_backup_count),
+        )
     )
 
     headless_env = _env("HEADLESS")
@@ -233,7 +251,108 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
             "content_scan_patterns", cfg.content_scan_patterns
         )
 
+    _validate(cfg)
     return paths, cfg
+
+
+class ConfigError(ValueError):
+    """Raised when a config value is invalid."""
+
+
+_VALID_TIERS = {"auto", "cloak", "playwright", "remote_bridge"}
+_VALID_LOG_LEVELS = {"debug", "info", "warning", "error"}
+
+
+def _validate(cfg: AgentcloakConfig) -> None:
+    """Validate config values; raise :class:`ConfigError` on bad input."""
+    if not 1 <= cfg.daemon_port <= 65535:
+        raise ConfigError(
+            f"daemon.port must be 1-65535, got {cfg.daemon_port}"
+        )
+    if cfg.default_tier not in _VALID_TIERS:
+        raise ConfigError(
+            f"browser.default_tier must be one of {_VALID_TIERS}, "
+            f"got {cfg.default_tier!r}"
+        )
+    if cfg.log_level not in _VALID_LOG_LEVELS:
+        raise ConfigError(
+            f"log_level must be one of {_VALID_LOG_LEVELS}, "
+            f"got {cfg.log_level!r}"
+        )
+    if cfg.viewport_width < 1 or cfg.viewport_height < 1:
+        raise ConfigError(
+            f"viewport dimensions must be positive, "
+            f"got {cfg.viewport_width}x{cfg.viewport_height}"
+        )
+    if cfg.screenshot_quality < 0 or cfg.screenshot_quality > 100:
+        raise ConfigError(
+            f"screenshot_quality must be 0-100, got {cfg.screenshot_quality}"
+        )
+    if cfg.mcp_screenshot_quality < 0 or cfg.mcp_screenshot_quality > 100:
+        raise ConfigError(
+            f"mcp_screenshot_quality must be 0-100, "
+            f"got {cfg.mcp_screenshot_quality}"
+        )
+
+
+_ENV_KEYS: dict[str, list[str]] = {
+    "daemon_host": ["HOST"],
+    "daemon_port": ["PORT"],
+    "default_tier": ["DEFAULT_TIER", "TIER"],
+    "default_profile": ["DEFAULT_PROFILE", "PROFILE"],
+    "viewport_width": ["VIEWPORT_WIDTH"],
+    "viewport_height": ["VIEWPORT_HEIGHT"],
+    "navigation_timeout": ["NAVIGATION_TIMEOUT_SEC", "NAVIGATION_TIMEOUT"],
+    "idle_timeout_min": ["IDLE_TIMEOUT_MIN"],
+    "stop_on_exit": ["STOP_ON_EXIT"],
+    "log_level": ["LOG_LEVEL"],
+    "log_to_file": ["LOG_TO_FILE"],
+    "log_max_bytes": ["LOG_MAX_BYTES"],
+    "log_backup_count": ["LOG_BACKUP_COUNT"],
+    "headless": ["HEADLESS"],
+    "humanize": ["HUMANIZE"],
+    "action_timeout": ["ACTION_TIMEOUT"],
+    "batch_settle_timeout": ["BATCH_SETTLE_TIMEOUT"],
+    "http_client_timeout": ["HTTP_CLIENT_TIMEOUT"],
+    "max_return_size": ["MAX_RETURN_SIZE"],
+    "screenshot_quality": ["SCREENSHOT_QUALITY"],
+    "mcp_screenshot_quality": ["MCP_SCREENSHOT_QUALITY"],
+    "auto_start_timeout": ["AUTO_START_TIMEOUT"],
+    "auto_start_poll_interval": ["AUTO_START_POLL_INTERVAL"],
+    "domain_whitelist": ["DOMAIN_WHITELIST"],
+    "domain_blacklist": ["DOMAIN_BLACKLIST"],
+    "content_scan": ["CONTENT_SCAN"],
+    "content_scan_patterns": ["CONTENT_SCAN_PATTERNS"],
+}
+
+
+def dump_config(
+    cfg: AgentcloakConfig, paths: Paths,
+) -> dict[str, dict[str, object]]:
+    """Return each config field with its value and source (env/toml/default)."""
+    raw = _read_toml(paths.config_file)
+    toml_flat: dict[str, object] = {}
+    for _key, section in raw.items():
+        if isinstance(section, dict):
+            section_typed: dict[str, object] = section  # type: ignore[assignment]
+            toml_flat.update(section_typed)
+
+    defaults = AgentcloakConfig()
+    result: dict[str, dict[str, object]] = {}
+
+    for field_name in vars(defaults):
+        value = getattr(cfg, field_name)
+        source = "default"
+        env_keys = _ENV_KEYS.get(field_name, [])
+        for ek in env_keys:
+            if _env(ek) is not None:
+                source = f"env:{_ENV_PREFIX}{ek.upper()}"
+                break
+        if source == "default" and field_name in toml_flat:
+            source = "config.toml"
+        result[field_name] = {"value": value, "source": source}
+
+    return result
 
 
 def resolve_tier(tier_value: str) -> str:

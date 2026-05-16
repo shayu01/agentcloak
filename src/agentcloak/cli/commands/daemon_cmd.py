@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
+import httpx
 import typer
 
 from agentcloak.cli.output import output_error, output_json
@@ -12,6 +14,31 @@ from agentcloak.core.errors import DaemonConnectionError
 __all__ = ["app"]
 
 app = typer.Typer()
+
+# When ``daemon start -b`` returns, the daemon is launched but uvicorn is still
+# binding the socket. The first subsequent CLI/MCP request then races the
+# spawn and triggers the auto-start path's "daemon_auto_starting" warning. Poll
+# /health for a short budget so we only return once the daemon is reachable.
+_BG_READY_BUDGET_S = 3.0
+_BG_READY_POLL_INTERVAL_S = 0.2
+_BG_READY_PROBE_TIMEOUT_S = 0.5
+
+
+def _wait_for_daemon_ready(base_url: str) -> bool:
+    """Poll ``GET /health`` until 200 or budget elapses. Returns ``True`` on success."""
+    deadline = time.monotonic() + _BG_READY_BUDGET_S
+    while time.monotonic() < deadline:
+        try:
+            with httpx.Client(
+                base_url=base_url, timeout=_BG_READY_PROBE_TIMEOUT_S
+            ) as client:
+                resp = client.get("/health")
+                if resp.status_code == 200:
+                    return True
+        except httpx.HTTPError:
+            pass
+        time.sleep(_BG_READY_POLL_INTERVAL_S)
+    return False
 
 
 @app.command("start")
@@ -58,12 +85,20 @@ def daemon_start(
         )
         _, cfg = load_config()
         resolved_tier = resolve_tier(cfg.default_tier)
+
+        # Block until daemon is reachable so subsequent CLI/MCP requests don't
+        # race the spawn and trigger the auto-start warning path.
+        bind_host = host or cfg.daemon_host
+        bind_port = port or cfg.daemon_port
+        ready = _wait_for_daemon_ready(f"http://{bind_host}:{bind_port}")
+
         output_json(
             {
                 "pid": pid,
                 "background": True,
                 "profile": profile,
                 "tier": resolved_tier,
+                "ready": ready,
             },
             seq=0,
         )

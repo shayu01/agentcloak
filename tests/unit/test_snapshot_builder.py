@@ -8,6 +8,7 @@ from agentcloak.browser._snapshot_builder import (
     build_snapshot,
     diff_snapshots,
     render_diff_tree,
+    truncate_diff_lines,
 )
 
 
@@ -411,3 +412,165 @@ class TestRenderDiffTree:
         ]
         rendered = render_diff_tree(diff_lines)
         assert "# removed: [2] [3]" in rendered
+
+
+class TestTruncateDiffLines:
+    """Verify truncate_diff_lines preserves the build_snapshot cap shape."""
+
+    def _lines(self, n: int) -> list:
+        return [(0, f'[{i}] button "B{i}"', i, "+") for i in range(1, n + 1)]
+
+    def test_no_truncation_when_under_limit(self) -> None:
+        lines = self._lines(5)
+        out, cut = truncate_diff_lines(lines, max_nodes=10)
+        assert out == lines
+        assert cut == 0
+
+    def test_max_nodes_zero_means_unlimited(self) -> None:
+        lines = self._lines(50)
+        out, cut = truncate_diff_lines(lines, max_nodes=0)
+        assert out == lines
+        assert cut == 0
+
+    def test_truncation_appends_summary(self) -> None:
+        lines = self._lines(50)
+        out, cut = truncate_diff_lines(lines, max_nodes=10)
+        # 10 visible + 1 summary line
+        assert len(out) == 11
+        assert cut == 10
+        last = out[-1]
+        assert last[2] is None  # summary has no ref
+        assert last[3] is None  # summary has no marker
+        assert "--- not shown:" in last[1]
+        assert "[11]-[50]" in last[1]
+        assert "--offset=10" in last[1]
+
+    def test_truncation_with_offset_adjusts_pagination_hint(self) -> None:
+        lines = self._lines(50)
+        out, cut = truncate_diff_lines(lines, max_nodes=10, offset=20)
+        assert cut == 30
+        assert "--offset=30" in out[-1][1]
+
+    def test_truncation_without_interactive_refs(self) -> None:
+        # Pure context lines, no refs
+        lines = [(0, f"ctx {i}", None, None) for i in range(50)]
+        out, cut = truncate_diff_lines(lines, max_nodes=5)
+        assert cut == 5
+        # Summary still appears, just without ref range
+        summary = out[-1][1]
+        assert "--- not shown:" in summary
+        assert "45 elements" in summary
+        assert "[" not in summary.split("not shown:")[1].split(" ")[1]
+
+
+class TestBoolPropExtraction:
+    """Verify tristate vs boolean prop extraction (B2 regression guard)."""
+
+    def test_radio_checked_true_shows_marker(self) -> None:
+        # CDP serialises aria-checked as a tristate with string value.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "radio",
+                "Medium",
+                properties=[
+                    {"name": "checked", "value": {"type": "tristate", "value": "true"}},
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes)
+        assert "[1] radio" in result.snapshot.tree_text
+        # boolean-true tristate renders as bare flag, matching `disabled` etc
+        assert " checked" in result.snapshot.tree_text
+
+    def test_checkbox_checked_false_omitted(self) -> None:
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "checkbox",
+                "Agree",
+                properties=[
+                    {
+                        "name": "checked",
+                        "value": {"type": "tristate", "value": "false"},
+                    },
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes)
+        assert "[1] checkbox" in result.snapshot.tree_text
+        # Unchecked is the clean default — no marker, matches selected/disabled.
+        assert "checked" not in result.snapshot.tree_text
+
+    def test_checkbox_mixed_renders_explicit_value(self) -> None:
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "checkbox",
+                "Partial",
+                properties=[
+                    {
+                        "name": "checked",
+                        "value": {"type": "tristate", "value": "mixed"},
+                    },
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes)
+        # Indeterminate state surfaces as `checked=mixed`.
+        assert "checked=mixed" in result.snapshot.tree_text
+
+    def test_button_pressed_true_shows_marker(self) -> None:
+        # aria-pressed is also tristate.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "button",
+                "Toggle",
+                properties=[
+                    {"name": "pressed", "value": {"type": "tristate", "value": "true"}},
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes)
+        assert " pressed" in result.snapshot.tree_text
+
+    def test_disabled_boolean_path_still_works(self) -> None:
+        # Real-boolean props (disabled is type=boolean in CDP) must keep working.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "button",
+                "Send",
+                properties=[
+                    {"name": "disabled", "value": {"type": "boolean", "value": True}},
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes)
+        assert " disabled" in result.snapshot.tree_text
+
+    def test_expanded_false_still_meaningful(self) -> None:
+        # `expanded=false` carries information (collapsed combobox), so the
+        # existing _FALSE_MEANINGFUL path must not regress.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node(
+                "2",
+                "combobox",
+                "Country",
+                properties=[
+                    {
+                        "name": "expanded",
+                        "value": {"type": "booleanOrUndefined", "value": False},
+                    },
+                ],
+            ),
+        ]
+        result = build_snapshot(nodes)
+        assert "expanded=false" in result.snapshot.tree_text

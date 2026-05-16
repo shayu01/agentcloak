@@ -23,7 +23,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from agentcloak.browser._snapshot_builder import diff_snapshots, render_diff_tree
+from agentcloak.browser._snapshot_builder import (
+    diff_snapshots,
+    render_diff_tree,
+    truncate_diff_lines,
+)
 
 if TYPE_CHECKING:
     from agentcloak.browser.state import PageSnapshot
@@ -67,7 +71,23 @@ class SnapshotService:
         diff_applied = False
         if diff and prev_cached_lines is not None and cur_cache is not None:
             diff_lines = diff_snapshots(prev_cached_lines, cur_cache)
-            snap = replace(snap, tree_text=render_diff_tree(diff_lines))
+            # build_snapshot already truncated snap.tree_text, but the diff
+            # overlay is rendered from the full cached lines and would blow
+            # past that limit. Re-apply the same node-level cap here so
+            # `--diff --max-nodes N` actually honours N.
+            truncated_diff, diff_truncated_at = truncate_diff_lines(
+                diff_lines,
+                max_nodes=max_nodes,
+                offset=offset,
+            )
+            new_truncated_at = (
+                diff_truncated_at if diff_truncated_at else snap.truncated_at
+            )
+            snap = replace(
+                snap,
+                tree_text=render_diff_tree(truncated_diff),
+                truncated_at=new_truncated_at,
+            )
             diff_applied = True
 
         data: dict[str, Any] = {

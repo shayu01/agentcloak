@@ -311,9 +311,15 @@ class PlaywrightContext(BrowserContextBase):
                     hint=f"Page did not load within {timeout}s",
                     action=f"retry with longer timeout or check URL: {url}",
                 ) from exc
+            # Playwright appends a verbose "Call log:" section to its error
+            # messages — useful for human debugging but noise for agents and
+            # CLI users. Strip it so the hint stays concise and actionable.
+            msg = str(exc)
+            if "\nCall log:" in msg:
+                msg = msg[: msg.index("\nCall log:")]
             raise NavigationError(
                 error="navigation_failed",
-                hint=str(exc),
+                hint=msg.strip(),
                 action="check URL and network connectivity",
             ) from exc
 

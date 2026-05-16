@@ -16,7 +16,22 @@ from agentcloak.client import DaemonClient
 
 __all__ = ["app"]
 
-app = typer.Typer(invoke_without_command=True)
+# ``allow_extra_args=False`` is the key fix for B4 from dogfood
+# v0.2.0: without it, Click treats trailing tokens like ``-m POST`` as
+# subcommand candidates once the positional URL is consumed and bails out with
+# "No such command '-m'". Forcing ``allow_extra_args=False`` (combined with
+# ``invoke_without_command=True``) tells the parser there is no subcommand to
+# look up — every flag is bound to this callback regardless of its position
+# relative to the URL argument. ``allow_interspersed_args=True`` is the Click
+# default but we set it explicitly so future Click upgrades don't quietly
+# regress the ordering guarantee covered by the tests.
+app = typer.Typer(
+    invoke_without_command=True,
+    context_settings={
+        "allow_extra_args": False,
+        "allow_interspersed_args": True,
+    },
+)
 
 
 def _parse_header(raw: str) -> tuple[str, str]:
