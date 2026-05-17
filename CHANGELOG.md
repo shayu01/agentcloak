@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.3 (unreleased)
+## 0.2.3 (2026-05-17)
 
 Seed-user review round 2: bug fixes, security, snapshot optimization, network config.
 
@@ -22,7 +22,7 @@ Seed-user review round 2: bug fixes, security, snapshot optimization, network co
 - **Token estimate** — snapshot header now includes `~NK tok` estimate (chars/4, no tokenizer dependency).
 - **Content dedup** — content mode deduplicates adjacent identical lines (fixes Wikipedia/HN repetition from parent-child a11y node overlap).
 
-### Network Config (from Phase 7c roadmap)
+### Network Config
 
 - **`browser.proxy`** — SOCKS5/HTTP upstream proxy for the browser (`AGENTCLOAK_PROXY` env var).
 - **`browser.dns_over_https`** — defaults to `false`, disabling Chrome's built-in DoH to respect system DNS / split-horizon proxies.
