@@ -672,12 +672,21 @@ class DaemonClient:
         # Background daemons should log to a rotating file by default — the
         # user typically can't see stderr from a detached subprocess.
         env.setdefault("AGENTCLOAK_LOG_TO_FILE", "true")
+        if sys.platform == "win32":
+            return subprocess.Popen(
+                argv,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                creationflags=subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
         return subprocess.Popen(
             argv,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
             env=env,
+            start_new_session=True,
         )
 
     def spawn_background(

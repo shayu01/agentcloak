@@ -307,6 +307,12 @@ class DiagnosticService:
         prompt-passing. If sudo is missing we report the gap instead of
         silently doing nothing.
         """
+        if sys.platform == "win32":
+            return {
+                "ran": False,
+                "command": command,
+                "reason": "auto-fix is not supported on Windows",
+            }
         if os.geteuid() != 0 and shutil.which("sudo") is None:
             return {
                 "ran": False,

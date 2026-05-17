@@ -126,14 +126,36 @@ def _clear_session(paths: Paths) -> None:
         paths.active_session_file.unlink()
 
 
+def _pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _check_stale_pid(paths: Paths) -> bool:
     pf = _pid_file(paths)
     if not pf.exists():
         return False
     try:
         pid = int(pf.read_text().strip())
-        os.kill(pid, 0)
     except (ValueError, OSError):
+        _clear_pid(paths)
+        _clear_session(paths)
+        return False
+    if not _pid_alive(pid):
         _clear_pid(paths)
         _clear_session(paths)
         return False
