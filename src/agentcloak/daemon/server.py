@@ -538,12 +538,14 @@ async def start(
     resume_writer.start_background()
 
     # Bridge OS signals → shutdown_event so we shut down gracefully.
+    # Windows ProactorEventLoop does not support add_signal_handler.
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(
-            sig,
-            lambda: asyncio.ensure_future(_signal_shutdown(server, app)),
-        )
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(
+                sig,
+                lambda: asyncio.ensure_future(_signal_shutdown(server, app)),
+            )
 
     # Wire shutdown_event to stop uvicorn when /shutdown is called.
     async def _watch_shutdown_event() -> None:
