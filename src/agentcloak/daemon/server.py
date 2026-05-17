@@ -133,7 +133,7 @@ def _check_stale_pid(paths: Paths) -> bool:
     try:
         pid = int(pf.read_text().strip())
         os.kill(pid, 0)
-    except (ValueError, ProcessLookupError, PermissionError):
+    except (ValueError, OSError):
         _clear_pid(paths)
         _clear_session(paths)
         return False
