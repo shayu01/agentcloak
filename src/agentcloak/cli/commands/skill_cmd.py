@@ -66,12 +66,11 @@ def _all_platforms(cwd: Path) -> list[Platform]:
 
     Project-scoped entries resolve under ``cwd`` (so they're recreated for
     whichever repo the user is in); user-global entries always sit under
-    ``~``. We list both Claude Code variants because both are common.
+    ``~``. Use ``--path`` to install to an arbitrary location.
     """
     home = Path.home()
     return [
-        Platform("claude", "Claude Code (project)", cwd / ".claude"),
-        Platform("claude-global", "Claude Code (global)", home / ".claude"),
+        Platform("claude", "Claude Code", home / ".claude"),
         Platform("codex", "Codex (global)", home / ".codex"),
         Platform("codex-project", "Codex (project)", cwd / ".codex"),
         Platform("cursor", "Cursor (project)", cwd / ".cursor"),
@@ -210,7 +209,7 @@ def skill_install(
         None,
         "--platform",
         help=(
-            "Target platform alias (claude, claude-global, codex, "
+            "Target platform alias (claude, codex, "
             "codex-project, cursor, opencode, all). Omit for interactive "
             "selection."
         ),

@@ -46,8 +46,7 @@ with the Skill bundle inside the wheel and a dedicated installer command.
 
 ```bash
 cloak skill install                # interactive menu of detected platforms
-cloak skill install --platform claude         # project-scoped Claude Code
-cloak skill install --platform claude-global  # ~/.claude/skills/
+cloak skill install --platform claude         # ~/.claude/skills/
 cloak skill install --platform codex          # ~/.codex/skills/
 cloak skill install --platform cursor         # .cursor/skills/
 cloak skill install --platform opencode       # .opencode/skills/
@@ -81,13 +80,16 @@ Each agent platform reads skills from its own directory:
 
 | Agent platform | Project-scoped                 | User-global                    | `--platform` alias |
 | -------------- | ------------------------------ | ------------------------------ | ------------------ |
-| Claude Code    | `.claude/skills/agentcloak/`   | `~/.claude/skills/agentcloak/` | `claude` / `claude-global` |
-| Codex          | `.codex/skills/agentcloak/`    | `~/.codex/skills/agentcloak/`  | `codex-project` / `codex` |
-| Cursor         | `.cursor/skills/agentcloak/`   | (n/a — project-scoped)         | `cursor` |
-| OpenCode       | `.opencode/skills/agentcloak/` | (n/a — project-scoped)         | `opencode` |
-| Other          | Use `--path <dir>`             | Use `--path <dir>`             | n/a |
+| Agent platform | Install path                   | `--platform` alias |
+| -------------- | ------------------------------ | ------------------ |
+| Claude Code    | `~/.claude/skills/agentcloak/` | `claude` |
+| Codex          | `~/.codex/skills/agentcloak/`  | `codex` |
+| Codex (project)| `.codex/skills/agentcloak/`    | `codex-project` |
+| Cursor         | `.cursor/skills/agentcloak/`   | `cursor` |
+| OpenCode       | `.opencode/skills/agentcloak/` | `opencode` |
+| Other          | Use `--path <dir>`             | n/a |
 
-Project-scoped installs only apply to that repo; user-global installs apply everywhere. Pick whichever fits your workflow.
+Global installs (`claude`, `codex`) apply to all projects; project-scoped installs (`codex-project`, `cursor`, `opencode`) only apply to that repo. Use `--path` for any custom location.
 
 ### Updating after a `pip install --upgrade`
 
