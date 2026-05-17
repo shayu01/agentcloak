@@ -179,6 +179,7 @@ def _register_commands() -> None:
         launch,
         network,
         profile,
+        skill_cmd,
         spell_cmd,
         tab,
         upload,
@@ -232,6 +233,11 @@ def _register_commands() -> None:
         capture_cmd.app,
         name="capture",
         help="Network traffic capture: record, export, analyze.",
+    )
+    app.add_typer(
+        skill_cmd.app,
+        name="skill",
+        help="Skill bundle: install, update, uninstall to agent platforms.",
     )
     app.add_typer(
         spell_cmd.app,

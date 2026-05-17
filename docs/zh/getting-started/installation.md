@@ -12,13 +12,13 @@
 
 ```bash
 pip install agentcloak
+cloak skill install            # 给你的 agent 平台安装 Skill 安装包
+cloak doctor --fix             # 验证环境 + 下载 CloakBrowser
 ```
 
-接着一步验证并修复环境：
-
-```bash
-agentcloak doctor --fix
-```
+`cloak skill install` 首次执行会显示交互式菜单，让你从检测到的 agent 平台
+中选择。脚本化场景下用 `--platform <alias>` 跳过交互（详见下方
+[安装 Skill 安装包](#安装-skill-安装包)）。
 
 `doctor --fix` 会在进程内完成它自己能做的事（下载 CloakBrowser 二进制文件、创建数据目录），并为需要系统级权限的操作（Linux 服务器的 Xvfb、Playwright 系统库）输出一条整合好的 shell 命令。加上 `--sudo` 则会直接执行那条命令。
 
@@ -34,29 +34,79 @@ CloakBrowser 在首次使用时自动下载补丁版 Chromium 二进制文件（
 
 ## 安装 Skill 安装包
 
-`pip install agentcloak` 装好的是 CLI 和 MCP server。如果你的 AI agent 支持 **Skills**，还需要额外安装 Skill 安装包（`SKILL.md` + `references/` 目录），这样 agent 在需要时才按需加载 `cloak` 知识（约 300 tokens，比 MCP 工具定义的 6,000 tokens 节省 20 倍）。
+`pip install agentcloak` 会安装好 CLI 和 MCP 服务。CLI 在 wheel 中已经
+打包了 Skill 安装包，并提供了专用的安装命令。
 
-> **推荐：只装 Skill + CLI。** MCP server 是给没有 bash 能力的 agent 准备的可选方案。如果两个都装，MCP 工具定义会在每次对话中消耗约 6,000 tokens（即使没用到）。二选一即可：
-> - **Skill + CLI**（推荐）：agent 按需加载 skill，通过 bash 调用 `cloak` 命令
-> - **仅 MCP**：适用于没有 bash 能力的 agent（如纯聊天界面）
+> 推荐使用 **Skill + CLI** 的组合， MCP server 为备选方案，一般来说仅为 Agent 配置 Skill 即可，配置 MCP 会带来额外的 Token 开销。
+>
+> - **Skill + CLI**：agent 按需加载 skill，通过 bash 调用 `cloak` 命令
+> - **MCP**：推荐用于没有 bash 能力的 agent（如纯聊天界面）
+
+### 推荐方式：`cloak skill install`
+
+```bash
+cloak skill install                # 交互式菜单，列出已检测到的平台
+cloak skill install --platform claude         # 项目级 Claude Code
+cloak skill install --platform claude-global  # ~/.claude/skills/
+cloak skill install --platform codex          # ~/.codex/skills/
+cloak skill install --platform cursor         # .cursor/skills/
+cloak skill install --platform opencode       # .opencode/skills/
+cloak skill install --platform all            # 全部检测到的平台
+cloak skill install --path /custom/skills/dir # 任意自定义目录
+```
+
+**支持的平台：** Claude Code、Codex、Cursor、OpenCode。其他 agent 使用 `--path` 指向对应的 skills 目录。
+
+**交互 / 非交互：**
+- `cloak skill install`（无参数）— 交互式：显示检测到的平台，让你选择
+- `cloak skill install --platform <name>` — 非交互：适合脚本和 AI agent 调用
+
+安装器会先把 wheel 内置的 Skill 数据拷贝到统一位置
+`~/.agentcloak/skills/agentcloak/`，然后从你选择的平台目录创建**符号链接**
+指向该位置。后续升级只需 `cloak skill update`，所有符号链接安装自动跟进
+最新内容。
+
+Windows 上若未启用 Developer Mode 创建符号链接会失败，安装器会自动 fallback
+到完整复制，输出 `(copy)` 而不是 `(symlink)`，提醒你每次
+`pip install --upgrade agentcloak` 之后需要重新运行 `cloak skill install`。
+
+`cloak skill uninstall` 会移除所有由安装器创建的链接（加 `--remove-canonical`
+同时删除 `~/.agentcloak/` 下的源副本）。
 
 ### 各平台 Skill 目录
 
 每个 agent 平台从各自的目录读取 Skill：
 
-| Agent 平台 | 项目级 | 用户全局 |
-|---|---|---|
-| Claude Code | `.claude/skills/agentcloak/` | `~/.claude/skills/agentcloak/` |
-| Codex | `.codex/skills/agentcloak/` | `~/.codex/skills/agentcloak/` |
-| Cursor | `.cursor/skills/agentcloak/` | （无 — 仅项目级） |
-| OpenCode | `.opencode/skills/agentcloak/` | （无 — 仅项目级） |
-| 其他 | 查阅对应 agent 文档 | 查阅对应 agent 文档 |
+| Agent 平台  | 项目级                         | 用户全局                       | `--platform` 别名 |
+| ----------- | ------------------------------ | ------------------------------ | ----------------- |
+| Claude Code | `.claude/skills/agentcloak/`   | `~/.claude/skills/agentcloak/` | `claude` / `claude-global` |
+| Codex       | `.codex/skills/agentcloak/`    | `~/.codex/skills/agentcloak/`  | `codex-project` / `codex` |
+| Cursor      | `.cursor/skills/agentcloak/`   | （无 — 仅项目级）              | `cursor` |
+| OpenCode    | `.opencode/skills/agentcloak/` | （无 — 仅项目级）              | `opencode` |
+| 其他        | 用 `--path <dir>` 指向         | 用 `--path <dir>` 指向         | n/a |
 
 项目级只在该仓库内生效；用户全局对所有项目生效。按需选择。
 
-### 使用 curl + tar 安装（Linux / macOS / WSL）
+### `pip install --upgrade` 之后的更新方式
 
-Skill 安装包位于仓库的 [`skills/agentcloak/`](https://github.com/shayuc137/agentcloak/tree/main/skills/agentcloak)。下面的命令从 GitHub tarball 中只抽取该目录：
+符号链接安装（默认）只要刷新一下源副本就自动更新：
+
+```bash
+pip install --upgrade agentcloak
+cloak skill update
+```
+
+复制安装（Windows fallback）则需要重新执行 install：
+
+```bash
+cloak skill install --platform claude   # 各平台逐一重跑
+```
+
+### 备选方式：curl + tar（离线 / CI）
+
+适用场景：`cloak` 不在 PATH、公司代理拦截 `pip`、想把 Skill 拷进仓库
+vendoring。Skill 安装包位于仓库的 [`skills/agentcloak/`](https://github.com/shayuc137/agentcloak/tree/main/skills/agentcloak)
+—— 下面的命令从 GitHub tarball 中只抽取该目录：
 
 ```bash
 # 从上表中选择目标目录。示例：项目级 Claude Code。
@@ -70,10 +120,9 @@ curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
 
 执行后 `$DEST/agentcloak/SKILL.md` 和 `$DEST/agentcloak/references/` 都应该存在。
 
-### 使用 PowerShell 安装（Windows）
+PowerShell 版本（Windows 10 1803+ 自带 `tar` 和 `curl.exe`）：
 
 ```powershell
-# 项目级 Claude Code 示例。请按上表调整 $Dest。
 $Dest = ".claude\skills"
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 
@@ -82,8 +131,6 @@ Invoke-WebRequest "https://github.com/shayuc137/agentcloak/archive/refs/heads/ma
 tar -xz -C $Dest --strip-components=2 -f "$tmp.tgz" agentcloak-main/skills/agentcloak
 Remove-Item "$tmp.tgz"
 ```
-
-（Windows 10 1803+ 自带 `tar` 和 `curl.exe`。）
 
 ### 从 git clone 安装（开发者）
 
@@ -96,14 +143,10 @@ cp -r skills/agentcloak ~/.claude/skills/         # 全局安装
 ln -s "$PWD/skills/agentcloak" ~/.claude/skills/  # 可实时编辑的软链接
 ```
 
-### 更新 Skill
-
-重新执行相同的 `curl | tar`（或 `cp -r`）命令。Skill 都是纯 markdown，没有迁移步骤。
-
 ## 可选扩展
 
-| 扩展 | 功能 | 使用场景 |
-|------|------|---------|
+| 扩展        | 功能                                                                | 使用场景                    |
+| ----------- | ------------------------------------------------------------------- | --------------------------- |
 | `discovery` | [zeroconf](https://github.com/python-zeroconf/python-zeroconf) mDNS | 远程 bridge 自动发现 daemon |
 
 ```bash
@@ -156,13 +199,13 @@ agentcloak doctor
 
 v0.2.0 默认 `headless = true`，所以无头模式开箱即用，不需要系统依赖。如果你切换到有头模式（部分网站的反爬效果更好），且机器没有显示器，agentcloak 会自动启动 Xvfb，doctor 会提示你安装它：
 
-| 发行版 | 安装命令 |
-|--------|---------|
-| Debian / Ubuntu / Mint | `sudo apt-get install -y xvfb` |
+| 发行版                                     | 安装命令                                   |
+| ------------------------------------------ | ------------------------------------------ |
+| Debian / Ubuntu / Mint                     | `sudo apt-get install -y xvfb`             |
 | Fedora / RHEL / CentOS / Rocky / AlmaLinux | `sudo dnf install -y xorg-x11-server-Xvfb` |
-| Arch / Manjaro | `sudo pacman -S xorg-server-xvfb` |
-| Alpine | `sudo apk add xvfb` |
-| openSUSE | `sudo zypper install -y xorg-x11-server` |
+| Arch / Manjaro                             | `sudo pacman -S xorg-server-xvfb`          |
+| Alpine                                     | `sudo apk add xvfb`                        |
+| openSUSE                                   | `sudo zypper install -y xorg-x11-server`   |
 
 如果你完全不想用 Xvfb，把 `~/.agentcloak/config.toml` 里的 `headless = true` 保持不动（或设置 `AGENTCLOAK_HEADLESS=true`）。doctor 只在有头模式配置下才会提示 Xvfb。
 
@@ -189,7 +232,7 @@ sudo playwright install-deps chromium
 
 - **无需 Xvfb** —— Windows 始终有显示器。
 - **`pip install --user` 后的 PATH 问题** —— 用 `pip install --user agentcloak` 安装时，入口脚本会放在 `%APPDATA%\Python\Python312\Scripts`（根据你的 Python 版本调整）。如果运行 `agentcloak` 提示找不到命令，将该目录加到 `PATH`：
-  1. 打开 *系统属性 → 环境变量*
+  1. 打开 _系统属性 → 环境变量_
   2. 编辑用户的 `Path`
   3. 添加 `%APPDATA%\Python\Python312\Scripts`
   4. 重新启动终端使配置生效
@@ -241,14 +284,14 @@ pip install -e ".[dev,mcp,stealth]"
 
 ## 首次运行问题排查
 
-| 现象 | 修复方式 |
-|------|---------|
-| `command not found: agentcloak` | PATH 未配置（Windows：添加 `%APPDATA%\Python\Python3X\Scripts`；*nix：`pip install` 把它放到 `~/.local/bin`）。或者运行 `py -m agentcloak.cli.app doctor` / `python -m agentcloak.cli.app doctor`。 |
-| `cloakbrowser_binary: not downloaded` | `agentcloak doctor --fix` |
-| Linux 服务器上 `xvfb: not found` | 要么在 `~/.agentcloak/config.toml` 设置 `headless = true`，要么运行 `agentcloak doctor --fix --sudo` |
-| `playwright_libs: missing: ...` | `sudo playwright install-deps chromium`（或 `agentcloak doctor --fix --sudo`） |
-| 安装后 `daemon_unreachable` | `agentcloak doctor --fix` 会告诉你哪里坏了；如果没问题，运行 `agentcloak daemon start -b` 手动启动并查看 `~/.agentcloak/logs/daemon.log` 日志 |
-| macOS Gatekeeper 拦截 Chromium | `xattr -d com.apple.quarantine ~/.cloakbrowser/chromium-*/chrome` |
+| 现象                                  | 修复方式                                                                                                                                                                                             |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command not found: agentcloak`       | PATH 未配置（Windows：添加 `%APPDATA%\Python\Python3X\Scripts`；\*nix：`pip install` 把它放到 `~/.local/bin`）。或者运行 `py -m agentcloak.cli.app doctor` / `python -m agentcloak.cli.app doctor`。 |
+| `cloakbrowser_binary: not downloaded` | `agentcloak doctor --fix`                                                                                                                                                                            |
+| Linux 服务器上 `xvfb: not found`      | 要么在 `~/.agentcloak/config.toml` 设置 `headless = true`，要么运行 `agentcloak doctor --fix --sudo`                                                                                                 |
+| `playwright_libs: missing: ...`       | `sudo playwright install-deps chromium`（或 `agentcloak doctor --fix --sudo`）                                                                                                                       |
+| 安装后 `daemon_unreachable`           | `agentcloak doctor --fix` 会告诉你哪里坏了；如果没问题，运行 `agentcloak daemon start -b` 手动启动并查看 `~/.agentcloak/logs/daemon.log` 日志                                                        |
+| macOS Gatekeeper 拦截 Chromium        | `xattr -d com.apple.quarantine ~/.cloakbrowser/chromium-*/chrome`                                                                                                                                    |
 
 ## 后续步骤
 

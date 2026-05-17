@@ -44,6 +44,8 @@ You need a browser. Your agents do too.
 
 ```bash
 pip install agentcloak
+cloak skill install        # installs the Skill bundle to your agent platform
+cloak doctor --fix         # verify environment + download CloakBrowser
 ```
 
 Everything is included: CLI (`agentcloak` and `cloak` shorthand), MCP server (`agentcloak-mcp`), CloakBrowser stealth backend, and httpcloak TLS fingerprint proxy. The patched Chromium binary (~200 MB) downloads automatically on first use to `~/.cloakbrowser/`.
@@ -113,18 +115,29 @@ See the full [Quick Start tutorial](docs/en/getting-started/quickstart.md) for l
 | **Context cost** | ~300 tokens (on-demand) | ~6,000 tokens (persistent) |
 | **Best for** | Claude Code, any Bash-capable agent | MCP-native clients without Bash |
 
-**Skill + CLI** -- two steps. (1) install the CLI, (2) drop the Skill bundle (`SKILL.md` + `references/`) into your agent's skills directory:
+**Skill + CLI** -- three commands. The `cloak skill install` subcommand
+copies the bundle from the wheel and symlinks every detected agent platform
+to a single canonical source under `~/.agentcloak/skills/agentcloak/`:
 
 ```bash
 # 1. Install agentcloak (CLI + daemon + stealth browser)
 pip install agentcloak
 
-# 2. Install the Skill bundle for your agent.
-#    Example below uses Claude Code (project-scoped); see the table for other platforms.
-mkdir -p .claude/skills
-curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
-  | tar -xz --strip-components=2 -C .claude/skills \
-    agentcloak-main/skills/agentcloak
+# 2. Verify the environment (downloads CloakBrowser binary on first run)
+cloak doctor --fix
+
+# 3. Install the Skill bundle (interactive menu picks your agent platform)
+cloak skill install
+```
+
+Non-interactive variants for scripted setup:
+
+```bash
+cloak skill install --platform claude         # project-scoped Claude Code
+cloak skill install --platform claude-global  # ~/.claude/skills/
+cloak skill install --platform codex          # ~/.codex/skills/
+cloak skill install --platform all            # every detected platform
+cloak skill install --path /custom/skills/dir # arbitrary location
 ```
 
 | Agent platform | Skill location |
@@ -133,9 +146,13 @@ curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
 | Codex | `~/.codex/skills/agentcloak/` |
 | Cursor | `.cursor/skills/agentcloak/` |
 | OpenCode | `.opencode/skills/agentcloak/` |
-| Other | Check your agent's docs for its skill directory |
+| Other | Use `--path` to point at your agent's skill directory |
 
-See the [Skill installation guide](docs/en/getting-started/installation.md#install-the-skill-bundle) for per-platform details and Windows PowerShell variants.
+Run `cloak skill update` after upgrading agentcloak to refresh the bundle
+(symlinked installs pick up changes automatically — copy-installs need a
+re-run). `cloak skill uninstall` removes every link the installer created.
+
+See the [Skill installation guide](docs/en/getting-started/installation.md#install-the-skill-bundle) for the offline curl+tar alternative and Windows notes.
 
 **MCP Server** -- one-command setup for Claude Code:
 

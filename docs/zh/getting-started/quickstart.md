@@ -202,7 +202,7 @@ cloak capture analyze
 
 ## 输出格式
 
-CLI 从 v0.3.0 起以文本为先。**stdout 就是答案**。提示和错误走 stderr；exit code 为 0 成功 / 1 失败 / 2 用法错误。
+CLI 以文本为先 **stdout 就是答案**。提示和错误走 stderr；exit code 为 0 成功 / 1 失败 / 2 用法错误。
 
 ```text
 $ cloak navigate https://example.com

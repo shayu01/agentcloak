@@ -12,13 +12,13 @@ This guide covers installing agentcloak and its dependencies on all supported pl
 
 ```bash
 pip install agentcloak
+cloak skill install            # installs Skill bundle to your agent platform
+cloak doctor --fix             # verify environment + download CloakBrowser
 ```
 
-Then verify and fix the environment in one step:
-
-```bash
-agentcloak doctor --fix
-```
+`cloak skill install` runs an interactive menu the first time you call it
+— pick your agent platform from the detected list. Use `--platform <alias>`
+for non-interactive setup (see [Install the Skill bundle](#install-the-skill-bundle) below).
 
 `doctor --fix` does the in-process work itself (downloads the CloakBrowser binary, creates the data dir) and prints a single shell command for anything that needs system-level intervention (Xvfb on Linux servers, Playwright libs). Pass `--sudo` if you want it to run that command for you.
 
@@ -34,29 +34,82 @@ CloakBrowser downloads its patched Chromium binary automatically on first use (~
 
 ## Install the Skill bundle
 
-`pip install agentcloak` gives you the CLI and the MCP server. If your AI agent supports **Skills**, install the Skill bundle (`SKILL.md` + the `references/` directory) so the agent can lazy-load `cloak` knowledge on demand (~300 tokens, vs ~6,000 for MCP tool definitions).
+`pip install agentcloak` gives you the CLI and the MCP server. The CLI ships
+with the Skill bundle inside the wheel and a dedicated installer command.
 
-> **Recommended: install Skill + CLI only.** The MCP server is an optional alternative for agents that don't have bash access. If you install both, the MCP tool definitions consume ~6,000 tokens in every conversation even when unused. Pick one:
-> - **Skill + CLI** (recommended): agent loads skill on demand, calls `cloak` via bash
-> - **MCP only**: for agents without bash capability (e.g., some chat-only interfaces)
+> Recommended use **Skill + CLI** The MCP server is an optional alternative. Generally just use skill + cli for your agent, MCP tool consume ~6,000 tokens in every conversation even when unused.
+>
+> - **Skill + CLI**: agent loads skill on demand, calls `cloak` via bash
+> - **MCP**: recommend for agents without bash capability (e.g., some chat-only interfaces)
 
-### Where to put it
+### Quickest path: `cloak skill install`
+
+```bash
+cloak skill install                # interactive menu of detected platforms
+cloak skill install --platform claude         # project-scoped Claude Code
+cloak skill install --platform claude-global  # ~/.claude/skills/
+cloak skill install --platform codex          # ~/.codex/skills/
+cloak skill install --platform cursor         # .cursor/skills/
+cloak skill install --platform opencode       # .opencode/skills/
+cloak skill install --platform all            # every detected platform
+cloak skill install --path /custom/skills/dir # arbitrary directory
+```
+
+**Supported platforms:** Claude Code, Codex, Cursor, OpenCode. For other agents, use `--path` pointing to your agent's skills directory.
+
+**Interactive vs non-interactive:**
+- `cloak skill install` (no flags) — interactive: shows detected platforms, lets you choose
+- `cloak skill install --platform <name>` — non-interactive: suitable for scripts and AI agents
+
+The installer copies the bundled skill data to a canonical location at
+`~/.agentcloak/skills/agentcloak/`, then **symlinks** each chosen platform
+directory to that source. Subsequent upgrades only need
+`cloak skill update` — every symlinked install picks up the new content
+automatically. On Windows without Developer Mode, falls back to a full copy (re-run after upgrades).
+
+On Windows without Developer Mode the symlink call falls back to a full
+copy; the install message says `(copy)` instead of `(symlink)` so you know
+to re-run `cloak skill install` after each `pip install --upgrade
+agentcloak`.
+
+Remove everything with `cloak skill uninstall` (add `--remove-canonical`
+to also drop the source copy under `~/.agentcloak/`).
+
+### Where the bundle lands
 
 Each agent platform reads skills from its own directory:
 
-| Agent platform | Project-scoped | User-global |
-|---|---|---|
-| Claude Code | `.claude/skills/agentcloak/` | `~/.claude/skills/agentcloak/` |
-| Codex | `.codex/skills/agentcloak/` | `~/.codex/skills/agentcloak/` |
-| Cursor | `.cursor/skills/agentcloak/` | (n/a — project-scoped) |
-| OpenCode | `.opencode/skills/agentcloak/` | (n/a — project-scoped) |
-| Other | Consult your agent's docs | Consult your agent's docs |
+| Agent platform | Project-scoped                 | User-global                    | `--platform` alias |
+| -------------- | ------------------------------ | ------------------------------ | ------------------ |
+| Claude Code    | `.claude/skills/agentcloak/`   | `~/.claude/skills/agentcloak/` | `claude` / `claude-global` |
+| Codex          | `.codex/skills/agentcloak/`    | `~/.codex/skills/agentcloak/`  | `codex-project` / `codex` |
+| Cursor         | `.cursor/skills/agentcloak/`   | (n/a — project-scoped)         | `cursor` |
+| OpenCode       | `.opencode/skills/agentcloak/` | (n/a — project-scoped)         | `opencode` |
+| Other          | Use `--path <dir>`             | Use `--path <dir>`             | n/a |
 
 Project-scoped installs only apply to that repo; user-global installs apply everywhere. Pick whichever fits your workflow.
 
-### Install with curl + tar (Linux / macOS / WSL)
+### Updating after a `pip install --upgrade`
 
-The Skill bundle lives at [`skills/agentcloak/`](https://github.com/shayuc137/agentcloak/tree/main/skills/agentcloak) in the repo. The snippet below pulls just that directory out of the GitHub tarball:
+Symlinked installs (the default) pick up the new bundle automatically once
+the canonical copy is refreshed:
+
+```bash
+pip install --upgrade agentcloak
+cloak skill update
+```
+
+Copy-style installs (Windows fallback) need a re-run instead:
+
+```bash
+cloak skill install --platform claude   # repeat for each target
+```
+
+### Manual alternative: curl + tar (offline / CI)
+
+Useful in environments without the `cloak` binary on PATH, behind a corporate
+proxy that blocks `pip`, or when you want to vendor the Skill bundle into a
+repo. The Skill bundle lives at [`skills/agentcloak/`](https://github.com/shayuc137/agentcloak/tree/main/skills/agentcloak) in the repo — the snippet below pulls just that directory out of the GitHub tarball:
 
 ```bash
 # Pick your destination from the table above. Example: project-scoped Claude Code.
@@ -70,10 +123,9 @@ curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
 
 After the command, `$DEST/agentcloak/SKILL.md` and `$DEST/agentcloak/references/` should exist.
 
-### Install with PowerShell (Windows)
+PowerShell variant (Windows 10 1803+ ships `tar`/`curl.exe` out of the box):
 
 ```powershell
-# Project-scoped Claude Code example. Adjust $Dest per the table above.
 $Dest = ".claude\skills"
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 
@@ -83,11 +135,9 @@ tar -xz -C $Dest --strip-components=2 -f "$tmp.tgz" agentcloak-main/skills/agent
 Remove-Item "$tmp.tgz"
 ```
 
-(Windows 10 1803+ ships `tar`/`curl.exe` out of the box.)
+### From a git clone (developers)
 
-### Install from a git clone (developers)
-
-If you already cloned the repo, just copy or symlink the directory:
+If you already cloned the repo, copy or symlink the directory directly:
 
 ```bash
 # From the repo root
@@ -96,14 +146,10 @@ cp -r skills/agentcloak ~/.claude/skills/         # global install
 ln -s "$PWD/skills/agentcloak" ~/.claude/skills/  # live-edit symlink
 ```
 
-### Updating the Skill
-
-Re-run the same `curl | tar` (or `cp -r`) command. The Skill is plain markdown; there's no migration step.
-
 ## Optional extras
 
-| Extra | What it adds | When you need it |
-|-------|-------------|-----------------|
+| Extra       | What it adds                                                        | When you need it                           |
+| ----------- | ------------------------------------------------------------------- | ------------------------------------------ |
 | `discovery` | [zeroconf](https://github.com/python-zeroconf/python-zeroconf) mDNS | Auto-discovering daemon from remote bridge |
 
 ```bash
@@ -156,13 +202,13 @@ A healthy install prints `"healthy": true`. If something's missing, `agentcloak 
 
 The default headless flag in v0.2.0 is `true`, so headless mode "just works" with no system dependencies. If you opt into headed mode (better stealth on some sites) on a server without a display, agentcloak auto-starts Xvfb and the doctor will tell you to install it:
 
-| Distro | Install |
-|--------|---------|
-| Debian / Ubuntu / Mint | `sudo apt-get install -y xvfb` |
+| Distro                                     | Install                                    |
+| ------------------------------------------ | ------------------------------------------ |
+| Debian / Ubuntu / Mint                     | `sudo apt-get install -y xvfb`             |
 | Fedora / RHEL / CentOS / Rocky / AlmaLinux | `sudo dnf install -y xorg-x11-server-Xvfb` |
-| Arch / Manjaro | `sudo pacman -S xorg-server-xvfb` |
-| Alpine | `sudo apk add xvfb` |
-| openSUSE | `sudo zypper install -y xorg-x11-server` |
+| Arch / Manjaro                             | `sudo pacman -S xorg-server-xvfb`          |
+| Alpine                                     | `sudo apk add xvfb`                        |
+| openSUSE                                   | `sudo zypper install -y xorg-x11-server`   |
 
 If you don't want Xvfb at all, keep `headless = true` in `~/.agentcloak/config.toml` (or set `AGENTCLOAK_HEADLESS=true`). The doctor only nags about Xvfb when headed mode is configured.
 
@@ -189,7 +235,7 @@ sudo playwright install-deps chromium
 
 - **No Xvfb needed** — Windows always has a display.
 - **PATH after `pip install --user`** — when you install with `pip install --user agentcloak`, the entry-point scripts land in `%APPDATA%\Python\Python312\Scripts` (adjust for your Python version). Add that directory to `PATH` if running `agentcloak` complains it's not found:
-  1. Open *System Properties → Environment Variables*
+  1. Open _System Properties → Environment Variables_
   2. Edit `Path` for your user
   3. Add `%APPDATA%\Python\Python312\Scripts`
   4. Restart your shell so the change takes effect
@@ -241,14 +287,14 @@ To customize behavior, see the [configuration reference](../reference/config.md)
 
 ## Troubleshooting first-run issues
 
-| Symptom | Fix |
-|---------|-----|
-| `command not found: agentcloak` | PATH not configured (Windows: add `%APPDATA%\Python\Python3X\Scripts`; *nix: `pip install` puts it in `~/.local/bin`). Or run `py -m agentcloak.cli.app doctor` / `python -m agentcloak.cli.app doctor`. |
-| `cloakbrowser_binary: not downloaded` | `agentcloak doctor --fix` |
-| `xvfb: not found` on a Linux server | Either set `headless = true` in `~/.agentcloak/config.toml`, or `agentcloak doctor --fix --sudo` |
-| `playwright_libs: missing: ...` | `sudo playwright install-deps chromium` (or `agentcloak doctor --fix --sudo`) |
-| `daemon_unreachable` after install | `agentcloak doctor --fix` will tell you what broke; if nothing, `agentcloak daemon start -b` to launch manually and watch the logs at `~/.agentcloak/logs/daemon.log` |
-| Gatekeeper blocks Chromium (macOS) | `xattr -d com.apple.quarantine ~/.cloakbrowser/chromium-*/chrome` |
+| Symptom                               | Fix                                                                                                                                                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command not found: agentcloak`       | PATH not configured (Windows: add `%APPDATA%\Python\Python3X\Scripts`; \*nix: `pip install` puts it in `~/.local/bin`). Or run `py -m agentcloak.cli.app doctor` / `python -m agentcloak.cli.app doctor`. |
+| `cloakbrowser_binary: not downloaded` | `agentcloak doctor --fix`                                                                                                                                                                                 |
+| `xvfb: not found` on a Linux server   | Either set `headless = true` in `~/.agentcloak/config.toml`, or `agentcloak doctor --fix --sudo`                                                                                                          |
+| `playwright_libs: missing: ...`       | `sudo playwright install-deps chromium` (or `agentcloak doctor --fix --sudo`)                                                                                                                             |
+| `daemon_unreachable` after install    | `agentcloak doctor --fix` will tell you what broke; if nothing, `agentcloak daemon start -b` to launch manually and watch the logs at `~/.agentcloak/logs/daemon.log`                                     |
+| Gatekeeper blocks Chromium (macOS)    | `xattr -d com.apple.quarantine ~/.cloakbrowser/chromium-*/chrome`                                                                                                                                         |
 
 ## Next steps
 

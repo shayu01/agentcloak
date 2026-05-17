@@ -157,6 +157,26 @@ def check_skill() -> CheckResult:
     return CheckResult(True, "in sync", out)
 
 
+def check_skill_data() -> CheckResult:
+    """Mirror under ``src/agentcloak/_skill_data/`` must match ``skills/``.
+
+    The editable skill bundle lives at ``skills/agentcloak/`` (where authors
+    edit ``SKILL.md``); the wheel ships the same files from
+    ``src/agentcloak/_skill_data/agentcloak/`` so ``cloak skill install``
+    can read them via :mod:`importlib.resources`. Drift means the next
+    release would ship a stale bundle to users — fail loudly here instead.
+    Resolved with ``python scripts/sync_skill_data.py``.
+    """
+    rc, out = _run(
+        ["uv", "run", "python", "scripts/sync_skill_data.py", "--check"]
+    )
+    if rc != 0:
+        return CheckResult(False, "FAIL", out)
+    m = re.search(r"\((\d+) files\)", out)
+    count = m.group(1) if m else "?"
+    return CheckResult(True, f"{count} files in sync", out)
+
+
 def check_config() -> CheckResult:
     """Every ``AgentcloakConfig`` field must show up in ``config.md``.
 
@@ -362,7 +382,10 @@ def check_skill_coverage() -> CheckResult:
         "press", "keydown", "keyup", "navigate", "snapshot",
         "screenshot", "resume", "evaluate", "batch",
     }
-    parent_groups = {"browser", "daemon", "do", "js"}
+    # ``skill`` is the user-facing skill-bundle installer (``cloak skill
+    # install``); SKILL.md targets the agent's runtime needs and shouldn't
+    # mention the installation command.
+    parent_groups = {"browser", "daemon", "do", "js", "skill"}
     skip = shortcuts | parent_groups
     stale_in_skill = [s for s in stale_in_skill if s not in skip]
     missing_from_skill = [m for m in missing_from_skill if m not in skip]
@@ -391,6 +414,7 @@ CHECKS: dict[str, tuple[str, Callable[[], CheckResult]]] = {
     "client": ("Client drift", check_client),
     "skill": ("Skill reference sync", check_skill),
     "skill_cov": ("Skill coverage", check_skill_coverage),
+    "skill_data": ("Skill data mirror", check_skill_data),
     "config": ("Config docs sync", check_config),
     "version": ("Version consistency", check_version),
     "smoke": ("CLI smoke test", check_smoke),

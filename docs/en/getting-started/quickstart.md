@@ -202,7 +202,7 @@ See the [capture guide](../guides/capture.md) for more on API analysis and spell
 
 ## Output format
 
-CLI is text-first since v0.3.0. **stdout is the answer.** Hints / errors go to stderr; exit code is 0 on success, 1 on failure, 2 on bad usage.
+CLI is text-first **stdout is the answer.** Hints / errors go to stderr; exit code is 0 on success, 1 on failure, 2 on bad usage.
 
 ```text
 $ cloak navigate https://example.com
