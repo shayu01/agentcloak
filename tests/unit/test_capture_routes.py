@@ -18,6 +18,7 @@ def _make_client() -> TestClient:
     store = CaptureStore()
     type(ctx).capture_store = PropertyMock(return_value=store)
     type(ctx).seq = PropertyMock(return_value=0)
+
     # capture_start/stop became async on BrowserContextBase so backends can
     # run setup hooks (e.g. CDP Network.enable for RemoteBridge). The route
     # now awaits them, so the mock has to be an AsyncMock or TestClient

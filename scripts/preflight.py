@@ -139,9 +139,7 @@ def check_surface() -> CheckResult:
 
 def check_client() -> CheckResult:
     """Confirm ``DaemonClient`` exposes both async + sync methods per route."""
-    rc, out = _run(
-        ["uv", "run", "python", "scripts/generate_client.py", "--check"]
-    )
+    rc, out = _run(["uv", "run", "python", "scripts/generate_client.py", "--check"])
     if rc != 0:
         return CheckResult(False, "FAIL", out)
     return CheckResult(True, "0 drift", out)
@@ -149,9 +147,7 @@ def check_client() -> CheckResult:
 
 def check_skill() -> CheckResult:
     """Ensure ``commands-reference.md`` matches the freshly rendered version."""
-    rc, out = _run(
-        ["uv", "run", "python", "scripts/generate_skill.py", "--check"]
-    )
+    rc, out = _run(["uv", "run", "python", "scripts/generate_skill.py", "--check"])
     if rc != 0:
         return CheckResult(False, "FAIL", out)
     return CheckResult(True, "in sync", out)
@@ -167,9 +163,7 @@ def check_skill_data() -> CheckResult:
     release would ship a stale bundle to users — fail loudly here instead.
     Resolved with ``python scripts/sync_skill_data.py``.
     """
-    rc, out = _run(
-        ["uv", "run", "python", "scripts/sync_skill_data.py", "--check"]
-    )
+    rc, out = _run(["uv", "run", "python", "scripts/sync_skill_data.py", "--check"])
     if rc != 0:
         return CheckResult(False, "FAIL", out)
     m = re.search(r"\((\d+) files\)", out)
@@ -196,15 +190,11 @@ def check_config() -> CheckResult:
     config_text = (SRC / "agentcloak" / "core" / "config.py").read_text(
         encoding="utf-8"
     )
-    docs_text = (DOCS / "en" / "reference" / "config.md").read_text(
-        encoding="utf-8"
-    )
+    docs_text = (DOCS / "en" / "reference" / "config.md").read_text(encoding="utf-8")
 
     # Walk the load_config body line-by-line, threading the "currently
     # assigned field" so each _env("KEY") attaches to the right field.
-    field_to_envs: dict[str, list[str]] = {
-        f.name: [] for f in fields(AgentcloakConfig)
-    }
+    field_to_envs: dict[str, list[str]] = {f.name: [] for f in fields(AgentcloakConfig)}
     current_field: str | None = None
     field_assign_re = re.compile(r"cfg\.(\w+)\s*=")
     env_call_re = re.compile(r'_env\("(\w+)"\)')
@@ -273,9 +263,9 @@ def check_version() -> CheckResult:
     # Hard-coded version refs in install docs (we tolerate the current
     # version — e.g. "the default in v0.2.0 changed to …" — but flag older
     # ones that would mislead a reader).
-    install_md = (
-        DOCS / "en" / "getting-started" / "installation.md"
-    ).read_text(encoding="utf-8")
+    install_md = (DOCS / "en" / "getting-started" / "installation.md").read_text(
+        encoding="utf-8"
+    )
     refs = re.findall(r"\bv(\d+\.\d+\.\d+)\b", install_md)
     stale = sorted({r for r in refs if r != pyproj_version})
     if stale:
@@ -315,9 +305,7 @@ def check_smoke() -> CheckResult:
     for grp in groups:
         result = runner.invoke(app, [grp, "--help"])
         if result.exit_code != 0:
-            failures.append(
-                f"  - `agentcloak {grp} --help` exited {result.exit_code}"
-            )
+            failures.append(f"  - `agentcloak {grp} --help` exited {result.exit_code}")
             if result.exception:
                 exc = result.exception
                 failures.append(f"    {type(exc).__name__}: {exc}")
@@ -378,9 +366,21 @@ def check_skill_coverage() -> CheckResult:
     # that users invoke through subcommands — they don't need direct
     # SKILL.md mentions.
     shortcuts = {
-        "click", "fill", "type", "scroll", "hover", "select",
-        "press", "keydown", "keyup", "navigate", "snapshot",
-        "screenshot", "resume", "evaluate", "batch",
+        "click",
+        "fill",
+        "type",
+        "scroll",
+        "hover",
+        "select",
+        "press",
+        "keydown",
+        "keyup",
+        "navigate",
+        "snapshot",
+        "screenshot",
+        "resume",
+        "evaluate",
+        "batch",
     }
     # ``skill`` is the user-facing skill-bundle installer (``cloak skill
     # install``); SKILL.md targets the agent's runtime needs and shouldn't

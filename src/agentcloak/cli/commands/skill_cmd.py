@@ -280,10 +280,7 @@ def skill_uninstall(
     remove_canonical: bool = typer.Option(
         False,
         "--remove-canonical",
-        help=(
-            "Also delete the canonical install at "
-            "~/.agentcloak/skills/agentcloak/."
-        ),
+        help=("Also delete the canonical install at ~/.agentcloak/skills/agentcloak/."),
     ),
 ) -> None:
     """Remove skill installations from every known platform directory."""
