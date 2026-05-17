@@ -347,10 +347,19 @@ cloak daemon status                # tier | browser status | seq
 ## Configuration
 
 ```bash
-cloak config                       # key = value (source) — git-config -l style
+cloak config                       # alias for 'config list'
+cloak config list                  # key = value (source) — git-config -l style
+cloak config get <key>             # print one value
+cloak config set <key> <val...>    # set scalar or replace list (batch: k1 v1 k2 v2)
+cloak config add <key> <val...>    # append to list-typed key
+cloak config remove <key> <val>    # remove from list-typed key
+cloak config unset <key>           # reset to default
+cloak config keys                  # list all settable dot-notation keys
 ```
 
-Each row shows the field name, current value, and where the value came from (`default`, `config.toml`, or an env var).
+Keys use dot-notation (e.g., `browser.proxy`, `browser.extra_args`). Types are inferred from the config schema -- `add`/`remove` only work on list fields. Browser/daemon changes print a restart hint.
+
+See [config reference](config.md) for all available keys and environment variables.
 
 ## Diagnostics
 

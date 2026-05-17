@@ -344,10 +344,19 @@ cloak daemon status                # tier | browser status | seq
 ## 配置
 
 ```bash
-cloak config                       # key = value (source) — 类似 git config -l
+cloak config                       # 等同 config list
+cloak config list                  # key = value (source) — 类似 git config -l
+cloak config get <key>             # 读取单个值
+cloak config set <key> <val...>    # 设置标量或替换列表（批量: k1 v1 k2 v2）
+cloak config add <key> <val...>    # 追加到列表类型的 key
+cloak config remove <key> <val>    # 从列表类型的 key 移除
+cloak config unset <key>           # 恢复默认值
+cloak config keys                  # 列出所有可设置的 key
 ```
 
-每行显示字段名、当前值、来源（`default`、`config.toml` 或环境变量）。
+key 使用点分格式（如 `browser.proxy`、`browser.extra_args`）。类型由配置 schema 推断——`add`/`remove` 只对列表字段生效。修改 browser/daemon 配置后会提示重启。
+
+详见[配置参考](config.md)了解所有可用 key 和环境变量。
 
 ## 诊断
 

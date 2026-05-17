@@ -23,6 +23,7 @@ You need a browser. Your agents do too.
 - **CLI + Skill on-demand loading** -- agents call `cloak` via Bash; the Skill lazy-loads at ~300 tokens (vs ~6,000 for MCP tool definitions)
 - **CloakBrowser built-in stealth** -- 57 C++ patches on Chromium, passes common fingerprint checks and JS challenges
 - **Session reuse** -- save/restore login profiles + RemoteBridge to operate your real Chrome browser
+- **Network config** -- proxy (SOCKS5/HTTP), DNS-over-HTTPS control, and custom Chromium args via `cloak config set`
 - **Daemon architecture** -- auto-starts on first command, manages browser lifecycle with a monotonic seq counter
 - **Spells + API capture** -- wrap common site operations as one-liners; capture traffic, analyze patterns, generate spells automatically
 - **MCP server with 23 tools** -- full compatibility with MCP-native clients (Claude Code, Codex, Cursor, etc.)
@@ -211,6 +212,28 @@ See the full [MCP setup guide](docs/en/guides/mcp-setup.md) for details.
 | **RemoteBridge** (experimental) | Real browser fingerprint | Operate your own Chrome on another machine |
 
 See the [backends guide](docs/en/guides/backends.md) for configuration details and trade-offs.
+
+## Configuration
+
+```bash
+cloak config list                                       # all settings with sources
+cloak config set browser.proxy "socks5://host:1080"     # set a value
+cloak config get browser.proxy                          # read a value
+cloak config add browser.extra_args "--lang=ja-JP"      # append to a list
+cloak config unset browser.proxy                        # reset to default
+```
+
+Key network settings:
+
+```toml
+# ~/.agentcloak/config.toml
+[browser]
+proxy = "socks5://user:pass@host:1080"   # upstream proxy (SOCKS5/HTTP)
+dns_over_https = false                    # default: disabled, respects system DNS
+extra_args = ["--disable-background-networking"]
+```
+
+All settings also accept environment variables (`AGENTCLOAK_PROXY`, `AGENTCLOAK_DNS_OVER_HTTPS`, `AGENTCLOAK_EXTRA_ARGS`). See the [config reference](docs/en/reference/config.md) for the full list.
 
 ## Architecture
 
