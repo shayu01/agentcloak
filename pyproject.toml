@@ -97,8 +97,6 @@ known-first-party = ["agentcloak"]
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-venvPath = "."
-venv = ".venv"
 include = ["src"]
 # CloakBrowser ships a public Python API without type stubs; zeroconf is an
 # optional discovery dep with the same story. Disable the stub-only signal so
