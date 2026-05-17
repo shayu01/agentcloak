@@ -9,7 +9,7 @@ You need a browser. Your agents do too.
 [![PyPI](https://img.shields.io/pypi/v/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![Python](https://img.shields.io/pypi/pyversions/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![License](https://img.shields.io/github/license/shayuc137/agentcloak?style=flat)](https://github.com/shayuc137/agentcloak/blob/main/LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/shayuc137/agentcloak/ci.yml?style=flat&label=CI)](https://github.com/shayuc137/agentcloak/actions)
+[![Last commit](https://img.shields.io/github/last-commit/shayuc137/agentcloak?style=flat)](https://github.com/shayuc137/agentcloak/commits/main)
 
 <!-- README-I18N:START -->
 **English** | [中文](./README.zh.md)
