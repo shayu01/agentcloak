@@ -102,4 +102,4 @@ spell 这一侧详见 [spells 指南](./spells.md)。
 
 **"响应体为空或截断"**——超过 100 KB 的响应体被截断。二进制 content type（图片、视频）只录 header。需要完整 body 时用 `cloak fetch URL` 重新拉。
 
-**"daemon 重启后 capture 还在"**——不应该。capture store 只在内存。如果 `status` 在重启后还显示有条目，说明 daemon 其实没真的重启过——用 `cloak daemon health` 查 PID。
+**"daemon 重启后 capture 还在"**——不应该。capture store 只在内存。如果 `status` 在重启后还显示有条目，说明 daemon 其实没真的重启过——用 `cloak daemon status` 查 PID。

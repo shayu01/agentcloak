@@ -8,7 +8,7 @@
 cloak spell list                              # 看注册了哪些
 cloak spell info httpbin/headers              # 单个 spell 详情
 cloak spell run httpbin/headers               # 执行
-cloak spell run httpbin/headers user-agent=mycustomua  # 带参数
+cloak spell run weather/current city=Tokyo    # 带参的 spell 用 key=value
 ```
 
 ## Strategy
@@ -48,17 +48,14 @@ Spell 名永远是 `site/command`——site 把相关 spell 组在一起，comma
 ```python
 from agentcloak.core.types import Strategy
 from agentcloak.spells.registry import spell
-from agentcloak.spells.types import Arg
 
 @spell(
     site="httpbin",
     name="headers",
     strategy=Strategy.PUBLIC,
     description="Inspect request headers via httpbin.org",
-    args=(Arg("user-agent", default="agentcloak/0.2", help="Custom User-Agent"),),
     pipeline=[
-        {"fetch": {"url": "https://httpbin.org/headers",
-                   "headers": {"User-Agent": "{args.user-agent}"}}},
+        {"fetch": {"url": "https://httpbin.org/headers"}},
         {"select": "headers"},
     ],
 )
@@ -67,6 +64,8 @@ def httpbin_headers() -> None:
 ```
 
 设了 `pipeline=` 时，被装饰的函数只是占位；registry 存的是 pipeline，由它执行。
+
+`fetch` 步骤在有 browser 时会继承 session 状态（cookies、`User-Agent`、proxy）；`PUBLIC` 模式没有 browser 时退化为 httpx，但默认 UA 用 CloakBrowser 对齐的 Chrome 字符串，和 stealth session 发出的请求一致。需要覆盖时在 `headers` 里写 `{"User-Agent": "..."}`；按调用变化的话再加 spell `arg`。
 
 ### Function 模式
 

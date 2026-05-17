@@ -258,6 +258,7 @@ async def handle_health(
 async def handle_navigate(
     body: NavigateRequest,
     ctx: BrowserCtxDep,
+    config: ConfigDep,
     request: Request,
 ) -> Response | dict[str, Any]:
     result = await ctx.navigate(body.url, timeout=body.timeout)
@@ -267,7 +268,15 @@ async def handle_navigate(
 
     if body.include_snapshot:
         try:
-            snap = await ctx.snapshot(mode=body.snapshot_mode)
+            # Match the ``/snapshot`` route's default-cap behaviour so the
+            # ``--snap`` hot path doesn't accidentally dump 200+ node trees on
+            # busy sites. Compact mode honours config.snapshot_max_nodes (80);
+            # other modes are explicit asks for the full payload and stay
+            # uncapped — same semantics as ``handle_snapshot``.
+            attach_max = (
+                config.snapshot_max_nodes if body.snapshot_mode == "compact" else 0
+            )
+            snap = await ctx.snapshot(mode=body.snapshot_mode, max_nodes=attach_max)
             SnapshotService.attach_snapshot_to_result(result, snap)
         except Exception:
             logger.debug("include_snapshot_failed", exc_info=True)
@@ -313,8 +322,9 @@ async def handle_screenshot(
 async def handle_snapshot(
     ctx: BrowserCtxDep,
     request: Request,
+    config: ConfigDep,
     mode: str = "compact",
-    max_nodes: int = 0,
+    max_nodes: int = -1,
     max_chars: int = 0,
     focus: int = 0,
     offset: int = 0,
@@ -322,13 +332,26 @@ async def handle_snapshot(
     frames: bool = False,
     diff: bool = False,
 ) -> Response | dict[str, Any]:
+    # ``max_nodes`` semantics:
+    #   * ``-1`` (route default) — caller didn't specify; in compact mode we
+    #     fall back to ``config.snapshot_max_nodes`` so busy pages (HN front
+    #     hits ~230 interactive nodes) don't blow the agent's context budget
+    #   * ``0`` — caller explicitly opts into the full tree (``--limit 0``)
+    #   * ``>0`` — explicit cap
+    # ``accessible``/``dom``/``content`` modes are explicit asks for the full
+    # payload, so we never auto-cap them; ``-1`` collapses to ``0`` there.
+    if max_nodes == -1:
+        effective_max_nodes = config.snapshot_max_nodes if mode == "compact" else 0
+    else:
+        effective_max_nodes = max_nodes
+
     service = SnapshotService()
     prev_cache = getattr(request.app.state, "prev_snapshot_lines", None)
 
     data, cur_cache = await service.get(
         ctx,
         mode=mode,
-        max_nodes=max_nodes,
+        max_nodes=effective_max_nodes,
         max_chars=max_chars,
         focus=focus,
         offset=offset,
@@ -402,6 +425,7 @@ async def handle_network(
 async def handle_action(
     body: ActionRequest,
     ctx: BrowserCtxDep,
+    config: ConfigDep,
     request: Request,
 ) -> Response | dict[str, Any]:
     target = str(body.index) if body.index is not None else body.target
@@ -428,8 +452,29 @@ async def handle_action(
     await _update_resume(request, ctx, action_summary=summary)
 
     if body.include_snapshot:
+        # When the action caused a navigation, the page is still loading at
+        # this point — ``_post_action_cleanup`` only waits 2s for DOM ready,
+        # and that timeout is suppressed. Take a focused wait here so the
+        # attached snapshot reflects the new page, not the in-flight loader.
+        if result.get("caused_navigation"):
+            try:
+                await ctx.wait(
+                    condition="load",
+                    value="domcontentloaded",
+                    timeout=10000,
+                )
+            except Exception:
+                logger.debug("post_navigation_wait_failed", exc_info=True)
         try:
-            snap = await ctx.snapshot(mode=body.snapshot_mode)
+            # Same default-cap rule as ``/snapshot`` and ``/navigate?include_snapshot``:
+            # the ``--snap`` hot path is what most agents drive, so the default
+            # node budget must mirror the standalone snapshot route or busy
+            # pages dump 200+ nodes through ``--snap`` while ``cloak snapshot``
+            # caps at 80.
+            attach_max = (
+                config.snapshot_max_nodes if body.snapshot_mode == "compact" else 0
+            )
+            snap = await ctx.snapshot(mode=body.snapshot_mode, max_nodes=attach_max)
             SnapshotService.attach_snapshot_to_result(result, snap)
         except Exception:
             logger.debug("include_snapshot_failed", exc_info=True)
@@ -1075,6 +1120,12 @@ async def handle_tab_new(
     body: TabNewRequest, ctx: BrowserCtxDep, request: Request
 ) -> Response | dict[str, Any]:
     result = await ctx.tab_new(body.url)
+    # Tab CRUD changes the tab inventory — without this the persisted
+    # resume snapshot (last touched by navigate/action) keeps reporting
+    # the pre-mutation tab list.
+    await _update_resume(
+        request, ctx, action_summary={"kind": "tab_new", "url": body.url or ""}
+    )
     if wants_text(request):
         return PlainTextResponse(render_tab_op_text("new", result))
     return _ok(result, seq=ctx.seq)
@@ -1085,6 +1136,11 @@ async def handle_tab_close(
     body: TabCloseRequest, ctx: BrowserCtxDep, request: Request
 ) -> Response | dict[str, Any]:
     result = await ctx.tab_close(body.tab_id)
+    await _update_resume(
+        request,
+        ctx,
+        action_summary={"kind": "tab_close", "tab_id": body.tab_id},
+    )
     if wants_text(request):
         # Preserve the closed id in the renderer payload — services don't
         # always echo it back.
@@ -1098,6 +1154,11 @@ async def handle_tab_switch(
     body: TabSwitchRequest, ctx: BrowserCtxDep, request: Request
 ) -> Response | dict[str, Any]:
     result = await ctx.tab_switch(body.tab_id)
+    await _update_resume(
+        request,
+        ctx,
+        action_summary={"kind": "tab_switch", "tab_id": body.tab_id},
+    )
     if wants_text(request):
         result.setdefault("tab_id", body.tab_id)
         return PlainTextResponse(render_tab_op_text("switched to", result))

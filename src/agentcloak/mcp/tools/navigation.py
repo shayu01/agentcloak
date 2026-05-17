@@ -62,7 +62,7 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
     async def agentcloak_snapshot(
         mode: str = "compact",
         max_chars: int = 0,
-        max_nodes: int = 0,
+        max_nodes: int = -1,
         focus: int = 0,
         offset: int = 0,
         frames: bool = False,
@@ -84,9 +84,12 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
                   tree with all containers and states), 'dom' (raw HTML), or
                   'content' (text extraction)
             max_chars: Truncate tree_text to this many characters (0 = no limit).
-            max_nodes: Truncate after N nodes (0 = no limit).
-                Node-level truncation is more precise than char truncation.
-                Truncated output includes a summary of hidden elements.
+            max_nodes: Truncate after N nodes. Default (-1) applies
+                config.snapshot_max_nodes (80) in compact mode to keep
+                busy pages within the token budget. Pass 0 for the full
+                tree, or N > 0 for an explicit cap. Node-level
+                truncation is more precise than char truncation;
+                truncated output includes a summary of hidden elements.
             focus: Expand subtree around element [N] from cached snapshot.
                 Use when you need details about a specific area of the page.
             offset: Start output from Nth element (pagination for large pages).

@@ -15,7 +15,7 @@ https://example.com/ | Example Domain
 $ cloak snapshot
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=2
   heading "Example Domain" level=1
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 
 $ cloak click 99
 Error: Element [99] not in selector_map (1 entries)
@@ -103,6 +103,11 @@ cloak screenshot [--output FILE] [--full-page] [--format FORMAT] [--quality N]
 | `--full-page` | off | Capture full scrollable page |
 | `--format` | `jpeg` | `jpeg` or `png` |
 | `--quality` | `80` | JPEG quality 0-100 (ignored for PNG) |
+
+> [!TIP]
+> For visual analysis (OCR, vision models) use `--format png` — lossless quality
+> avoids JPEG artefacts that confuse text recognition. JPEG stays the default
+> because it ships ~4-10× smaller payloads for layout-verification screenshots.
 
 ### resume
 
@@ -330,7 +335,7 @@ cloak cookies import -c '[{"name":"token","value":"abc","domain":".example.com",
 ```bash
 cloak daemon start [--host HOST] [--port PORT] [--headed] [--profile NAME]
 cloak daemon stop
-cloak daemon health                # tier | browser status | seq
+cloak daemon status                # tier | browser status | seq
 ```
 
 ## Configuration

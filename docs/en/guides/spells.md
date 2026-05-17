@@ -8,7 +8,7 @@ A **spell** is a reusable, named site operation — one command per site task. I
 cloak spell list                              # see what's registered
 cloak spell info httpbin/headers              # detail for one spell
 cloak spell run httpbin/headers               # execute it
-cloak spell run httpbin/headers user-agent=mycustomua  # with args
+cloak spell run weather/current city=Tokyo    # spells with args use key=value
 ```
 
 ## Strategies
@@ -48,17 +48,14 @@ For straight-line API calls, declare a list of steps. Built-in steps include `fe
 ```python
 from agentcloak.core.types import Strategy
 from agentcloak.spells.registry import spell
-from agentcloak.spells.types import Arg
 
 @spell(
     site="httpbin",
     name="headers",
     strategy=Strategy.PUBLIC,
     description="Inspect request headers via httpbin.org",
-    args=(Arg("user-agent", default="agentcloak/0.2", help="Custom User-Agent"),),
     pipeline=[
-        {"fetch": {"url": "https://httpbin.org/headers",
-                   "headers": {"User-Agent": "{args.user-agent}"}}},
+        {"fetch": {"url": "https://httpbin.org/headers"}},
         {"select": "headers"},
     ],
 )
@@ -67,6 +64,8 @@ def httpbin_headers() -> None:
 ```
 
 The decorated function is just a placeholder when `pipeline=` is set; the registry stores the pipeline and executes it.
+
+The `fetch` step inherits browser session state when one is available (cookies, live `User-Agent`, proxy from `cloak fetch`). For `PUBLIC` spells without a browser, it falls back to a CloakBrowser-version-aligned Chrome `User-Agent` so the UA matches what a stealth session would send. Override by passing `headers={"User-Agent": "..."}`; add a spell `arg` if the value needs to be configurable per invocation.
 
 ### Function mode
 

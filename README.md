@@ -21,7 +21,7 @@ You need a browser. Your agents do too.
 
 - **Pages as structured text** -- every page becomes an accessibility tree with `[N]` indexed elements; agents interact by index, not fragile CSS selectors
 - **CLI + Skill on-demand loading** -- agents call `cloak` via Bash; the Skill lazy-loads at ~300 tokens (vs ~6,000 for MCP tool definitions)
-- **CloakBrowser built-in stealth** -- 57 C++ patches on Chromium, Cloudflare bypass out of the box
+- **CloakBrowser built-in stealth** -- 57 C++ patches on Chromium, passes common fingerprint checks and JS challenges
 - **Session reuse** -- save/restore login profiles + RemoteBridge to operate your real Chrome browser
 - **Daemon architecture** -- auto-starts on first command, manages browser lifecycle with a monotonic seq counter
 - **Spells + API capture** -- wrap common site operations as one-liners; capture traffic, analyze patterns, generate spells automatically
@@ -43,16 +43,27 @@ You need a browser. Your agents do too.
 <summary>Manual installation</summary>
 
 ```bash
+# Recommended -- isolated environment, no PEP 668 hassle
+uv tool install agentcloak     # or: pipx install agentcloak
+
+cloak skill install            # installs the Skill bundle to your agent platform
+cloak doctor --fix             # verify environment + download CloakBrowser
+```
+
+> **Why `uv tool` / `pipx`?** Modern Ubuntu/Debian and many other distros block `pip install` outside a venv (PEP 668 "externally-managed-environment"). `uv tool install` and `pipx install` each create a dedicated isolated environment for the package, so the install just works.
+
+If you'd rather stick with `pip`, use a venv first:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
 pip install agentcloak
-cloak skill install        # installs the Skill bundle to your agent platform
-cloak doctor --fix         # verify environment + download CloakBrowser
 ```
 
 Everything is included: CLI (`agentcloak` and `cloak` shorthand), MCP server (`agentcloak-mcp`), CloakBrowser stealth backend, and httpcloak TLS fingerprint proxy. The patched Chromium binary (~200 MB) downloads automatically on first use to `~/.cloakbrowser/`.
 
 **System dependencies (headless Linux only):**
 
-CloakBrowser runs in headed mode for anti-detection. On a server without a display, agentcloak auto-starts Xvfb:
+CloakBrowser runs in headless mode by default (v0.2.0+) — no extra dependencies needed. If you opt into headed mode (`headless = false` for stronger anti-detection) on a server without a display, agentcloak auto-starts Xvfb:
 
 ```bash
 sudo apt-get install -y xvfb
@@ -78,7 +89,7 @@ https://example.com/ | Example Domain
 
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
   heading "Example Domain" level=1
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 ```
 
 ```bash
@@ -121,7 +132,7 @@ to a single canonical source under `~/.agentcloak/skills/agentcloak/`:
 
 ```bash
 # 1. Install agentcloak (CLI + daemon + stealth browser)
-pip install agentcloak
+uv tool install agentcloak    # or: pipx install agentcloak (or pip install inside a venv)
 
 # 2. Verify the environment (downloads CloakBrowser binary on first run)
 cloak doctor --fix
@@ -195,7 +206,7 @@ See the full [MCP setup guide](docs/en/guides/mcp-setup.md) for details.
 
 | Backend | Stealth | Use case |
 |---------|---------|----------|
-| **CloakBrowser** (default) | 57 C++ patches + Cloudflare bypass | Most sites, anti-bot protected pages |
+| **CloakBrowser** (default) | 57 C++ patches, fingerprint / JS-challenge resistant | Most sites, anti-bot protected pages |
 | **Playwright** | Standard Chromium | Development, testing, no stealth needed |
 | **RemoteBridge** (experimental) | Real browser fingerprint | Operate your own Chrome on another machine |
 

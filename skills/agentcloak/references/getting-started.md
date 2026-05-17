@@ -2,9 +2,23 @@
 
 ## Installation
 
+Modern Ubuntu/Debian and many other Linux distros block bare `pip install`
+outside a venv (PEP 668). Recommend `uv tool` or `pipx` — each makes an
+isolated environment per CLI:
+
 ```bash
+uv tool install agentcloak      # https://github.com/astral-sh/uv
+# or:
+pipx install agentcloak         # https://pipx.pypa.io/
+
+agentcloak doctor --fix         # verify and fix the environment in one step
+```
+
+If you'd rather stay with `pip`, use a venv first:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
 pip install agentcloak
-agentcloak doctor --fix    # verify and fix the environment in one step
 ```
 
 One install gets you: CLI (`agentcloak` and `cloak`), MCP server (`agentcloak-mcp`), CloakBrowser stealth backend, httpcloak TLS fingerprint proxy.
@@ -150,7 +164,7 @@ The daemon auto-starts and auto-stops. Manual control:
 |---------|---------|
 | `cloak daemon start -b` | Start daemon in background |
 | `cloak daemon stop` | Stop daemon |
-| `cloak daemon health` | Check daemon status |
+| `cloak daemon status` | Check daemon status |
 
 Default port: 18765. The daemon auto-increments if the port is busy (18765 → 18766 → ...).
 

@@ -316,20 +316,23 @@ def register(mcp: FastMCP, client: DaemonClient) -> None:
                 {
                     "name": "daemon",
                     "ok": True,
+                    "level": "ok",
                     "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
                     "hint": "",
                 }
             )
         except AgentBrowserError:
+            # Daemon-down during a one-off ``doctor`` invocation is the
+            # expected fresh-install state — auto-start spins it up on the
+            # next real command. Report ``level="info"`` so the CLI / agent
+            # render doesn't treat it as a broken environment.
             report["checks"].append(
                 {
                     "name": "daemon",
-                    "ok": False,
+                    "ok": True,
+                    "level": "info",
                     "detail": f"{cfg.daemon_host}:{cfg.daemon_port}",
-                    "hint": (
-                        "run 'agentcloak doctor --fix' (sudo if Linux) or "
-                        "'agentcloak daemon start -b' to launch"
-                    ),
+                    "hint": "not running (auto-starts on first command)",
                 }
             )
         report["healthy"] = all(c["ok"] for c in report["checks"])

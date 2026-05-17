@@ -97,7 +97,7 @@ Removed lines are summarised in a trailing block. Diff is purely line-level; it 
 
 Internally the snapshot carries two maps alongside the tree text:
 
-- `selector_map`: `{N: ElementRef(index, tag, role, text, attributes, depth)}` — what actions resolve `--target N` against
+- `selector_map`: `{N: ElementRef(index, tag, role, text, attributes, depth)}` — what actions resolve positional `N` (e.g. `cloak click 5`) or `--index N` against
 - `backend_node_map`: `{N: CDP backendNodeId}` — the durable Chromium node identifier the RemoteBridge backend uses to drive elements via CDP commands
 
 CLI text output never prints the selector_map (agents read `[N]` refs from the tree directly). Pass `--selector-map` to opt in for ad-hoc inspection, or use `--json` and look under `data.selector_map`. MCP tools also omit it by default. The backend_node_map is internal — agents never need it.

@@ -91,6 +91,13 @@ class AgentcloakConfig:
     # Screenshot quality used by MCP tools. Lower than the CLI default (80) so
     # the base64 payload stays within MCP token budgets (B2 from dogfood).
     mcp_screenshot_quality: int = 50
+    # Default node cap for compact-mode snapshots when the caller didn't
+    # request one. Picked at 80 to keep busy pages (HN front page hits ~230
+    # interactive nodes) within agent context budgets. Users can pass
+    # ``--limit 0`` / ``max_nodes=0`` to opt back into the full tree. Only
+    # applied in ``compact`` mode — ``accessible``/``dom``/``content`` are
+    # explicit asks for the full payload and stay uncapped.
+    snapshot_max_nodes: int = 80
     # Auto-start: total budget for waiting on /health after spawning daemon,
     # and the poll interval between health probes.
     auto_start_timeout: float = 15.0
@@ -218,6 +225,10 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         _env("MCP_SCREENSHOT_QUALITY")
         or browser.get("mcp_screenshot_quality", cfg.mcp_screenshot_quality)
     )
+    cfg.snapshot_max_nodes = int(
+        _env("SNAPSHOT_MAX_NODES")
+        or browser.get("snapshot_max_nodes", cfg.snapshot_max_nodes)
+    )
     cfg.auto_start_timeout = float(
         _env("AUTO_START_TIMEOUT")
         or daemon.get("auto_start_timeout", cfg.auto_start_timeout)
@@ -309,6 +320,10 @@ def _validate(cfg: AgentcloakConfig) -> None:
         raise ConfigError(
             f"mcp_screenshot_quality must be 0-100, got {cfg.mcp_screenshot_quality}"
         )
+    if cfg.snapshot_max_nodes < 0:
+        raise ConfigError(
+            f"snapshot_max_nodes must be >= 0, got {cfg.snapshot_max_nodes}"
+        )
     if cfg.local_idle_timeout < 0:
         raise ConfigError(
             f"bridge.local_idle_timeout must be >= 0, got {cfg.local_idle_timeout}"
@@ -337,6 +352,7 @@ _ENV_KEYS: dict[str, list[str]] = {
     "max_return_size": ["MAX_RETURN_SIZE"],
     "screenshot_quality": ["SCREENSHOT_QUALITY"],
     "mcp_screenshot_quality": ["MCP_SCREENSHOT_QUALITY"],
+    "snapshot_max_nodes": ["SNAPSHOT_MAX_NODES"],
     "auto_start_timeout": ["AUTO_START_TIMEOUT"],
     "auto_start_poll_interval": ["AUTO_START_POLL_INTERVAL"],
     "domain_whitelist": ["DOMAIN_WHITELIST"],
@@ -355,10 +371,12 @@ def dump_config(
     """Return each config field with its value and source (env/toml/default)."""
     raw = _read_toml(paths.config_file)
     toml_flat: dict[str, object] = {}
-    for _key, section in raw.items():
+    for section_name, section in raw.items():
         if isinstance(section, dict):
             section_typed: dict[str, object] = section  # type: ignore[assignment]
-            toml_flat.update(section_typed)
+            for k, v in section_typed.items():
+                toml_flat[k] = v
+                toml_flat[f"{section_name}_{k}"] = v
 
     defaults = AgentcloakConfig()
     result: dict[str, dict[str, object]] = {}
@@ -683,6 +701,13 @@ def write_example_config(paths: Paths) -> Path:
                 "mcp_screenshot_quality",
                 defaults.mcp_screenshot_quality,
                 "Lower quality used by MCP tools to stay within token\nbudgets.",
+            ),
+            (
+                "snapshot_max_nodes",
+                defaults.snapshot_max_nodes,
+                "Default node cap for compact snapshots when --limit /\n"
+                "max_nodes is unset. 0 disables the cap; explicit\n"
+                "--limit always wins. Only applied in compact mode.",
             ),
         ],
     )

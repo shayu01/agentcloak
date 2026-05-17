@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from agentcloak.core.types import Strategy
 from agentcloak.spells.registry import spell
-from agentcloak.spells.types import Arg
 
 if TYPE_CHECKING:
     from agentcloak.spells.context import SpellContext
@@ -20,19 +19,19 @@ if TYPE_CHECKING:
     strategy=Strategy.PUBLIC,
     description="Inspect request headers via httpbin.org",
     access="read",
-    args=(Arg("user-agent", default="agentcloak/0.2", help="Custom User-Agent"),),
     pipeline=[
-        {
-            "fetch": {
-                "url": "https://httpbin.org/headers",
-                "headers": {"User-Agent": "{args.user-agent}"},
-            }
-        },
+        {"fetch": {"url": "https://httpbin.org/headers"}},
         {"select": "headers"},
     ],
 )
 def httpbin_headers() -> None:
-    """Pipeline spell placeholder."""
+    """Pipeline spell placeholder.
+
+    No ``user-agent`` arg: the ``fetch`` step picks a CloakBrowser-aligned
+    Chrome UA automatically when there's no browser context to inherit from.
+    Spells that *do* need a custom UA should set it in the ``headers`` dict
+    directly rather than reintroducing the arg.
+    """
 
 
 # -- Function mode: browser required (UI interaction) --

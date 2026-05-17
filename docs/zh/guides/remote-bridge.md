@@ -47,9 +47,10 @@ cloak bridge extension-path
 扩展变绿后，所有常规命令照常工作——只是驱动的是真实浏览器：
 
 ```bash
-cloak navigate "https://example.com" --backend bridge
+cloak launch --tier remote_bridge
+cloak navigate "https://example.com"
 cloak snapshot                                   # 看到真实页面
-cloak click --target 5                           # 在真实 Chrome 里点击
+cloak click 5                                    # 在真实 Chrome 里点击
 ```
 
 让 bridge 成为 daemon 默认后端：

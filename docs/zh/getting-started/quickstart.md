@@ -28,7 +28,7 @@ https://example.com/ | Example Domain
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
   heading "Example Domain" level=1
   paragraph "This domain is for use in illustrative examples in documents."
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 ```
 
 ## 阅读 snapshot
@@ -39,7 +39,7 @@ snapshot 是一棵无障碍树，每个可交互元素分配一个 `[N]` 引用�
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
   heading "Example Domain" level=1
   paragraph "This domain is for use in illustrative examples in documents."
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 ```
 
 - 头行包含页面标题、URL、节点数量、daemon `seq`（状态计数器）

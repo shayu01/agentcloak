@@ -47,9 +47,10 @@ For most home networks the simplest setup is:
 Once the extension is green, all regular commands work — they just drive the real browser:
 
 ```bash
-cloak navigate "https://example.com" --backend bridge
+cloak launch --tier remote_bridge
+cloak navigate "https://example.com"
 cloak snapshot                                   # sees the real page
-cloak click --target 5                           # clicks in real Chrome
+cloak click 5                                    # clicks in real Chrome
 ```
 
 Make the bridge the default for the daemon:

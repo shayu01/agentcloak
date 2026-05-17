@@ -1,4 +1,4 @@
-"""Daemon lifecycle commands — start, stop, health, cdp-endpoint."""
+"""Daemon lifecycle commands — start, stop, status, cdp-endpoint."""
 
 from __future__ import annotations
 
@@ -161,12 +161,17 @@ def daemon_cdp_endpoint(
     dispatch_text_or_json(DaemonClient(host=host, port=port), "GET", "/cdp/endpoint")
 
 
-@app.command("health")
-def daemon_health(
+@app.command("status")
+def daemon_status(
     host: str | None = typer.Option(None, "--host"),
     port: int | None = typer.Option(None, "--port"),
 ) -> None:
-    """Show daemon health (tier, browser status, seq, current URL, capture state)."""
+    """Show daemon status (tier, browser status, seq, current URL, capture state).
+
+    The HTTP endpoint is still ``/health`` (industry convention for monitoring
+    + Kubernetes-style liveness probes); the CLI command is named ``status``
+    so it matches the systemctl/docker/kubectl vocabulary agents already know.
+    """
     from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port, auto_start=False)

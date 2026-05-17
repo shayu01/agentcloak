@@ -42,9 +42,9 @@ form "Login"
   [8] button "Submit"
 ```
 
-Numbers are `--target` values for actions. They change on navigation/DOM update -- always re-snapshot for fresh refs. ARIA states shown: `checked`, `disabled`, `expanded`, `selected`, `pressed`, `invalid`, `required`, `focused`. Passwords redacted as `••••`.
+Numbers are element references — pass them as the first positional arg (`cloak click 5`) or via `--index 5`. They change on navigation/DOM update -- always re-snapshot for fresh refs. ARIA states shown: `checked`, `disabled`, `expanded`, `selected`, `pressed`, `invalid`, `required`, `focused`. Passwords redacted as `••••`.
 
-Snapshot modes: `compact` (default, interactive + containers only) | `accessible` (full tree, heavier) | `content` (text extraction) | `dom` (raw HTML).
+Snapshot modes: `compact` (default, interactive + containers only, capped at 80 nodes — pass `--limit 0` to disable the cap) | `accessible` (full tree, heavier) | `content` (text from the a11y tree) | `dom` (raw HTML).
 
 ## Command Reference
 
@@ -106,6 +106,7 @@ Actions accept the element index positionally (`cloak click 5`) or via `--index 
 | `cloak cookies export` / `import -c '[...]'` | Export/import cookies (import supports httpOnly) |
 | `cloak cdp endpoint` | Get CDP WebSocket URL (for jshookmcp) |
 | `cloak config` | Show merged config with value sources (default/env/toml) |
+| `cloak version` | Show agentcloak version (same value as `cloak --version`) |
 | `cloak doctor` | Self-check diagnostics |
 | `cloak bridge start` / `claim` / `finalize` | RemoteBridge (real browser) |
 | `cloak bridge token` / `--reset` | Show or rotate the persistent bridge auth token |
@@ -130,11 +131,11 @@ $ cloak snapshot
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=2
   heading "Example Domain" level=1
   paragraph "This domain is for use in illustrative examples in documents."
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 
 $ cloak click 1
 clicked [1]
-  navigation: https://www.iana.org/...
+  navigation: https://iana.org/...
 
 $ cloak js evaluate "document.title"
 Example Domain
@@ -142,7 +143,7 @@ Example Domain
 $ cloak doctor
 [ok] python_version | 3.12.4
 [ok] cloakbrowser | binary v140.0.7339 installed
-[fail] daemon | 127.0.0.1:18765 | hint: run 'cloak daemon start -b' to launch
+[info] daemon | 127.0.0.1:18765 | hint: not running (auto-starts on first command)
 ```
 
 **Errors go to stderr** with a recovery hint:
@@ -174,7 +175,7 @@ JSON envelope shape (only when `--json` is active):
 
 These work automatically:
 - **Stale ref auto-retry**: `element_not_found` triggers one automatic re-snapshot + retry
-- **`--snap`**: add to any action to get a compact snapshot back, saving a round trip (alias for `--include-snapshot` / `--snapshot`)
+- **`--snap`**: add to any action to get a compact snapshot back, saving a round trip. Output starts with `# Title | url | N nodes`
 - **`--snap` on navigate**: `cloak navigate URL --snap` returns page + a11y tree in one call
 - **`$N.path` batch refs**: in `--calls-file` batch mode, reference prior results (e.g. `"$0.url"`)
 - **Tab group**: RemoteBridge auto-groups agent tabs under blue "agentcloak" Chrome tab group
@@ -185,9 +186,11 @@ These work automatically:
 - **Read stderr / inline feedback**: `pending_requests`, `dialog`, `navigation` lines follow the action confirmation
 - **Handle dialogs immediately**: they block everything until dismissed
 - **Follow error hints**: stderr `Error: ... -> action` tells you what to do next
-- **Compact is the default**: `cloak snapshot` already runs in compact mode (interactive + named containers)
+- **Compact is the default**: `cloak snapshot` already runs in compact mode (interactive + named containers), capped at 80 nodes — pass `--limit 0` to disable the cap or `--limit 50` for a tighter budget
 - **Large pages**: 100+ elements blow up token budgets. Default compact + `--limit 80` (~1.8K tokens), then `--focus N` or `--offset N` to explore specific areas. Action targets work even if truncated from the tree output
 - **Timeouts**: navigation defaults to 30s, actions to 30s. For slow pages or large uploads, pass `--timeout 60` on `navigate` or `wait`. If `navigation_timeout` errors persist, set `AGENTCLOAK_NAVIGATION_TIMEOUT=60` globally
+- **Headless by default**: the browser runs headless. For stronger anti-detection, start headed without changing config: `cloak daemon stop && cloak daemon start --headed -b`. Or set `headless = false` in `~/.agentcloak/config.toml` (or `AGENTCLOAK_HEADLESS=false`). Xvfb auto-starts on headless Linux servers
+- **Daemon lifecycle**: auto-starts on first command, stays running. `cloak launch --tier X` hot-switches browser tier without restart. Changing headless/profile requires `cloak daemon stop` + `cloak daemon start`. `cloak daemon status` shows current state
 - **Scripting / piping**: add `--json` for the legacy envelope shape when piping to jq, or set `AGENTCLOAK_OUTPUT=json` for the same effect
 
 ## References

@@ -385,6 +385,24 @@ def render_document(spec: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _auto_sync_skill_data() -> None:
+    """Mirror skills/ → src/_skill_data/ after a --write so the wheel stays in sync."""
+    import importlib
+    import importlib.util
+
+    sync_path = ROOT / "scripts" / "sync_skill_data.py"
+    if not sync_path.is_file():
+        return
+    spec = importlib.util.spec_from_file_location("sync_skill_data", sync_path)
+    if spec is None or spec.loader is None:
+        return
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod._sync(mod.SOURCE, mod.MIRROR)  # type: ignore[attr-defined]
+    total = len(mod._iter_tracked_files(mod.SOURCE))  # type: ignore[attr-defined]
+    print(f"OK: synced skill data mirror ({total} files).")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
@@ -416,6 +434,7 @@ def main() -> int:
         OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         OUTPUT.write_text(rendered, encoding="utf-8")
         print(f"OK: wrote {OUTPUT.relative_to(ROOT)} ({len(rendered)} bytes).")
+        _auto_sync_skill_data()
         return 0
 
     if args.check:

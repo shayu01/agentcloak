@@ -35,7 +35,7 @@ Once connected, all regular commands work on the real browser:
 
 ```bash
 cloak snapshot           # sees the real page content
-cloak click --target 5   # clicks in the real browser
+cloak click 5            # clicks in the real browser
 cloak navigate "https://example.com"
 ```
 

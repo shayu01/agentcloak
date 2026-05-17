@@ -80,7 +80,7 @@ The cost is latency — actions take 200-1000 ms longer. Worth it on bot-walled 
 
 CloakBrowser ships a Manifest V3 extension that patches `window.screenX` / `screenY` to defeat Cloudflare Turnstile's monitor-position check (the most common reason Turnstile fails on headless setups). The extension loads automatically; no manual setup.
 
-When you hit a Turnstile challenge, just `cloak wait --selector "[data-testid='success']"` (or whatever success marker the site uses) — most challenges clear within a few seconds.
+The extension helps pass the JS challenge phase (passive verification). Interactive Turnstile challenges (the "Verify you are human" checkbox) require profile reuse with pre-established trust, or human intervention. You can detect the challenge with `cloak snapshot --frames` and interact via `cloak frame focus` + `cloak click`.
 
 For visual CAPTCHAs (hCaptcha, sliders), you still need a human-in-the-loop or a paid solver service.
 

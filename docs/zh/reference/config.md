@@ -43,6 +43,7 @@ batch_settle_timeout = 2000
 max_return_size = 50000
 screenshot_quality = 80
 mcp_screenshot_quality = 50
+snapshot_max_nodes = 80
 
 [security]
 domain_whitelist = []
@@ -93,6 +94,7 @@ content_scan_patterns = []
 | `AGENTCLOAK_MAX_RETURN_SIZE` | `browser.max_return_size` | `50000` | `/evaluate` 返回值的最大字节数（超出截断，避免 MCP token 爆掉） |
 | `AGENTCLOAK_SCREENSHOT_QUALITY` | `browser.screenshot_quality` | `80` | CLI 截图默认 JPEG 质量（0-100） |
 | `AGENTCLOAK_MCP_SCREENSHOT_QUALITY` | `browser.mcp_screenshot_quality` | `50` | MCP 截图默认 JPEG 质量（低于 CLI 以节省 token） |
+| `AGENTCLOAK_SNAPSHOT_MAX_NODES` | `browser.snapshot_max_nodes` | `80` | compact 模式 snapshot 默认节点上限（未传 `--limit`/`max_nodes` 时生效）。`--limit 0`（CLI）或 `max_nodes=0`（MCP）可重新打开完整树。仅在 compact 模式生效。 |
 
 ### 安全设置
 

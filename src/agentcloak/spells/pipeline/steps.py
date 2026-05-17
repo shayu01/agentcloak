@@ -15,6 +15,42 @@ __all__ = ["STEP_REGISTRY", "StepContext"]
 StepHandler = Callable[[Any, Any, "StepContext"], Awaitable[Any]]
 
 
+# Fallback UA used by PUBLIC-strategy spells that don't have a browser session
+# to inherit from. ``httpx``'s default UA is ``python-httpx/<ver>`` which trips
+# basic anti-bot heuristics on the same sites these spells are designed to
+# reach. We synthesise a CloakBrowser-version-aligned Chrome UA so the request
+# looks identical to whatever an attached browser would have sent — TLS
+# fingerprint matching happens at the proxy layer, but the UA still has to look
+# real or servers will diverge before they even check the handshake.
+_FALLBACK_CHROME_UA_TEMPLATE = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/{major}.0.0.0 Safari/537.36"
+)
+_FALLBACK_CHROME_MAJOR_DEFAULT = "131"
+
+
+def _fallback_chrome_user_agent() -> str:
+    """Return a Chrome-shaped UA string matching the installed CloakBrowser.
+
+    ``cloakbrowser`` is an optional dependency for PUBLIC spells (they don't
+    need a live browser), so we silently fall back to a recent major version
+    when import fails. The exact number isn't security-critical — what matters
+    is that the UA *looks* like a real Chrome.
+    """
+    major = _FALLBACK_CHROME_MAJOR_DEFAULT
+    try:
+        import cloakbrowser  # pyright: ignore[reportMissingTypeStubs]
+
+        version_str = getattr(cloakbrowser, "CHROMIUM_VERSION", "")
+        if version_str:
+            head = str(version_str).split(".")[0]
+            if head.isdigit():
+                major = head
+    except ImportError:
+        pass
+    return _FALLBACK_CHROME_UA_TEMPLATE.format(major=major)
+
+
 class StepContext:
     """Runtime context available to each pipeline step."""
 
@@ -41,6 +77,19 @@ class StepContext:
 
 
 async def _step_fetch(params: Any, data: Any, ctx: StepContext) -> Any:
+    """Fetch a URL, inheriting browser session state when one is available.
+
+    Two paths:
+
+    1. **Browser attached** (``COOKIE``/``HEADER``/``INTERCEPT``/``UI``
+       strategies, or a manually-injected context) — delegate to
+       ``ctx.browser.fetch()`` which threads through cookies, the live UA,
+       and any active proxy. This is what makes a captured session work for
+       follow-up API calls.
+    2. **No browser** (``PUBLIC`` strategy) — use ``httpx`` directly but with
+       a CloakBrowser-version-aligned Chrome UA. Servers that fingerprint on
+       UA see the same string a stealth session would send.
+    """
     from agentcloak.core.config import load_config
 
     rendered: Any = render_deep(params, ctx.template_context(data))
@@ -54,8 +103,30 @@ async def _step_fetch(params: Any, data: Any, ctx: StepContext) -> Any:
 
     _, _agent_cfg = load_config()
     _timeout = float(_agent_cfg.navigation_timeout)
+
+    if ctx.browser is not None:
+        result = await ctx.browser.fetch(
+            url,
+            method=method,
+            body=body,
+            headers=headers,
+            timeout=_timeout,
+        )
+        # ``BrowserContext.fetch`` returns a dict with ``body`` already JSON-
+        # parsed when ``content-type`` looked like JSON. Return that directly
+        # so downstream ``select`` steps don't have to know which transport
+        # ran the request.
+        return result.get("body", result)
+
+    # No browser context — apply the Chrome UA fallback unless the spell
+    # author overrode it.
+    req_headers: dict[str, str] = dict(headers)
+    req_headers.setdefault("User-Agent", _fallback_chrome_user_agent())
+
     async with httpx.AsyncClient(timeout=_timeout) as client:
-        resp = await client.request(method, url, headers=headers, content=body)
+        resp = await client.request(
+            method, url, headers=req_headers, content=body
+        )
         resp.raise_for_status()
         return resp.json()
 

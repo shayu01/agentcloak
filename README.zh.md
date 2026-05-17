@@ -21,7 +21,7 @@ Agent 原生隐身浏览器 -- 看见、交互、自动化。
 
 - **页面即结构化文本** -- 页面转化为无障碍树，每个可交互元素带有 `[N]` 索引，agent 通过索引操作而非脆弱的 CSS 选择器
 - **CLI + Skill 按需加载** -- agent 通过 Bash 调用 `cloak` 命令，Skill 按需加载仅占 ~300 tokens（MCP 工具定义常驻 ~6,000 tokens）
-- **CloakBrowser 内置隐身** -- 基于 57 个 C++ 补丁的 Chromium，开箱即用绕过 Cloudflare
+- **CloakBrowser 内置隐身** -- 基于 57 个 C++ 补丁的 Chromium，对抗常见指纹检测和 JS 挑战
 - **登录态复用** -- 保存/恢复登录 profile，通过 RemoteBridge 操控真实 Chrome 浏览器
 - **Daemon 架构** -- 首次命令自动启动，管理浏览器生命周期，单调递增的 seq 计数器追踪状态
 - **Spell + API 流量捕获** -- 常见站点操作封装为一行命令；捕获流量，分析模式，自动生成 spell
@@ -43,16 +43,27 @@ Agent 原生隐身浏览器 -- 看见、交互、自动化。
 <summary>手动安装</summary>
 
 ```bash
+# 推荐——隔离环境，绕开 PEP 668 限制
+uv tool install agentcloak     # 或：pipx install agentcloak
+
+cloak skill install            # 将 Skill 安装包安装到你的 agent 平台
+cloak doctor --fix             # 验证环境 + 下载 CloakBrowser
+```
+
+> **为什么用 `uv tool` / `pipx`？** 现代 Ubuntu/Debian 等发行版会拦截 venv 之外的 `pip install`（PEP 668 "externally-managed-environment"）。`uv tool install` 和 `pipx install` 各自为包创建独立的隔离环境，开箱即用。
+
+如果你仍想用 `pip`，先建一个 venv：
+
+```bash
+python -m venv .venv && source .venv/bin/activate
 pip install agentcloak
-cloak skill install        # 将 Skill 安装包安装到你的 agent 平台
-cloak doctor --fix         # 验证环境 + 下载 CloakBrowser
 ```
 
 一条命令安装全部组件：CLI（`agentcloak` 和简写 `cloak`）、MCP server（`agentcloak-mcp`）、CloakBrowser 隐身后端、httpcloak TLS 指纹代理。补丁版 Chromium 二进制文件（约 200 MB）在首次使用时自动下载到 `~/.cloakbrowser/`。
 
 **系统依赖（仅限无显示器的 Linux 服务器）：**
 
-CloakBrowser 以有头模式运行以对抗反检测。在没有显示器的服务器上，agentcloak 会自动启动 Xvfb：
+CloakBrowser 默认以 headless 模式运行（v0.2.0 起）——无需任何额外依赖。如果切到有头模式（`headless = false`，对抗反检测更强）且服务器没有显示器，agentcloak 会自动启动 Xvfb：
 
 ```bash
 sudo apt-get install -y xvfb
@@ -78,7 +89,7 @@ https://example.com/ | Example Domain
 
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
   heading "Example Domain" level=1
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 ```
 
 ```bash
@@ -119,7 +130,7 @@ cloak --json snapshot | jq -r '.data.tree_text'
 
 ```bash
 # 1. 安装 agentcloak（CLI + daemon + 隐身浏览器）
-pip install agentcloak
+uv tool install agentcloak    # 或：pipx install agentcloak（或 venv 内 pip install）
 
 # 2. 验证环境（首次运行时下载 CloakBrowser 二进制）
 cloak doctor --fix
@@ -191,7 +202,7 @@ claude mcp add agentcloak -- agentcloak-mcp
 
 | 后端 | 隐身能力 | 适用场景 |
 |------|---------|---------|
-| **CloakBrowser**（默认） | 57 个 C++ 补丁 + Cloudflare 绕过 | 大多数网站，反爬保护页面 |
+| **CloakBrowser**（默认） | 57 个 C++ 补丁，对抗指纹检测和 JS 挑战 | 大多数网站，反爬保护页面 |
 | **Playwright** | 标准 Chromium | 开发调试，无需隐身的场景 |
 | **RemoteBridge** | 真实浏览器指纹 | 操控另一台机器上的 Chrome |
 

@@ -18,7 +18,13 @@ app = typer.Typer()
 
 
 def _check_daemon(host: str, port: int) -> dict[str, Any]:
-    """CLI-only probe: try the daemon ``/health`` endpoint without spawning."""
+    """CLI-only probe: try the daemon ``/health`` endpoint without spawning.
+
+    Daemon-down is reported as ``level="info"`` rather than a hard ``fail``
+    because the daemon auto-starts on the first real command — the absence of
+    a running daemon during a one-off ``doctor`` invocation is the expected
+    fresh-install state, not a broken environment.
+    """
     from agentcloak.client import DaemonClient
 
     client = DaemonClient(host=host, port=port, auto_start=False)
@@ -28,6 +34,7 @@ def _check_daemon(host: str, port: int) -> dict[str, Any]:
             return {
                 "name": "daemon",
                 "ok": True,
+                "level": "ok",
                 "detail": f"{host}:{port}",
                 "hint": "",
             }
@@ -35,9 +42,10 @@ def _check_daemon(host: str, port: int) -> dict[str, Any]:
         pass
     return {
         "name": "daemon",
-        "ok": False,
+        "ok": True,
+        "level": "info",
         "detail": f"{host}:{port}",
-        "hint": "run 'agentcloak daemon start -b' to launch",
+        "hint": "not running (auto-starts on first command)",
     }
 
 
@@ -76,11 +84,16 @@ def run_doctor(
     if is_json_mode():
         emit_envelope({"ok": True, "seq": 0, "data": report})
     else:
-        # ``[ok] / [fail]`` lines for each check, one per line.
+        # ``[ok] / [info] / [fail]`` lines for each check, one per line.
+        # ``level`` is optional — when absent we derive it from ``ok`` so the
+        # render stays backwards-compatible with every check in
+        # :class:`DiagnosticService` (none of which set ``level``).
         for check in report["checks"]:
-            mark = "ok" if check["ok"] else "fail"
-            line = f"[{mark}] {check['name']} | {check['detail']}"
-            if not check["ok"] and check.get("hint"):
+            level = str(check.get("level") or ("ok" if check["ok"] else "fail"))
+            line = f"[{level}] {check['name']} | {check['detail']}"
+            # Show the hint whenever it's set and the check isn't a flat "ok"
+            # — info and fail both benefit from the explanatory text.
+            if level != "ok" and check.get("hint"):
                 line += f" | hint: {check['hint']}"
             value(line)
 

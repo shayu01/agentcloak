@@ -4,16 +4,32 @@ This guide covers installing agentcloak and its dependencies on all supported pl
 
 ## Requirements
 
-- **Python 3.12+** (3.13 also supported)
+- **Python 3.12+**
 - **pip** or **uv** package manager
 - Linux (x64/arm64), macOS (x64/arm64), or Windows (x64)
 
 ## Base install
 
+Modern Ubuntu/Debian and several other Linux distros block bare `pip install`
+outside a virtual environment (PEP 668 "externally-managed-environment").
+The recommended path is therefore an isolated tool installer — `uv tool` or
+`pipx` — both of which create a dedicated env per command-line app:
+
 ```bash
-pip install agentcloak
+# Pick one:
+uv tool install agentcloak     # https://github.com/astral-sh/uv (fast)
+pipx install agentcloak        # https://pipx.pypa.io/         (standard tool)
+
 cloak skill install            # installs Skill bundle to your agent platform
 cloak doctor --fix             # verify environment + download CloakBrowser
+```
+
+If `uv` / `pipx` aren't available, fall back to `pip` *inside* a venv (raw
+`pip install agentcloak` will fail on PEP 668 distros):
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install agentcloak
 ```
 
 `cloak skill install` runs an interactive menu the first time you call it
@@ -22,7 +38,7 @@ for non-interactive setup (see [Install the Skill bundle](#install-the-skill-bun
 
 `doctor --fix` does the in-process work itself (downloads the CloakBrowser binary, creates the data dir) and prints a single shell command for anything that needs system-level intervention (Xvfb on Linux servers, Playwright libs). Pass `--sudo` if you want it to run that command for you.
 
-Everything is included in the one `pip install`:
+Everything the installer command above pulls in:
 
 - `agentcloak` and `cloak` CLI commands
 - `agentcloak-mcp` MCP server (23 tools)

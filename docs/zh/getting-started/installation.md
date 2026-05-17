@@ -4,16 +4,30 @@
 
 ## 系统要求
 
-- **Python 3.12+**（同时支持 3.13）
+- **Python 3.12+**
 - **pip** 或 **uv** 包管理器
 - Linux（x64/arm64）、macOS（x64/arm64）或 Windows（x64）
 
 ## 基础安装
 
+现代 Ubuntu/Debian 和不少其他 Linux 发行版会拦截 venv 之外的裸 `pip install`
+（PEP 668 "externally-managed-environment"）。推荐用 `uv tool` 或 `pipx`，它们各自给命令行工具创建独立的隔离环境：
+
 ```bash
-pip install agentcloak
+# 二选一：
+uv tool install agentcloak     # https://github.com/astral-sh/uv（速度快）
+pipx install agentcloak        # https://pipx.pypa.io/          （标准工具）
+
 cloak skill install            # 给你的 agent 平台安装 Skill 安装包
 cloak doctor --fix             # 验证环境 + 下载 CloakBrowser
+```
+
+如果手头没有 `uv` / `pipx`，请回退到 venv 内的 `pip`（裸 `pip install agentcloak` 在
+PEP 668 发行版上会失败）：
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install agentcloak
 ```
 
 `cloak skill install` 首次执行会显示交互式菜单，让你从检测到的 agent 平台
@@ -22,7 +36,7 @@ cloak doctor --fix             # 验证环境 + 下载 CloakBrowser
 
 `doctor --fix` 会在进程内完成它自己能做的事（下载 CloakBrowser 二进制文件、创建数据目录），并为需要系统级权限的操作（Linux 服务器的 Xvfb、Playwright 系统库）输出一条整合好的 shell 命令。加上 `--sudo` 则会直接执行那条命令。
 
-一条 `pip install` 包含所有组件：
+上面任一安装命令都会一次性带入所有组件：
 
 - `agentcloak` 和 `cloak` CLI 命令
 - `agentcloak-mcp` MCP server（23 个工具）

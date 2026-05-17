@@ -97,7 +97,7 @@ cloak click 42                               # 操作
 
 内部 snapshot 在树文本旁还携带两份映射：
 
-- `selector_map`：`{N: ElementRef(index, tag, role, text, attributes, depth)}`——action 通过 `--target N` 在这里解析元素
+- `selector_map`：`{N: ElementRef(index, tag, role, text, attributes, depth)}`——action 通过 positional `N`（如 `cloak click 5`）或 `--index N` 在这里解析元素
 - `backend_node_map`：`{N: CDP backendNodeId}`——RemoteBridge 后端通过 CDP 命令操作元素时用的持久 Chromium 节点 ID
 
 CLI 文本输出默认不包含 selector_map（agent 从树正文里就能读到 `[N]` 引用）。临时需要可加 `--selector-map`，或用 `--json` 模式从 `data.selector_map` 字段读取。MCP 工具也默认不返回。backend_node_map 是内部数据——agent 不需要直接接触。

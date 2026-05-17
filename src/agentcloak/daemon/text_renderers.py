@@ -183,39 +183,13 @@ def _attach_feedback(base: str, data: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_navigate_text(data: dict[str, Any]) -> str:
-    """Render the ``/navigate`` payload as ``url | title``.
+def _render_snapshot_header(data: dict[str, Any]) -> str:
+    """Build the ``# title | url | N nodes (M interactive) | seq=K`` header line.
 
-    When ``include_snapshot`` was requested the snapshot tree follows after a
-    blank line so callers get a single combined block — matches the
-    ``--snap`` combo flag on action commands.
-    """
-    url = str(data.get("url", "") or "")
-    title = _clip_title(str(data.get("title", "") or ""))
-    header = f"{url} | {title}" if title else url
-    raw_snap = data.get("snapshot")
-    if isinstance(raw_snap, dict):
-        snap = _as_dict(raw_snap)
-        tree = snap.get("tree_text")
-        if tree:
-            return f"{header}\n\n{tree!s}"
-    return header
-
-
-def render_snapshot_text(data: dict[str, Any]) -> str:
-    """Render the ``/snapshot`` payload with a metadata header line.
-
-    Format::
-
-        # <title> | <url> | <N> nodes (<M> interactive) | seq=N
-        <tree_text>
-
-    When the daemon truncated the tree, the renderer appends a trailing
-    ``--- shown N of total. Continue with --offset N ---`` so the agent
-    knows how to page forward — but only when ``build_snapshot`` didn't
-    already emit its own ``--- not shown: ... ---`` summary inside the tree
-    (which it does whenever ``max_nodes`` truncation hits). Otherwise we'd
-    print two adjacent truncation lines that say the same thing.
+    Shared between :func:`render_snapshot_text` (the dedicated route) and the
+    ``--snap`` paths in :func:`render_navigate_text` / :func:`render_action_text`
+    so all three produce the same machine-parseable header. Diff counts and
+    ``showing 1-N`` truncation suffix are appended when present in ``data``.
     """
     title = _clip_title(str(data.get("title", "") or ""))
     url = str(data.get("url", "") or "")
@@ -242,13 +216,73 @@ def render_snapshot_text(data: dict[str, Any]) -> str:
     if truncated_at:
         showing = f" | showing 1-{int(truncated_at)}"
 
-    header = (
+    return (
         f"# {title} | {url} | {total_nodes} nodes "
         f"({interactive} interactive) | seq={seq}{diff_info}{showing}"
     )
+
+
+def _render_snapshot_block(snap: dict[str, Any]) -> str:
+    """Render a snapshot dict as ``<header>\\n<tree>`` with optional truncation tail.
+
+    Used by ``--snap`` paths to embed a snapshot tree under a navigate/action
+    one-liner. Returns an empty string when there's no ``tree_text`` so the
+    caller can keep the header-only path.
+    """
+    tree = str(snap.get("tree_text", "") or "")
+    if not tree:
+        return ""
+    header = _render_snapshot_header(snap)
+    body = f"{header}\n{tree}".rstrip("\n")
+    truncated_at = snap.get("truncated_at")
+    if truncated_at and not _tree_has_inline_truncation(tree):
+        total_nodes = int(snap.get("total_nodes", 0) or 0)
+        body += (
+            f"\n--- {int(truncated_at)}/{total_nodes} nodes shown. "
+            f"Continue with --offset {int(truncated_at)} ---"
+        )
+    return body
+
+
+def render_navigate_text(data: dict[str, Any]) -> str:
+    """Render the ``/navigate`` payload as ``url | title``.
+
+    When ``include_snapshot`` was requested the snapshot block (header +
+    tree) follows after a blank line so callers get a single combined block —
+    matches the ``--snap`` combo flag on action commands.
+    """
+    url = str(data.get("url", "") or "")
+    title = _clip_title(str(data.get("title", "") or ""))
+    header = f"{url} | {title}" if title else url
+    raw_snap = data.get("snapshot")
+    if isinstance(raw_snap, dict):
+        block = _render_snapshot_block(_as_dict(raw_snap))
+        if block:
+            return f"{header}\n\n{block}"
+    return header
+
+
+def render_snapshot_text(data: dict[str, Any]) -> str:
+    """Render the ``/snapshot`` payload with a metadata header line.
+
+    Format::
+
+        # <title> | <url> | <N> nodes (<M> interactive) | seq=N
+        <tree_text>
+
+    When the daemon truncated the tree, the renderer appends a trailing
+    ``--- shown N of total. Continue with --offset N ---`` so the agent
+    knows how to page forward — but only when ``build_snapshot`` didn't
+    already emit its own ``--- not shown: ... ---`` summary inside the tree
+    (which it does whenever ``max_nodes`` truncation hits). Otherwise we'd
+    print two adjacent truncation lines that say the same thing.
+    """
+    header = _render_snapshot_header(data)
     tree = str(data.get("tree_text", "") or "")
     body = f"{header}\n{tree}".rstrip("\n")
+    truncated_at = data.get("truncated_at")
     if truncated_at and not _tree_has_inline_truncation(tree):
+        total_nodes = int(data.get("total_nodes", 0) or 0)
         body += (
             f"\n--- {int(truncated_at)}/{total_nodes} nodes shown. "
             f"Continue with --offset {int(truncated_at)} ---"
@@ -370,10 +404,9 @@ def render_action_text(kind: str, target: str, data: dict[str, Any]) -> str:
     result = _attach_feedback(base, data)
     raw_snap = data.get("snapshot")
     if isinstance(raw_snap, dict):
-        snap = _as_dict(raw_snap)
-        tree = snap.get("tree_text")
-        if tree:
-            return f"{result}\n\n{tree!s}"
+        block = _render_snapshot_block(_as_dict(raw_snap))
+        if block:
+            return f"{result}\n\n{block}"
     return result
 
 

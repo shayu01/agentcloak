@@ -116,7 +116,7 @@ class DaemonClient:
         When ``True`` (default), the first request after a
         ``daemon_unreachable`` error spawns the daemon as a background
         subprocess and retries once. Pass ``False`` from commands that
-        explicitly want to probe (``doctor``, ``daemon health``, etc.).
+        explicitly want to probe (``doctor``, ``daemon status``, etc.).
     """
 
     def __init__(
@@ -178,7 +178,10 @@ class DaemonClient:
                     f"Connection to daemon at {self._host}:{self._port} "
                     "timed out before a TCP handshake completed."
                 ),
-                action="check daemon health or restart it",
+                action=(
+                    "check daemon status with 'agentcloak daemon status' "
+                    "or restart it"
+                ),
             ) from exc
         except httpx.TimeoutException as exc:
             raise BrowserTimeoutError(
@@ -198,7 +201,7 @@ class DaemonClient:
             raise AgentBrowserError(
                 error="daemon_request_failed",
                 hint=f"HTTP request to daemon failed: {exc}",
-                action="check daemon status with 'agentcloak daemon health'",
+                action="check daemon status with 'agentcloak daemon status'",
             ) from exc
 
     async def _send_async(
@@ -224,7 +227,10 @@ class DaemonClient:
                     f"Connection to daemon at {self._host}:{self._port} "
                     "timed out before a TCP handshake completed."
                 ),
-                action="check daemon health or restart it",
+                action=(
+                    "check daemon status with 'agentcloak daemon status' "
+                    "or restart it"
+                ),
             ) from exc
         except httpx.TimeoutException as exc:
             raise BrowserTimeoutError(
@@ -244,7 +250,7 @@ class DaemonClient:
             raise AgentBrowserError(
                 error="daemon_request_failed",
                 hint=f"HTTP request to daemon failed: {exc}",
-                action="check daemon status with 'agentcloak daemon health'",
+                action="check daemon status with 'agentcloak daemon status'",
             ) from exc
 
     def _do_request_sync(
@@ -331,7 +337,10 @@ class DaemonClient:
                     f"Connection to daemon at {self._host}:{self._port} "
                     "timed out before a TCP handshake completed."
                 ),
-                action="check daemon health or restart it",
+                action=(
+                    "check daemon status with 'agentcloak daemon status' "
+                    "or restart it"
+                ),
             ) from exc
         except httpx.TimeoutException as exc:
             raise BrowserTimeoutError(
@@ -351,7 +360,7 @@ class DaemonClient:
             raise AgentBrowserError(
                 error="daemon_request_failed",
                 hint=f"HTTP request to daemon failed: {exc}",
-                action="check daemon status with 'agentcloak daemon health'",
+                action="check daemon status with 'agentcloak daemon status'",
             ) from exc
 
     def _do_text_request_sync(
@@ -709,7 +718,12 @@ class DaemonClient:
         if self._auto_started:
             return False
         t0 = time.monotonic()
-        logger.warning("daemon_auto_starting", host=self._host, port=self._port)
+        # Auto-start is an expected, normal lifecycle event (the daemon
+        # auto-starts on the first command) — emitted at ``info`` so it
+        # doesn't bubble up under the default ``warning`` log level. Only
+        # the failure path stays at ``warning`` since that one demands the
+        # user's attention.
+        logger.info("daemon_auto_starting", host=self._host, port=self._port)
         self._spawn_daemon(headless=headless, profile=profile, humanize=humanize)
         self._auto_started = True
 
@@ -723,7 +737,7 @@ class DaemonClient:
                 ) as client:
                     resp = client.get("/health")
                     if resp.status_code == 200:
-                        logger.warning(
+                        logger.info(
                             "daemon_auto_started",
                             elapsed_s=round(time.monotonic() - t0, 1),
                             outcome="success",
@@ -752,7 +766,8 @@ class DaemonClient:
         if self._auto_started:
             return False
         t0 = time.monotonic()
-        logger.warning("daemon_auto_starting", host=self._host, port=self._port)
+        # See the sync variant for the warning→info rationale.
+        logger.info("daemon_auto_starting", host=self._host, port=self._port)
         self._spawn_daemon(headless=headless, profile=profile, humanize=humanize)
         self._auto_started = True
 
@@ -766,7 +781,7 @@ class DaemonClient:
                 ) as client:
                     resp = await client.get("/health")
                     if resp.status_code == 200:
-                        logger.warning(
+                        logger.info(
                             "daemon_auto_started",
                             elapsed_s=round(time.monotonic() - t0, 1),
                             outcome="success",
@@ -902,7 +917,7 @@ class DaemonClient:
         *,
         mode: str = "compact",
         max_chars: int = 0,
-        max_nodes: int = 0,
+        max_nodes: int = -1,
         focus: int = 0,
         offset: int = 0,
         frames: bool = False,
@@ -1237,7 +1252,7 @@ class DaemonClient:
         *,
         mode: str = "compact",
         max_chars: int = 0,
-        max_nodes: int = 0,
+        max_nodes: int = -1,
         focus: int = 0,
         offset: int = 0,
         frames: bool = False,
@@ -1562,7 +1577,12 @@ def _build_snapshot_params(
         params["include_selector_map"] = "false"
     if max_chars:
         params["max_chars"] = str(max_chars)
-    if max_nodes:
+    # ``max_nodes`` uses a tri-state sentinel: ``-1`` means "caller didn't
+    # specify, let the daemon apply ``config.snapshot_max_nodes`` in compact
+    # mode"; ``0`` means "explicit no limit"; ``>0`` is the explicit cap. We
+    # forward ``0`` so the daemon can tell it apart from the default — a plain
+    # truthiness check would swallow ``0`` and let the daemon auto-cap it.
+    if max_nodes != -1:
         params["max_nodes"] = str(max_nodes)
     if focus:
         params["focus"] = str(focus)

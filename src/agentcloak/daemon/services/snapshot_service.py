@@ -138,10 +138,20 @@ class SnapshotService:
 
     @staticmethod
     def attach_snapshot_to_result(result: dict[str, Any], snap: PageSnapshot) -> None:
-        """Attach a compact snapshot payload to an action/navigate response."""
+        """Attach a compact snapshot payload to an action/navigate response.
+
+        Includes ``url``/``title``/``seq``/``truncated_at`` so the text
+        renderer can build the same ``# title | url | N nodes ...`` header
+        line that the standalone ``snapshot`` command produces — keeps
+        ``--snap`` output parseable by the same downstream tooling.
+        """
         result["snapshot"] = {
+            "url": snap.url,
+            "title": snap.title,
+            "seq": snap.seq,
             "tree_text": snap.tree_text,
             "mode": snap.mode,
             "total_nodes": snap.total_nodes,
             "total_interactive": snap.total_interactive,
+            "truncated_at": snap.truncated_at,
         }

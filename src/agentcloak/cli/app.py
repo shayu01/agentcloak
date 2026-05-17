@@ -16,16 +16,37 @@ from agentcloak.cli.output import (
     is_json_mode,
     set_json_mode,
     set_pretty,
+    value,
 )
 from agentcloak.core.errors import AgentBrowserError
 
 __all__ = ["app", "main"]
+
+# The shortcut commands registered below (``cloak navigate``, ``cloak click``,
+# etc.) are intentionally hidden so the Commands panel stays scannable. To
+# avoid them being invisible, the epilog spells them out — agents and humans
+# scrolling the help find both the short forms and the full ``<group> --help``
+# path to deeper command trees.
+_SHORTCUTS = (
+    "navigate, snapshot, screenshot, resume, click, fill, type, "
+    "press, scroll, hover, select, keydown, keyup"
+)
+_GROUPS = (
+    "browser, do, js, tab, profile, spell, capture, frame, daemon, doctor, "
+    "launch, network, fetch, bridge, cookies, skill, cdp, dialog, wait, "
+    "upload, config"
+)
+_EPILOG = (
+    f"Shortcuts (top-level, also documented under their groups):\n  {_SHORTCUTS}\n"
+    f"\nRun 'cloak <group> --help' to explore deeper trees:\n  {_GROUPS}"
+)
 
 app = typer.Typer(
     name="agentcloak",
     help="Browser CLI toolchain for AI agents.",
     no_args_is_help=True,
     add_completion=False,
+    epilog=_EPILOG,
 )
 
 
@@ -315,6 +336,24 @@ def _register_shortcuts() -> None:
 
 
 _register_shortcuts()
+
+
+@app.command("version")
+def show_version() -> None:
+    """Show agentcloak version."""
+    # Mirrors the ``--version`` flag but as a discoverable subcommand so
+    # ``cloak version | head`` and ``cloak version`` style probes work the
+    # same as every other Unix CLI. Text mode emits the bare version string
+    # (pipe-friendly — agents and version-bump scripts can read it
+    # directly, no ``agentcloak `` prefix). JSON mode wraps it in the
+    # standard envelope so script callers using ``--json`` see the same
+    # shape as every other command.
+    if is_json_mode():
+        from agentcloak.cli._dispatch import emit_envelope
+
+        emit_envelope({"ok": True, "seq": 0, "data": {"version": __version__}})
+        return
+    value(__version__)
 
 
 def main() -> None:

@@ -42,7 +42,7 @@ Read this file when you need full parameter detail. For the common path, the qui
 - MCP: `agentcloak_snapshot`
 - Query:
   - `mode` (string, default: "compact")
-  - `max_nodes` (integer, default: 0)
+  - `max_nodes` (integer, default: -1)
   - `max_chars` (integer, default: 0)
   - `focus` (integer, default: 0)
   - `offset` (integer, default: 0)

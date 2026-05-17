@@ -102,4 +102,4 @@ See the [spells guide](./spells.md) for the spell side of this pipeline.
 
 **"Response body is empty or truncated"** — Bodies over 100 KB are truncated. Binary content types (images, video) are recorded as headers-only. If you need the full body, fetch it again with `cloak fetch URL`.
 
-**"Capture survived a daemon restart"** — It shouldn't. The capture store is in-memory only. If `status` shows entries after a restart, the daemon didn't actually restart — check `cloak daemon health` for the PID.
+**"Capture survived a daemon restart"** — It shouldn't. The capture store is in-memory only. If `status` shows entries after a restart, the daemon didn't actually restart — check `cloak daemon status` for the PID.

@@ -293,6 +293,13 @@ def build_snapshot(
     backend_node_map: dict[int, int] = {}
     counter = [1]
     compact = mode == "compact"
+    # ``content`` mode walks the same AX tree as compact/accessible but emits
+    # plain text only — no ``[N]`` refs, no role labels, no ARIA props. This
+    # gives agents a clean "read the page as a human would" view that inherits
+    # the StaticText aggregation (so inline-element boundaries get spaces
+    # between words instead of running together like ``document.body.innerText``
+    # does).
+    content_mode = mode == "content"
 
     all_lines: list[tuple[int, str, int | None]] = []
 
@@ -321,7 +328,37 @@ def build_snapshot(
         is_interactive = role_lower in _INTERACTIVE_ROLES
         is_context = role_lower in _CONTEXT_ROLES
 
-        if is_interactive:
+        if content_mode:
+            # Walk the same tree as compact/accessible but record names only.
+            # We still allocate refs + populate selector_map so a subsequent
+            # ``action`` call against the most recent snapshot can resolve
+            # elements — agents may run ``snapshot --mode content`` then
+            # ``snapshot`` (compact) to switch view styles without losing the
+            # ability to click.
+            if is_interactive:
+                ref = counter[0]
+                attrs = _extract_props(node)
+                selector_map[ref] = ElementRef(
+                    index=ref,
+                    tag=role,
+                    role=role,
+                    text=name,
+                    attributes=attrs,
+                    depth=depth,
+                    description=attrs.get("description", ""),
+                )
+                backend_dom_id = node.get("backendDOMNodeId")
+                if backend_dom_id is not None:
+                    backend_node_map[ref] = int(backend_dom_id)
+                if name:
+                    all_lines.append((depth, name, ref))
+                counter[0] += 1
+            elif name:
+                # Static text, context roles, anything else with a visible name
+                # contributes its bare text — we deliberately drop the role
+                # label so the output reads naturally.
+                all_lines.append((depth, name, None))
+        elif is_interactive:
             ref = counter[0]
             attrs = _extract_props(node)
             selector_map[ref] = ElementRef(
@@ -479,10 +516,17 @@ def build_snapshot(
             )
         output_lines = [*output_lines, (0, summary, None)]
 
-    # Render lines with 2-space indentation
+    # Render lines with 2-space indentation. Content mode skips the indent
+    # because it's optimised for human-readable reading flow, not tree
+    # navigation — the structural depth is irrelevant when the agent just
+    # wants to know what the page says.
     rendered: list[str] = []
-    for depth, text, _ in output_lines:
-        rendered.append("  " * depth + text)
+    if content_mode:
+        for _depth, text, _ in output_lines:
+            rendered.append(text)
+    else:
+        for depth, text, _ in output_lines:
+            rendered.append("  " * depth + text)
     tree_text = "\n".join(rendered)
 
     if max_chars and max_chars > 0 and len(tree_text) > max_chars:

@@ -28,7 +28,7 @@ https://example.com/ | Example Domain
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
   heading "Example Domain" level=1
   paragraph "This domain is for use in illustrative examples in documents."
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 ```
 
 ## Reading the snapshot
@@ -39,7 +39,7 @@ The snapshot is an accessibility tree where each interactive element gets a `[N]
 # Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
   heading "Example Domain" level=1
   paragraph "This domain is for use in illustrative examples in documents."
-  [1] link "More information..." href="https://www.iana.org/domains/example"
+  [1] link "Learn more" href="https://iana.org/domains/example"
 ```
 
 - The header line carries the page title, URL, node counts, and the daemon `seq` (monotonic state counter).

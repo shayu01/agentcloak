@@ -87,7 +87,8 @@ python -m playwright install chromium
 RemoteBridge 通过 Chrome 扩展和 WebSocket 连接到另一台机器上的真实 Chrome 浏览器。浏览器保留其真实指纹、登录会话和已安装的扩展。
 
 ```bash
-cloak navigate "https://example.com" --backend bridge
+cloak launch --tier remote_bridge
+cloak navigate "https://example.com"
 ```
 
 ### 使用场景
@@ -106,7 +107,8 @@ cloak navigate "https://example.com" --backend bridge
 3. **开始使用。**
 
 ```bash
-cloak navigate "https://example.com" --backend bridge
+cloak launch --tier remote_bridge
+cloak navigate "https://example.com"
 ```
 
 详细的配置说明、多机器部署和故障排除参见 [Remote Bridge 指南](./remote-bridge.md)。
@@ -144,10 +146,11 @@ export AGENTCLOAK_DEFAULT_TIER=cloak
 
 ### 通过 CLI 参数
 
-部分命令接受 `--backend` 参数：
+用 `cloak launch` 热切换当前后端：
 
 ```bash
-cloak navigate "https://example.com" --backend bridge
+cloak launch --tier remote_bridge
+cloak navigate "https://example.com"
 ```
 
 ### 后端解析规则

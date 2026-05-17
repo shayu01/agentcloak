@@ -80,7 +80,7 @@ humanize = true
 
 CloakBrowser 自带一个 Manifest V3 扩展，给 `window.screenX` / `screenY` 打补丁，挫败 Cloudflare Turnstile 的显示器位置检查（headless 配置下 Turnstile 失败的最常见原因）。扩展自动加载；无需手动配置。
 
-碰到 Turnstile 挑战时，直接 `cloak wait --selector "[data-testid='success']"`（或站点用的任何成功标识）——大多数挑战几秒内自动通过。
+扩展帮助通过 JS challenge 阶段（被动验证）。交互式 Turnstile 挑战（"Verify you are human" 复选框）需要复用已建立信任的 profile，或人工介入。可以用 `cloak snapshot --frames` 检测挑战，通过 `cloak frame focus` + `cloak click` 交互。
 
 视觉验证码（hCaptcha、滑块）仍需人在回路或付费 solver 服务。
 

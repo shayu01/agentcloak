@@ -149,7 +149,7 @@ function describeError(err) {
         "The browser couldn't open a TCP connection to the configured " +
         "host/port. Make sure the daemon is running and reachable:"
       ),
-      command: "agentcloak daemon health",
+      command: "agentcloak daemon status",
     };
   }
   return {

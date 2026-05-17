@@ -184,15 +184,24 @@ class TestSnapshot:
 
     @pytest.mark.asyncio
     async def test_content_mode(self) -> None:
-        page = MagicMock()
-        page.on = MagicMock()
-        page.url = "https://example.com"
-        page.title = AsyncMock(return_value="Example")
-        page.evaluate = AsyncMock(return_value="Hello World")
-        ctx = _make_ctx(page=page)
+        """Content mode walks the AX tree and emits names without ref/role labels.
+
+        After the unification with accessible/compact (P2 #9), content mode
+        runs the same ``build_snapshot`` pipeline and inherits StaticText
+        aggregation. The output is plain text with no ``[N]`` refs, no role
+        tokens, and no ARIA attribute strings — just what a human would read.
+        """
+        ctx = _make_ctx()
         snap = await ctx.snapshot(mode="content")
         assert snap.mode == "content"
-        assert "Hello World" in snap.tree_text
+        # Names from the AX tree fixture show up as bare text.
+        assert "Click me" in snap.tree_text
+        assert "Submit" in snap.tree_text
+        assert "Main Title" in snap.tree_text
+        # No ``[N]`` refs or role tokens leak into content output.
+        assert "[1]" not in snap.tree_text
+        assert "button" not in snap.tree_text
+        assert "heading" not in snap.tree_text
 
     @pytest.mark.asyncio
     async def test_accessible_filters_inline_text_box(self) -> None:

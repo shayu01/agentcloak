@@ -289,8 +289,13 @@ class BrowserContextBase(ABC):
     @abstractmethod
     async def _snapshot_dom_impl(self) -> str: ...
 
-    @abstractmethod
-    async def _snapshot_content_impl(self) -> str: ...
+    async def _snapshot_content_impl(self) -> str:
+        """Deprecated: content mode now uses the unified AX-tree path.
+
+        Kept as a non-abstract fallback so existing subclasses compile
+        without changes. New backends should not override this.
+        """
+        return ""
 
     @abstractmethod
     async def _network_entries(self, *, since_seq: int) -> list[dict[str, Any]]: ...
@@ -352,7 +357,14 @@ class BrowserContextBase(ABC):
         frames: bool = False,
     ) -> PageSnapshot:
         self._check_browser_alive()
-        if mode in ("accessible", "compact"):
+        # ``content`` joins ``accessible``/``compact`` on the unified AX-tree
+        # path so it picks up StaticText aggregation (proper word spacing) and
+        # ``--frames`` iframe merging for free. The old
+        # ``document.body.innerText`` shortcut left inline-element boundaries
+        # without separators ("Hacker Newsnew") and bypassed every other
+        # snapshot feature; ``_snapshot_content_impl`` is now dead code kept
+        # only so ABC subclasses don't drift.
+        if mode in ("accessible", "compact", "content"):
             return await self._build_tree_snapshot(
                 mode=mode,
                 max_nodes=max_nodes,
@@ -370,16 +382,6 @@ class BrowserContextBase(ABC):
                 title=title,
                 mode="dom",
                 tree_text=html,
-            )
-        if mode == "content":
-            text = await self._snapshot_content_impl()
-            url, title = await self._get_page_info()
-            return PageSnapshot(
-                seq=self._seq_counter.value,
-                url=url,
-                title=title,
-                mode="content",
-                tree_text=text,
             )
         raise BackendError(
             error="invalid_snapshot_mode",

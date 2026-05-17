@@ -129,11 +129,14 @@ def browser_snapshot(
         help="Truncate tree_text to this many characters (0 = no limit).",
     ),
     limit: int = typer.Option(
-        0,
+        -1,
         "--limit",
         "--max-nodes",
         help=(
-            "Truncate after N nodes (0 = no limit). --max-nodes is the legacy alias."
+            "Truncate after N nodes. Default applies "
+            "config.snapshot_max_nodes (80) in compact mode; pass "
+            "--limit 0 to opt back into the full tree. --max-nodes "
+            "is the legacy alias."
         ),
     ),
     focus: int = typer.Option(
@@ -167,7 +170,11 @@ def browser_snapshot(
     params: dict[str, str] = {"mode": mode}
     if max_chars:
         params["max_chars"] = str(max_chars)
-    if limit:
+    # ``limit == -1`` is the "user didn't pass --limit" sentinel — leave
+    # ``max_nodes`` out so the daemon applies its compact-mode default
+    # (``config.snapshot_max_nodes``). ``--limit 0`` opts back into the full
+    # tree and we must forward the literal ``0`` to override the default.
+    if limit != -1:
         params["max_nodes"] = str(limit)
     if focus:
         params["focus"] = str(focus)
