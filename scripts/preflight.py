@@ -112,6 +112,14 @@ def check_lint() -> CheckResult:
     return CheckResult(True, "clean", out)
 
 
+def check_format() -> CheckResult:
+    """Ruff format check over ``src/`` and ``tests/``."""
+    rc, out = _run(["uv", "run", "ruff", "format", "--check", "src/", "tests/"])
+    if rc != 0:
+        return CheckResult(False, "FAIL", out)
+    return CheckResult(True, "clean", out)
+
+
 def check_types() -> CheckResult:
     """Strict-mode pyright. Pyright reports the summary on its last line."""
     rc, out = _run(["uv", "run", "pyright", "src/agentcloak/"])
@@ -409,6 +417,7 @@ def check_skill_coverage() -> CheckResult:
 CHECKS: dict[str, tuple[str, Callable[[], CheckResult]]] = {
     "tests": ("Unit tests", check_tests),
     "lint": ("Lint", check_lint),
+    "format": ("Format", check_format),
     "types": ("Type check", check_types),
     "surface": ("Surface consistency", check_surface),
     "client": ("Client drift", check_client),
