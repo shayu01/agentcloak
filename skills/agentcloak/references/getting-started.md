@@ -105,7 +105,15 @@ viewport_height = 720
 navigation_timeout = 30    # seconds
 action_timeout = 30000     # ms, per-action timeout
 batch_settle_timeout = 5000 # ms, settle between batch actions
-humanize = false           # human-like mouse/keyboard timing
+humanize = true            # CloakBrowser humanize layer — adds Bezier mouse curves,
+                           # 70ms/char typing with 2% mistype simulation, and
+                           # scroll smoothing. Anti-detection benefit is real but
+                           # ``fill`` slows from ~30ms to multi-second per field
+                           # because CloakBrowser intercepts it and replays as
+                           # click + select-all + character-by-character type.
+                           # Disable globally with AGENTCLOAK_HUMANIZE=false or
+                           # ``cloak daemon start --no-humanize`` when bulk form
+                           # fill speed matters more than typing cadence.
 headless = true            # headless mode (v0.2.0 default); set false for max stealth
 idle_timeout_min = 0       # auto-shutdown after idle (0 = disabled)
 stop_on_exit = false       # stop daemon when CLI exits
@@ -116,6 +124,9 @@ log_backup_count = 3       # keep N rotated logs
 max_return_size = 50000    # /evaluate response cap (bytes)
 screenshot_quality = 80    # CLI JPEG quality
 mcp_screenshot_quality = 50 # MCP JPEG quality (smaller base64)
+proxy = ""                  # upstream browser proxy (e.g. "socks5://user:pw@host:1080")
+dns_over_https = false      # false → append --disable-features=DnsOverHttps
+extra_args = []             # extra Chromium flags, e.g. ["--lang=ja-JP"]
 
 [security]
 domain_whitelist = []       # glob patterns, e.g. ["*.github.com", "example.com"]
@@ -154,7 +165,27 @@ All settings can be overridden with `AGENTCLOAK_` prefix:
 | `AGENTCLOAK_DOMAIN_BLACKLIST` | `evil.com` |
 | `AGENTCLOAK_CONTENT_SCAN` | `true` |
 | `AGENTCLOAK_CONTENT_SCAN_PATTERNS` | `password=.*,ssn:\d+` |
+| `AGENTCLOAK_PROXY` | `socks5://user:pass@host:1080` (browser only — fetch always uses local httpcloak) |
+| `AGENTCLOAK_DNS_OVER_HTTPS` | `false` (default — turn on with `true`) |
+| `AGENTCLOAK_EXTRA_ARGS` | `--lang=ja-JP,--disable-blink-features=AutomationControlled` (comma-separated) |
 | `AGENTCLOAK_SKIP_FIRST_RUN_BANNER` | `1` (silence the first-run nudge) |
+
+### Editing config from the CLI
+
+```bash
+cloak config set browser.proxy "socks5://host:1080"     # write one key
+cloak config set browser.headless false browser.humanize true   # batch
+cloak config add browser.extra_args "--lang=ja-JP"      # append to list
+cloak config remove browser.extra_args "--lang=ja-JP"   # remove from list
+cloak config unset browser.proxy                        # back to default
+cloak config get browser.proxy                          # read one key
+cloak config keys                                       # list all keys
+```
+
+Writes only touch `~/.agentcloak/config.toml`; env vars and built-in
+defaults are never modified. Daemon must be restarted for `[browser]` /
+`[daemon]` changes to take effect — the command prints the restart hint
+when applicable.
 
 ## Daemon Management
 

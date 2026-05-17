@@ -392,6 +392,14 @@ async def start(
         profile_dir = paths.profiles_dir / profile
         profile_dir.mkdir(parents=True, exist_ok=True)
 
+    # Assemble the Chromium command-line flags from user config. The
+    # ``--disable-features=DnsOverHttps`` default keeps split-horizon DNS
+    # working with transparent proxies — users who want Chromium's
+    # bundled DoH set ``dns_over_https = true``.
+    chromium_args: list[str] = list(cfg.extra_args)
+    if not cfg.dns_over_https:
+        chromium_args.append("--disable-features=DnsOverHttps")
+
     raw_ctx: Any = None
     if not skip_local_launch:
         logger.info(
@@ -400,6 +408,8 @@ async def start(
             headless=actual_headless,
             humanize=actual_humanize,
             profile=profile,
+            browser_proxy=cfg.proxy or None,
+            extra_args=chromium_args,
         )
         try:
             raw_ctx = await create_context(
@@ -413,6 +423,8 @@ async def start(
                 if tier == StealthTier.CLOAK
                 else None,
                 proxy_url=proxy_url,
+                browser_proxy=cfg.proxy or None,
+                extra_args=chromium_args,
             )
         except Exception as exc:
             # Browser launch failures are the most common first-run problem.

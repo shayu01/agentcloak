@@ -9,14 +9,17 @@ from pathlib import Path
 from typing import Any, cast
 
 __all__ = [
+    "FIELD_SCHEMA",
     "AgentcloakConfig",
     "ConfigError",
     "Paths",
     "dump_config",
     "ensure_bridge_token",
     "load_config",
+    "read_toml",
     "regenerate_bridge_token",
     "resolve_tier",
+    "serialise_toml",
     "write_example_config",
 ]
 
@@ -115,6 +118,21 @@ class AgentcloakConfig:
     # idle for this many seconds (0 = keep it warm forever). 30 min
     # default matches the daemon idle timeout.
     local_idle_timeout: int = 1800
+    # Upstream proxy for the browser itself (Chromium ``--proxy-server``).
+    # Empty string means "no proxy". Supports any scheme Chromium accepts:
+    # ``http://``, ``https://``, ``socks4://``, ``socks5://``. Distinct
+    # from the httpcloak local TLS proxy that fetch uses internally.
+    proxy: str = ""
+    # When False (default), launch with ``--disable-features=DnsOverHttps``.
+    # Most agents run behind transparent/HTTP proxies or want system DNS
+    # so split-horizon resolution keeps working; turn this on to let
+    # Chromium use its bundled DoH resolvers instead.
+    dns_over_https: bool = False
+    # Extra Chromium command-line flags appended to every browser launch.
+    # User-controlled escape hatch — agentcloak does not validate the
+    # contents. Common uses include ``--lang=ja-JP`` or
+    # ``--disable-blink-features=AutomationControlled``.
+    extra_args: list[str] = field(default_factory=list[str])
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -282,6 +300,24 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
         or bridge.get("local_idle_timeout", cfg.local_idle_timeout)
     )
 
+    cfg.proxy = _env("PROXY") or browser.get("proxy", cfg.proxy)
+
+    doh_env = _env("DNS_OVER_HTTPS")
+    if doh_env is not None:
+        cfg.dns_over_https = doh_env.lower() in ("true", "1", "yes")
+    else:
+        cfg.dns_over_https = bool(
+            browser.get("dns_over_https", cfg.dns_over_https)
+        )
+
+    extra_args_env = _env("EXTRA_ARGS")
+    if extra_args_env is not None:
+        cfg.extra_args = [
+            a.strip() for a in extra_args_env.split(",") if a.strip()
+        ]
+    else:
+        cfg.extra_args = browser.get("extra_args", cfg.extra_args)
+
     _validate(cfg)
     return paths, cfg
 
@@ -361,6 +397,56 @@ _ENV_KEYS: dict[str, list[str]] = {
     "content_scan_patterns": ["CONTENT_SCAN_PATTERNS"],
     "bridge_token": ["BRIDGE_TOKEN"],
     "local_idle_timeout": ["LOCAL_IDLE_TIMEOUT"],
+    "proxy": ["PROXY"],
+    "dns_over_https": ["DNS_OVER_HTTPS"],
+    "extra_args": ["EXTRA_ARGS"],
+}
+
+
+# Schema for ``cloak config set/get/unset/add/remove`` — maps user-facing
+# dot-notation keys (``browser.proxy``) to the TOML location and Python
+# type. Keep this in lockstep with :class:`AgentcloakConfig` and the
+# example config writer; preflight has no automatic check for this yet
+# because the table is small enough to keep mental.
+_FIELD_SCHEMA: dict[str, tuple[str, str, type]] = {
+    # [daemon]
+    "daemon.host": ("daemon", "host", str),
+    "daemon.port": ("daemon", "port", int),
+    "daemon.log_level": ("daemon", "log_level", str),
+    "daemon.log_to_file": ("daemon", "log_to_file", bool),
+    "daemon.log_max_bytes": ("daemon", "log_max_bytes", int),
+    "daemon.log_backup_count": ("daemon", "log_backup_count", int),
+    "daemon.http_client_timeout": ("daemon", "http_client_timeout", int),
+    "daemon.auto_start_timeout": ("daemon", "auto_start_timeout", float),
+    "daemon.auto_start_poll_interval": ("daemon", "auto_start_poll_interval", float),
+    # [browser]
+    "browser.default_tier": ("browser", "default_tier", str),
+    "browser.default_profile": ("browser", "default_profile", str),
+    "browser.headless": ("browser", "headless", bool),
+    "browser.humanize": ("browser", "humanize", bool),
+    "browser.viewport_width": ("browser", "viewport_width", int),
+    "browser.viewport_height": ("browser", "viewport_height", int),
+    "browser.navigation_timeout": ("browser", "navigation_timeout", int),
+    "browser.action_timeout": ("browser", "action_timeout", int),
+    "browser.batch_settle_timeout": ("browser", "batch_settle_timeout", int),
+    "browser.idle_timeout_min": ("browser", "idle_timeout_min", int),
+    "browser.stop_on_exit": ("browser", "stop_on_exit", bool),
+    "browser.max_return_size": ("browser", "max_return_size", int),
+    "browser.screenshot_quality": ("browser", "screenshot_quality", int),
+    "browser.mcp_screenshot_quality": ("browser", "mcp_screenshot_quality", int),
+    "browser.snapshot_max_nodes": ("browser", "snapshot_max_nodes", int),
+    "browser.proxy": ("browser", "proxy", str),
+    "browser.dns_over_https": ("browser", "dns_over_https", bool),
+    "browser.extra_args": ("browser", "extra_args", list),
+    # [security]
+    "security.domain_whitelist": ("security", "domain_whitelist", list),
+    "security.domain_blacklist": ("security", "domain_blacklist", list),
+    "security.content_scan": ("security", "content_scan", bool),
+    "security.content_scan_patterns": ("security", "content_scan_patterns", list),
+    # [bridge]
+    "bridge.local_idle_timeout": ("bridge", "local_idle_timeout", int),
+    # bridge.token is auto-managed via `bridge token --reset`; intentionally
+    # not exposed through `config set` to keep token rotation explicit.
 }
 
 
@@ -478,6 +564,14 @@ def _serialise_toml_value(value: Any) -> str:
     # corrupt the file (the validator above keeps this branch unreachable
     # for documented config fields).
     return f'"{value!s}"'
+
+
+# Public re-exports for the config writer. Keep the underscored implementations
+# as the source of truth so ``_write_bridge_token`` and friends stay one
+# co-located cluster, but expose a stable name for the writer module.
+FIELD_SCHEMA = _FIELD_SCHEMA
+read_toml = _read_toml
+serialise_toml = _serialise_toml
 
 
 def ensure_bridge_token(paths: Paths, cfg: AgentcloakConfig) -> str:
@@ -708,6 +802,27 @@ def write_example_config(paths: Paths) -> Path:
                 "Default node cap for compact snapshots when --limit /\n"
                 "max_nodes is unset. 0 disables the cap; explicit\n"
                 "--limit always wins. Only applied in compact mode.",
+            ),
+            (
+                "proxy",
+                defaults.proxy,
+                "Upstream proxy for the browser. Empty = direct.\n"
+                "Examples: 'socks5://user:pass@host:1080',\n"
+                "'http://corp-proxy:3128'. Restart daemon to apply.",
+            ),
+            (
+                "dns_over_https",
+                defaults.dns_over_https,
+                "When false (default), launch Chromium with\n"
+                "--disable-features=DnsOverHttps so DNS goes through\n"
+                "the system resolver (works with transparent proxies).\n"
+                "Set true to let Chromium use bundled DoH resolvers.",
+            ),
+            (
+                "extra_args",
+                defaults.extra_args,
+                "Extra Chromium command-line flags appended to every\n"
+                "browser launch. Example: ['--lang=ja-JP'].",
             ),
         ],
     )

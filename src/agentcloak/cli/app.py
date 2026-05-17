@@ -210,7 +210,7 @@ def _register_commands() -> None:
     app.add_typer(
         config_cmd.app,
         name="config",
-        help="Show merged configuration with sources.",
+        help="Read/write configuration (get/set/unset/list/add/remove).",
     )
     app.add_typer(doctor.app, name="doctor", help="Self-check and diagnostics.")
     app.add_typer(daemon_cmd.app, name="daemon", help="Daemon lifecycle management.")

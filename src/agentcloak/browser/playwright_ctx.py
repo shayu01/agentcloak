@@ -28,7 +28,11 @@ import httpx
 import structlog
 
 from agentcloak.browser._snapshot_builder import FrameData
-from agentcloak.browser.base import BrowserContextBase
+from agentcloak.browser.base import (
+    BrowserContextBase,
+    classify_url_pattern,
+    match_url_substring,
+)
 from agentcloak.browser.state import (
     FrameInfo,
     PendingDialog,
@@ -331,7 +335,12 @@ class PlaywrightContext(BrowserContextBase):
         }
 
     async def _get_ax_tree(self, *, frames: bool = False) -> list[dict[str, Any]]:
-        cdp = await self._page.context.new_cdp_session(self._page)
+        # When the user has run `frame focus`, snapshots should reflect that
+        # subframe — not the main page. Routing the CDP session to the active
+        # frame keeps `frame focus` symmetric with click/fill/etc., which
+        # already use `_target_frame`. See `frame focus` docs and bug B2.
+        target = self._active_frame if self._active_frame is not None else self._page
+        cdp = await self._page.context.new_cdp_session(target)
         try:
             tree = await cdp.send("Accessibility.getFullAXTree", {"pierce": True})
         finally:
@@ -682,7 +691,20 @@ class PlaywrightContext(BrowserContextBase):
         if condition == "selector":
             await target.wait_for_selector(value, state=state, timeout=timeout)
         elif condition == "url":
-            await self._page.wait_for_url(value, timeout=timeout)
+            kind, processed = classify_url_pattern(value)
+            if kind == "glob":
+                # Native Playwright glob — '*' does not cross '/'.
+                await self._page.wait_for_url(processed, timeout=timeout)
+            else:
+                # Substring path: pass a predicate so Playwright handles the
+                # wait + timeout machinery for us. Returns immediately when
+                # the current URL already contains the keyword.
+                keyword = processed
+
+                def _url_contains(url: str) -> bool:
+                    return keyword in url
+
+                await self._page.wait_for_url(_url_contains, timeout=timeout)
         elif condition == "load":
             await self._page.wait_for_load_state(value, timeout=timeout)
         elif condition == "js":
@@ -1102,10 +1124,16 @@ class PlaywrightContext(BrowserContextBase):
         if name:
             target_frame = self._page.frame(name=name)
         elif url:
-            for frame in self._page.frames:
-                if url in frame.url:
-                    target_frame = frame
-                    break
+            kind, processed = classify_url_pattern(url)
+            if kind == "glob":
+                # Native Playwright glob ('*' does not cross '/').
+                target_frame = self._page.frame(url=processed)
+            else:
+                # Substring fallback so '--url "default.asp"' just works.
+                for frame in self._page.frames:
+                    if match_url_substring(url, frame.url or ""):
+                        target_frame = frame
+                        break
 
         if target_frame is None:
             available = [f.name or f.url[:60] for f in self._page.frames]
@@ -1156,21 +1184,40 @@ async def launch_playwright(
     viewport_height: int = 800,
     profile_dir: Path | None = None,
     proxy_url: str | None = None,
+    browser_proxy: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> PlaywrightContext:
-    """Launch a Playwright browser and return a context."""
+    """Launch a Playwright browser and return a context.
+
+    See :func:`agentcloak.browser.create_context` for the rationale on
+    keeping ``proxy_url`` (httpcloak/fetch) and ``browser_proxy``
+    (Chromium upstream) as two separate parameters.
+    """
     from playwright.async_api import async_playwright
 
     pw = await async_playwright().start()
     executable = _find_chromium()
 
     cdp_port = find_free_port()
-    chrome_args = ["--no-sandbox", f"--remote-debugging-port={cdp_port}"]
+    # User-supplied ``extra_args`` come after agentcloak defaults so the
+    # last-occurrence-wins Chromium semantics let users override
+    # anything we set.
+    chrome_args = [
+        "--no-sandbox",
+        f"--remote-debugging-port={cdp_port}",
+        *(extra_args or []),
+    ]
+
+    proxy_kwargs: dict[str, Any] = {}
+    if browser_proxy:
+        proxy_kwargs["proxy"] = {"server": browser_proxy}
 
     if profile_dir is not None:
         launch_kwargs: dict[str, Any] = {
             "headless": headless,
             "args": chrome_args,
             "viewport": {"width": viewport_width, "height": viewport_height},
+            **proxy_kwargs,
         }
         if executable:
             launch_kwargs["executable_path"] = executable
@@ -1205,7 +1252,11 @@ async def launch_playwright(
             cdp_port=cdp_port,
         )
 
-    launch_args: dict[str, Any] = {"headless": headless, "args": chrome_args}
+    launch_args: dict[str, Any] = {
+        "headless": headless,
+        "args": chrome_args,
+        **proxy_kwargs,
+    }
     if executable:
         launch_args["executable_path"] = executable
 

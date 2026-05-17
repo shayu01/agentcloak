@@ -71,8 +71,8 @@ Actions accept the element index positionally (`cloak click 5`) or via `--index 
 | Command | Purpose |
 |---------|---------|
 | `cloak click N` | Click element |
-| `cloak fill N "value"` | Clear and set input value |
-| `cloak type N "value"` | Type character by character |
+| `cloak fill N "value"` | Clear and set input value (fast when `humanize=false`; CloakBrowser intercepts under `humanize=true` and replays as click + select-all + character-by-character typing — multi-second per field) |
+| `cloak type N "value"` | Type character by character (always uses humanize timing when enabled; pick this when you need anti-detection cadence) |
 | `cloak press Enter` | Press key (Enter, Tab, Escape, Backspace, ArrowDown, Space...) |
 | `cloak press "Control+a"` | Combo key (Playwright `+` syntax) |
 | `cloak scroll down` | Scroll page |
@@ -103,9 +103,15 @@ Actions accept the element index positionally (`cloak click 5`) or via `--index 
 | `cloak profile list` / `create` / `launch` / `delete` | Browser profile management |
 | `cloak tab list` / `new` / `close` / `switch` | Tab management |
 | `cloak spell list` / `info` / `run NAME` / `scaffold` | Spells (reusable site automation) |
-| `cloak cookies export` / `import -c '[...]'` | Export/import cookies (import supports httpOnly) |
+| `cloak cookies export [--url URL]` / `import -c '[...]'` | Export/import cookies (text output is `domain \| name=value`; pass `--url` to scope to one site — without it every site's cookies are returned, with import preserving httpOnly) |
 | `cloak cdp endpoint` | Get CDP WebSocket URL (for jshookmcp) |
 | `cloak config` | Show merged config with value sources (default/env/toml) |
+| `cloak config get KEY` | Print one value (e.g. `cloak config get browser.proxy`) |
+| `cloak config set KEY VAL [K2 V2 ...]` | Set scalar(s) or replace a list (batch supported) |
+| `cloak config add KEY VAL ...` | Append values to a list-typed key (e.g. `browser.extra_args`) |
+| `cloak config remove KEY VAL` | Remove one value from a list-typed key |
+| `cloak config unset KEY` | Clear a key so it falls back to its default |
+| `cloak config keys` | List every settable dot-notation key |
 | `cloak version` | Show agentcloak version (same value as `cloak --version`) |
 | `cloak doctor` | Self-check diagnostics |
 | `cloak bridge start` / `claim` / `finalize` | RemoteBridge (real browser) |
@@ -191,6 +197,7 @@ These work automatically:
 - **Timeouts**: navigation defaults to 30s, actions to 30s. For slow pages or large uploads, pass `--timeout 60` on `navigate` or `wait`. If `navigation_timeout` errors persist, set `AGENTCLOAK_NAVIGATION_TIMEOUT=60` globally
 - **Headless by default**: the browser runs headless. For stronger anti-detection, start headed without changing config: `cloak daemon stop && cloak daemon start --headed -b`. Or set `headless = false` in `~/.agentcloak/config.toml` (or `AGENTCLOAK_HEADLESS=false`). Xvfb auto-starts on headless Linux servers
 - **Daemon lifecycle**: auto-starts on first command, stays running. `cloak launch --tier X` hot-switches browser tier without restart. Changing headless/profile requires `cloak daemon stop` + `cloak daemon start`. `cloak daemon status` shows current state
+- **`fill` vs `type` under humanize**: humanize is on by default (CloakBrowser preset `"default"`, ~70ms/char typing delay). `fill` reaches for raw `page.fill()` when humanize is off (sub-50ms write) but CloakBrowser intercepts it under humanize and replays as `click → Ctrl+A → Backspace → typed character-by-character` — a 30-char field crosses ~3 seconds. Pick `fill` for speed and disable humanize globally (`AGENTCLOAK_HUMANIZE=false` or `cloak daemon start --no-humanize`); pick `type` when the slow cadence is the point (anti-detection forms, careful preset). There's no per-action humanize flag today — switching requires a daemon restart
 - **Scripting / piping**: add `--json` for the legacy envelope shape when piping to jq, or set `AGENTCLOAK_OUTPUT=json` for the same effect
 
 ## References

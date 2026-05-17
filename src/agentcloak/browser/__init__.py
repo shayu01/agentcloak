@@ -32,8 +32,24 @@ async def create_context(
     humanize: bool = False,
     extensions: list[str] | None = None,
     proxy_url: str | None = None,
+    browser_proxy: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> BrowserContextBase:
-    """Factory: create a browser context for the given stealth tier."""
+    """Factory: create a browser context for the given stealth tier.
+
+    ``proxy_url`` and ``browser_proxy`` solve two different problems and
+    are intentionally separate:
+
+    * ``proxy_url`` is the httpcloak local TLS-fingerprint proxy used by
+      :py:meth:`fetch`. It lives on ``localhost`` and is wired by the
+      daemon when stealth is on; callers that don't run httpcloak pass
+      ``None``.
+    * ``browser_proxy`` is the user-configured upstream proxy
+      (``socks5://...``, ``http://...``) handed straight to Chromium so
+      every browser request — page loads, XHRs, WebSockets — egresses
+      through that hop. Populated from ``[browser] proxy`` /
+      ``AGENTCLOAK_PROXY``.
+    """
     if tier == StealthTier.PLAYWRIGHT:
         from agentcloak.browser.playwright_ctx import launch_playwright
 
@@ -43,6 +59,8 @@ async def create_context(
             viewport_height=viewport_height,
             profile_dir=profile_dir,
             proxy_url=proxy_url,
+            browser_proxy=browser_proxy,
+            extra_args=extra_args,
         )
 
     if tier == StealthTier.CLOAK:
@@ -56,6 +74,8 @@ async def create_context(
             humanize=humanize,
             extensions=extensions,
             proxy_url=proxy_url,
+            browser_proxy=browser_proxy,
+            extra_args=extra_args,
         )
 
     raise NotImplementedError(f"Backend {tier!r} not yet implemented")

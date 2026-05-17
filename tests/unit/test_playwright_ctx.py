@@ -729,7 +729,12 @@ class TestSnapshotTree:
 
     @pytest.mark.asyncio
     async def test_indentation_present(self) -> None:
-        """Tree output uses 2-space indentation for nested elements."""
+        """Tree output uses 1-space indentation per depth level.
+
+        v0.2.3 cut the indent step from 2 to 1 — the structural information
+        is still there (each level is one space deeper than its parent), but
+        the leading whitespace stops eating tokens on dense pages.
+        """
         cdp = MagicMock()
 
         async def _send(method: str, params: Any = None) -> Any:
@@ -768,10 +773,10 @@ class TestSnapshotTree:
         # RootWebArea at depth 0, navigation at depth 1, link at depth 2
         nav_line = next(ln for ln in lines if "Main" in ln)
         link_line = next(ln for ln in lines if "Home" in ln)
-        # nav is child of root, so indented once
-        assert nav_line.startswith("  ")
-        # link is child of nav, so indented twice
-        assert link_line.startswith("    ")
+        # nav is child of root, depth 1 → 1 leading space (not 2 anymore)
+        assert nav_line.startswith(" ") and not nav_line.startswith("  ")
+        # link is child of nav, depth 2 → 2 leading spaces (was 4)
+        assert link_line.startswith("  ") and not link_line.startswith("   ")
 
     @pytest.mark.asyncio
     async def test_generic_fold_single_child(self) -> None:

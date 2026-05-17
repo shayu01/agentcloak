@@ -59,6 +59,25 @@ Make the bridge the default for the daemon:
 export AGENTCLOAK_DEFAULT_TIER=remote_bridge
 ```
 
+## Privacy note
+
+RemoteBridge gives the agent the same view of your browser that you have.
+`cloak tab list` returns **every open tab** — including personal email,
+banking, work tools — not just the ones the agent claimed. URLs and titles
+enter the agent's context window the moment it inspects them, so anything
+visible in the title bar is effectively shared with whatever model is
+driving the session.
+
+Practical guardrails:
+
+- Close (or move to a separate Chrome profile) tabs you don't want the
+  agent to see before you connect.
+- Prefer `cloak bridge claim --url-pattern ...` to put one explicit tab
+  under control, rather than letting the agent scan the full tab list.
+- Keep an eye on the blue "agentcloak" tab group — anything outside it is
+  still readable, but it's a visual reminder of what's nominally agent
+  scope.
+
 ## Tab claiming
 
 The bridge starts out with no managed tabs. Two ways to put a tab under agent control:

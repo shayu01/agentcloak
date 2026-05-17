@@ -323,11 +323,15 @@ cloak bridge token --reset                # 轮换 token
 ## Cookie 管理
 
 ```bash
-cloak cookies export
+cloak cookies export                              # 当前浏览器所有 cookie
+cloak cookies export --url https://example.com    # 只导出匹配该 URL 的 cookie
 cloak cookies import -c '[{"name":"token","value":"abc","domain":".example.com","path":"/"}]'
 ```
 
-`cookies export` 输出 `name=value` 行（每个 cookie 一行）。`cookies import` 接受结构化 JSON，保留 httpOnly cookie。
+`cookies export` 输出 `domain | name=value` 行（每个 cookie 一行）——加上 domain
+列让 agent grep 时能分辨每个 cookie 属于哪个站点。建议用 `--url` 把导出范围限定
+到单个 domain；不加过滤会把当前浏览器里**所有**站点的会话一并吐出来，包括
+agent 任务无关的个人账号。`cookies import` 接受结构化 JSON，保留 httpOnly cookie。
 
 ## Daemon 管理
 

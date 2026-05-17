@@ -183,13 +183,33 @@ def _attach_feedback(base: str, data: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _format_tok_estimate(tree_text: str) -> str:
+    """Render a coarse token estimate from raw ``tree_text`` length.
+
+    Uses ``len // 4`` because that's the standard OpenAI/Anthropic
+    rule-of-thumb for English-heavy text and avoids pulling in tiktoken
+    (heavy dependency, big install footprint). The estimate is intentionally
+    a hint, not a budget: agents use it to decide "do I need to page with
+    --offset?" — they don't feed it back into a precise token-budget
+    calculation. Sub-1K trees print as ``~123 tok`` to avoid the ``~0.1K``
+    rounding noise; 1K+ collapses to ``~1.8K tok`` so the header stays narrow.
+    """
+    chars = len(tree_text)
+    tokens = chars // 4
+    if tokens < 1000:
+        return f"~{tokens} tok"
+    return f"~{tokens / 1000:.1f}K tok"
+
+
 def _render_snapshot_header(data: dict[str, Any]) -> str:
     """Build the ``# title | url | N nodes (M interactive) | seq=K`` header line.
 
     Shared between :func:`render_snapshot_text` (the dedicated route) and the
     ``--snap`` paths in :func:`render_navigate_text` / :func:`render_action_text`
     so all three produce the same machine-parseable header. Diff counts and
-    ``showing 1-N`` truncation suffix are appended when present in ``data``.
+    ``showing 1-N`` truncation suffix are appended when present in ``data``,
+    and the trailing ``~NK tok`` is a chars/4 estimate of the rendered tree
+    so agents can budget context without a tokenizer dependency.
     """
     title = _clip_title(str(data.get("title", "") or ""))
     url = str(data.get("url", "") or "")
@@ -216,9 +236,12 @@ def _render_snapshot_header(data: dict[str, Any]) -> str:
     if truncated_at:
         showing = f" | showing 1-{int(truncated_at)}"
 
+    tree_text = str(data.get("tree_text", "") or "")
+    tok = f" | {_format_tok_estimate(tree_text)}"
+
     return (
         f"# {title} | {url} | {total_nodes} nodes "
-        f"({interactive} interactive) | seq={seq}{diff_info}{showing}"
+        f"({interactive} interactive) | seq={seq}{diff_info}{showing}{tok}"
     )
 
 
@@ -562,7 +585,15 @@ def render_capture_analyze_text(data: dict[str, Any]) -> str:
 
 
 def render_cookies_export_text(data: dict[str, Any]) -> str:
-    """Render cookies export as ``name=value`` per line (pipeline-friendly)."""
+    """Render cookies export as ``domain | name=value`` per line.
+
+    The domain column matters when a multi-domain export is unfiltered —
+    without it an agent piping ``cookies export | grep session`` can't tell
+    which site the cookie belongs to, and is unaware of leakage from any
+    third party that happens to share the cookie name. Agents should still
+    prefer ``cloak cookies export --url <site>`` to scope the export, but
+    a domain-labeled line keeps the unfiltered output honest.
+    """
     cookies: list[Any] = list(data.get("cookies") or [])
     if not cookies:
         return "no cookies"
@@ -571,9 +602,16 @@ def render_cookies_export_text(data: dict[str, Any]) -> str:
         if not isinstance(raw, dict):
             continue
         cookie = _as_dict(raw)
+        domain = str(cookie.get("domain", "") or "")
         name = str(cookie.get("name", "") or "")
         val = str(cookie.get("value", "") or "")
-        lines.append(f"{name}={val}")
+        # Domain is usually present (daemon enriches it from Playwright/CDP)
+        # but raw RemoteBridge replies can omit it. Print ``? | name=value``
+        # in that case so the column count stays consistent for pipelines —
+        # a missing domain becomes loud, not silently shifted into another
+        # column.
+        domain_col = domain if domain else "?"
+        lines.append(f"{domain_col} | {name}={val}")
     return "\n".join(lines)
 
 

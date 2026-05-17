@@ -56,15 +56,36 @@ async def launch_cloak(
     humanize: bool = True,
     extensions: list[str] | None = None,
     proxy_url: str | None = None,
+    browser_proxy: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> CloakContext:
-    """Launch a CloakBrowser instance and return a CloakContext."""
+    """Launch a CloakBrowser instance and return a CloakContext.
+
+    ``proxy_url`` is the httpcloak local TLS proxy (used by ``fetch``);
+    ``browser_proxy`` is the user-configured upstream proxy passed to
+    Chromium so every browser request egresses through it. See
+    :func:`agentcloak.browser.create_context` for the rationale behind
+    the split.
+    """
     cb = _ensure_cloakbrowser()
 
     ext_args = _build_extension_args(extensions)
 
     # Allocate a free port for CDP; Chrome 90+ supports pipe+port coexistence.
     cdp_port = find_free_port()
-    all_args = [*ext_args, f"--remote-debugging-port={cdp_port}"]
+    # ``extra_args`` lands at the end so user-supplied flags can override
+    # any defaults agentcloak set (Chromium honours the last occurrence).
+    all_args = [
+        *ext_args,
+        f"--remote-debugging-port={cdp_port}",
+        *(extra_args or []),
+    ]
+
+    # CloakBrowser piggy-backs on Playwright's launch API, which expects
+    # ``proxy={"server": "..."}``. Empty / ``None`` means "direct".
+    launch_extras: dict[str, Any] = {}
+    if browser_proxy:
+        launch_extras["proxy"] = {"server": browser_proxy}
 
     seq_counter = SeqCounter()
     ring_buffer = RingBuffer()
@@ -77,6 +98,7 @@ async def launch_cloak(
             args=all_args,
             humanize=humanize,
             viewport={"width": viewport_width, "height": viewport_height},
+            **launch_extras,
         )
 
         pages = browser_context.pages
@@ -97,6 +119,7 @@ async def launch_cloak(
         headless=headless,
         args=all_args,
         humanize=humanize,
+        **launch_extras,
     )
 
     ctx = await browser.new_context(

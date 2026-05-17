@@ -44,6 +44,9 @@ max_return_size = 50000
 screenshot_quality = 80
 mcp_screenshot_quality = 50
 snapshot_max_nodes = 80
+proxy = ""                  # 例：socks5://user:pass@host:1080
+dns_over_https = false      # false（默认）会追加 --disable-features=DnsOverHttps
+extra_args = []             # 额外 Chromium 启动参数，例 ["--lang=ja-JP"]
 
 [security]
 domain_whitelist = []
@@ -95,6 +98,9 @@ content_scan_patterns = []
 | `AGENTCLOAK_SCREENSHOT_QUALITY` | `browser.screenshot_quality` | `80` | CLI 截图默认 JPEG 质量（0-100） |
 | `AGENTCLOAK_MCP_SCREENSHOT_QUALITY` | `browser.mcp_screenshot_quality` | `50` | MCP 截图默认 JPEG 质量（低于 CLI 以节省 token） |
 | `AGENTCLOAK_SNAPSHOT_MAX_NODES` | `browser.snapshot_max_nodes` | `80` | compact 模式 snapshot 默认节点上限（未传 `--limit`/`max_nodes` 时生效）。`--limit 0`（CLI）或 `max_nodes=0`（MCP）可重新打开完整树。仅在 compact 模式生效。 |
+| `AGENTCLOAK_PROXY` | `browser.proxy` | `""` | 浏览器上游代理（例：`socks5://user:pass@host:1080`、`http://corp-proxy:3128`）。空值 = 直连。修改后需重启 daemon 才能生效。 |
+| `AGENTCLOAK_DNS_OVER_HTTPS` | `browser.dns_over_https` | `false` | 为 `false`（默认）时 agentcloak 会给 Chromium 追加 `--disable-features=DnsOverHttps`，让 DNS 走系统 resolver——兼容透明 / split-horizon 代理。设为 `true` 后 Chromium 使用内置 DoH 解析器。 |
+| `AGENTCLOAK_EXTRA_ARGS` | `browser.extra_args` | `[]` | 逗号分隔的额外 Chromium 命令行参数，每次启动浏览器都会追加（例：`--lang=ja-JP,--disable-blink-features=AutomationControlled`）。完全由用户控制；agentcloak 不做校验。 |
 
 ### 安全设置
 
@@ -190,3 +196,49 @@ port = 19000
 export AGENTCLOAK_HOST=0.0.0.0
 export AGENTCLOAK_PORT=19000
 ```
+
+### 浏览器网络（代理 / DoH / 额外参数）
+
+```toml
+[browser]
+# 让所有浏览器请求走住宅 SOCKS5 代理
+proxy = "socks5://user:pass@residential.example:1080"
+
+# 保持系统 DNS（默认）。设为 true 后让 Chromium 用内置 DoH。
+dns_over_https = false
+
+# 额外 Chromium 启动参数。常用于伪装区域、控制特性开关等。
+extra_args = ["--lang=ja-JP", "--disable-blink-features=AutomationControlled"]
+```
+
+或通过环境变量（设置后重启 daemon）：
+
+```bash
+export AGENTCLOAK_PROXY="socks5://host:1080"
+export AGENTCLOAK_DNS_OVER_HTTPS=false
+export AGENTCLOAK_EXTRA_ARGS="--lang=ja-JP,--disable-blink-features=AutomationControlled"
+```
+
+> [!NOTE]
+> `proxy` 只影响浏览器自身。`cloak fetch` 仍走内置的 httpcloak 本地 TLS
+> 代理以保证 TLS 指纹与 CloakBrowser 一致——两条出口是有意分离的独立链路。
+
+## 从 CLI 修改配置
+
+`cloak config` 提供类似 git 的动词来编辑 `~/.agentcloak/config.toml`：
+
+```bash
+cloak config                                  # 列出所有配置（含来源）
+cloak config list                             # 同上
+cloak config get browser.proxy                # 读取单项
+cloak config set browser.proxy "socks5://host:1080"
+cloak config set browser.headless false browser.humanize true   # 批量赋值
+cloak config add browser.extra_args "--lang=ja-JP"              # 向 list 追加
+cloak config remove browser.extra_args "--lang=ja-JP"           # 从 list 删除
+cloak config unset browser.proxy                                # 恢复默认
+cloak config keys                                               # 列出可用 key
+```
+
+写入操作只动 `~/.agentcloak/config.toml`，不影响 env 或 default。改动
+`[daemon]` 或 `[browser]` 下的项需重启 daemon 才能生效，命令会在适用时
+输出 `(restart daemon to apply)` 提示。

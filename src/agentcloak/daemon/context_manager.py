@@ -235,6 +235,13 @@ class ContextManager:
 
         extensions = [str(TURNSTILE_PATCH_DIR)] if tier == StealthTier.CLOAK else None
 
+        # Keep the Chromium flag composition in lockstep with
+        # ``server.py``'s startup launch — split out here would risk
+        # drift between the two paths users can reach the launcher from.
+        chromium_args: list[str] = list(self._config.extra_args)
+        if not self._config.dns_over_https:
+            chromium_args.append("--disable-features=DnsOverHttps")
+
         return await create_context(
             tier=tier,
             headless=self._config.headless,
@@ -247,6 +254,8 @@ class ContextManager:
             # only the initial server start wires httpcloak in. Spelling
             # this out keeps the manager free of httpcloak fallbacks.
             proxy_url=None,
+            browser_proxy=self._config.proxy or None,
+            extra_args=chromium_args,
         )
 
     # ------------------------------------------------------------------

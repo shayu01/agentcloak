@@ -10,7 +10,7 @@ round-trip.
 from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003 — Typer needs runtime access
-from typing import Any
+from typing import Any, cast
 
 import orjson
 import typer
@@ -268,21 +268,57 @@ def do_batch(
     ),
     sleep: float = typer.Option(0.15, "--sleep", help="Seconds between actions."),
 ) -> None:
-    """Execute a batch of actions from a JSONL file.
+    """Execute a batch of actions from a JSONL or JSON array file.
 
-    Actions in the JSONL can reference prior results with ``$N.path`` syntax;
-    e.g. ``$0.data.url`` references the URL from the first action's result.
+    Two formats are accepted:
+
+    * **JSONL** (one JSON object per line) — historical default.
+    * **JSON array** (e.g. ``[{...}, {...}]``) — convenient when authoring
+      by hand or piping the output of `jq`. Detected by a leading ``[``.
+
+    Actions in either format can reference prior results with ``$N.path``
+    syntax; e.g. ``$0.data.url`` references the URL from the first
+    action's result.
     """
     if not calls_file.exists():
         error(f"file not found: {calls_file}", "pass an existing JSONL file")
 
-    actions: list[dict[str, Any]] = []
     raw = calls_file.read_text(encoding="utf-8").strip()
-    for raw_line in raw.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        actions.append(orjson.loads(line))
+    if not raw:
+        error(
+            f"file is empty: {calls_file}",
+            "provide at least one action (JSONL line or JSON array element)",
+        )
+
+    actions: list[dict[str, Any]] = []
+    try:
+        if raw.startswith("["):
+            # JSON array form. orjson.loads is typed as ``Any`` so we narrow
+            # explicitly before populating ``actions`` to keep strict pyright
+            # happy.
+            parsed: object = orjson.loads(raw)
+            if not isinstance(parsed, list):
+                error(
+                    f"invalid batch file: {calls_file}",
+                    "top-level JSON must be an array of action objects",
+                )
+            else:
+                actions = [
+                    cast("dict[str, Any]", item)
+                    for item in cast("list[Any]", parsed)
+                ]
+        else:
+            # JSONL form — one JSON object per non-blank line.
+            for raw_line in raw.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                actions.append(cast("dict[str, Any]", orjson.loads(line)))
+    except orjson.JSONDecodeError as exc:
+        error(
+            f"could not parse {calls_file}: {exc}",
+            "expected JSONL (one JSON object per line) or a JSON array",
+        )
 
     body = {"actions": actions, "sleep": sleep}
     client = DaemonClient()

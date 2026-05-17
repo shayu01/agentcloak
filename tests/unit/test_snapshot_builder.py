@@ -243,11 +243,12 @@ class TestBuildSnapshotFrameMerge:
         # Find the frame header line — should be at depth 0 (no indent)
         frame_line = [ln for ln in lines if '[frame "child"]' in ln]
         assert len(frame_line) == 1
-        assert not frame_line[0].startswith("  ")  # depth 0
-        # The link inside the frame should be indented (depth 1+)
+        assert not frame_line[0].startswith(" ")  # depth 0
+        # The link inside the frame should be indented (depth 1+) — one space
+        # per depth level since the token-budget optimisation.
         link_line = [ln for ln in lines if "[2] link" in ln]
         assert len(link_line) == 1
-        assert link_line[0].startswith("  ")  # at least depth 1
+        assert link_line[0].startswith(" ")  # at least depth 1
 
 
 class TestDiffSnapshots:
@@ -420,7 +421,8 @@ class TestRenderDiffTree:
         lines = rendered.split("\n")
         assert lines[0] == '[1] button "Submit"'
         assert lines[1] == '[+] [2] link "New"'
-        assert lines[2] == '  [~] [3] textbox "Name" value="changed"'
+        # 1 space per depth level — matches build_snapshot's _INDENT_STEP.
+        assert lines[2] == ' [~] [3] textbox "Name" value="changed"'
 
     def test_indentation_preserved(self) -> None:
         diff_lines = [
@@ -431,8 +433,9 @@ class TestRenderDiffTree:
         rendered = render_diff_tree(diff_lines)
         lines = rendered.split("\n")
         assert lines[0] == 'navigation "Nav"'
-        assert lines[1] == '  [+] [1] link "Home"'
-        assert lines[2] == "    [~] More text"
+        # 1 space per depth level (was 2 — token-budget optimisation).
+        assert lines[1] == ' [+] [1] link "Home"'
+        assert lines[2] == "  [~] More text"
 
     def test_empty_input(self) -> None:
         assert render_diff_tree([]) == ""
@@ -606,3 +609,65 @@ class TestBoolPropExtraction:
         ]
         result = build_snapshot(nodes)
         assert "expanded=false" in result.snapshot.tree_text
+
+
+class TestIndentStep:
+    """Token-budget tree indent: 1 space per depth level (was 2 pre-0.2.3)."""
+
+    def test_single_space_per_depth(self) -> None:
+        # WebArea > button: button sits at depth 1 → one leading space.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node("2", "button", "Click", backend_dom_id=5),
+        ]
+        result = build_snapshot(nodes)
+        lines = result.snapshot.tree_text.split("\n")
+        button_line = next(ln for ln in lines if "[1] button" in ln)
+        # Depth 1 with 1-space step → exactly one leading space, not two.
+        assert button_line.startswith(" [1]")
+        assert not button_line.startswith("  [1]")
+
+    def test_compact_mode_uses_same_indent(self) -> None:
+        # Both modes share the renderer, so compact must agree with accessible.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node("2", "button", "Click", backend_dom_id=5),
+        ]
+        result = build_snapshot(nodes, mode="compact")
+        lines = result.snapshot.tree_text.split("\n")
+        button_line = next(ln for ln in lines if "[1] button" in ln)
+        assert button_line.startswith(" [1]")
+
+
+class TestContentModeDedup:
+    """Content mode must collapse adjacent duplicate lines.
+
+    a11y trees often expose the same string twice — once on the parent's
+    ``name`` (which is the concatenation of children) and again on each
+    StaticText child. The dedup keeps reading flow natural without dropping
+    legitimate repeats from compact/accessible modes (which still see both
+    structural lines).
+    """
+
+    def test_adjacent_duplicates_collapsed(self) -> None:
+        # Heading + StaticText with the same name → only one line emitted.
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2"]),
+            _make_node("2", "heading", "Welcome", child_ids=["3"]),
+            _make_node("3", "StaticText", "Welcome"),
+        ]
+        result = build_snapshot(nodes, mode="content")
+        lines = result.snapshot.tree_text.split("\n")
+        assert lines.count("Welcome") == 1
+
+    def test_non_adjacent_duplicates_preserved(self) -> None:
+        # Same text in two unrelated sections → both kept (only adjacent
+        # collapses, otherwise we'd silently lose repeated nav items).
+        nodes = [
+            _make_node("1", "WebArea", child_ids=["2", "3", "4"]),
+            _make_node("2", "heading", "Section"),
+            _make_node("3", "button", "Click", backend_dom_id=10),
+            _make_node("4", "heading", "Section"),
+        ]
+        result = build_snapshot(nodes, mode="content")
+        assert result.snapshot.tree_text.count("Section") == 2

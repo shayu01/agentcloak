@@ -1,4 +1,13 @@
-"""Config command — show merged configuration with sources."""
+"""Config command — read/write configuration with sources.
+
+The five verbs (``set``/``get``/``unset``/``list``/``add``/``remove``)
+mirror ``git config`` semantics so users with that muscle memory don't
+have to context-switch. The bare ``cloak config`` invocation is
+backwards-compatible and falls through to ``list``.
+
+All writes go through :mod:`agentcloak.core.config_writer` which handles
+the TOML round-trip, validation, and roll-back-on-failure machinery.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +17,15 @@ import typer
 
 from agentcloak.cli._dispatch import emit_envelope
 from agentcloak.cli.output import is_json_mode, value
-from agentcloak.core.config import dump_config, load_config
+from agentcloak.core.config import ConfigError, dump_config, load_config
+from agentcloak.core.config_writer import (
+    config_add,
+    config_get,
+    config_list_keys,
+    config_remove,
+    config_set_batch,
+    config_unset,
+)
 
 __all__ = ["app"]
 
@@ -38,11 +55,8 @@ def _format_value(val: object) -> str:
     return str(val)
 
 
-@app.callback(invoke_without_command=True)
-def config_show(ctx: typer.Context) -> None:
-    """Show merged configuration with value sources."""
-    if ctx.invoked_subcommand is not None:
-        return
+def _emit_list() -> None:
+    """Shared rendering for the bare ``cloak config`` and ``cloak config list``."""
     paths, cfg = load_config()
     dumped = dump_config(cfg, paths)
 
@@ -76,3 +90,179 @@ def config_show(ctx: typer.Context) -> None:
         formatted = _format_value(raw_value)
         lines.append(f"{field_name.ljust(width)} = {formatted}  [{source}]")
     value("\n".join(lines))
+
+
+def _emit_ok(message: str, extra: dict[str, object] | None = None) -> None:
+    """Print a confirmation in plain or JSON mode."""
+    if is_json_mode():
+        data: dict[str, object] = {"message": message}
+        if extra:
+            data.update(extra)
+        emit_envelope({"ok": True, "seq": 0, "data": data})
+        return
+    value(message)
+
+
+def _bail(message: str) -> typer.Exit:
+    """Render an error envelope/line and return a non-zero ``Exit``."""
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": False,
+                "seq": 0,
+                "error": "config_error",
+                "hint": message,
+                "action": "run 'cloak config list' to inspect available keys",
+            }
+        )
+    else:
+        value(f"error: {message}")
+    return typer.Exit(code=1)
+
+
+@app.callback(invoke_without_command=True)
+def config_show(ctx: typer.Context) -> None:
+    """Show merged configuration with value sources (no subcommand = list)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    _emit_list()
+
+
+@app.command("list")
+def config_list_cmd() -> None:
+    """List all configuration fields with current value and source."""
+    _emit_list()
+
+
+@app.command("get")
+def config_get_cmd(
+    key: str = typer.Argument(..., help="Dot-notation key, e.g. 'browser.proxy'."),
+) -> None:
+    """Print the effective value for one configuration key."""
+    paths, _ = load_config()
+    try:
+        result = config_get(paths, key)
+    except ConfigError as exc:
+        raise _bail(str(exc)) from exc
+    if is_json_mode():
+        emit_envelope(
+            {"ok": True, "seq": 0, "data": {"key": key, "value": result}}
+        )
+        return
+    value(result)
+
+
+@app.command(
+    "set",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_set_cmd(
+    ctx: typer.Context,
+) -> None:
+    """Set one or more configuration keys.
+
+    Usage:
+
+      cloak config set KEY VALUE
+      cloak config set KEY V1 V2 V3                # list-typed key
+      cloak config set K1 V1 K2 V2                 # batch
+    """
+    paths, _ = load_config()
+    args: list[str] = list(ctx.args)
+    try:
+        confirmations, restart_hint = config_set_batch(paths, args)
+    except ConfigError as exc:
+        raise _bail(str(exc)) from exc
+
+    if is_json_mode():
+        emit_envelope(
+            {
+                "ok": True,
+                "seq": 0,
+                "data": {
+                    "updated": confirmations,
+                    "restart_required": bool(restart_hint),
+                },
+            }
+        )
+        return
+
+    message = "\n".join(confirmations)
+    if restart_hint:
+        message += restart_hint
+    value(message)
+
+
+@app.command("unset")
+def config_unset_cmd(
+    key: str = typer.Argument(..., help="Dot-notation key to clear."),
+) -> None:
+    """Remove a key from config.toml (the default takes over)."""
+    paths, _ = load_config()
+    try:
+        message, restart_hint = config_unset(paths, key)
+    except ConfigError as exc:
+        raise _bail(str(exc)) from exc
+    _emit_ok(message + restart_hint, {"key": key})
+
+
+@app.command(
+    "add",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_add_cmd(
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="Dot-notation list key."),
+) -> None:
+    """Append one or more values to a list-typed key.
+
+    Usage: cloak config add browser.extra_args --flag1 --flag2
+    """
+    paths, _ = load_config()
+    values_list = list(ctx.args)
+    try:
+        message, restart_hint = config_add(paths, key, values_list)
+    except ConfigError as exc:
+        raise _bail(str(exc)) from exc
+    _emit_ok(message + restart_hint, {"key": key})
+
+
+@app.command(
+    "remove",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def config_remove_cmd(
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="Dot-notation list key."),
+) -> None:
+    """Remove the first occurrence of a value from a list-typed key.
+
+    Usage: cloak config remove browser.extra_args --lang=ja-JP
+
+    ``ignore_unknown_options`` keeps typer from treating user-supplied
+    values that start with ``--`` (e.g. Chromium flags) as CLI options.
+    """
+    args: list[str] = list(ctx.args)
+    if not args:
+        raise _bail(f"config remove {key} requires a value to remove")
+    if len(args) > 1:
+        raise _bail(
+            f"config remove {key} takes one value at a time (got {len(args)})"
+        )
+    val = args[0]
+    paths, _ = load_config()
+    try:
+        message, restart_hint = config_remove(paths, key, val)
+    except ConfigError as exc:
+        raise _bail(str(exc)) from exc
+    _emit_ok(message + restart_hint, {"key": key, "removed": val})
+
+
+@app.command("keys")
+def config_keys_cmd() -> None:
+    """List all valid keys ``set``/``get``/``unset`` accept."""
+    keys = config_list_keys()
+    if is_json_mode():
+        emit_envelope({"ok": True, "seq": 0, "data": {"keys": keys}})
+        return
+    value("\n".join(keys))

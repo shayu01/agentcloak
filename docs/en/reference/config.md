@@ -44,6 +44,9 @@ max_return_size = 50000
 screenshot_quality = 80
 mcp_screenshot_quality = 50
 snapshot_max_nodes = 80
+proxy = ""                  # e.g. "socks5://user:pass@host:1080"
+dns_over_https = false      # false (default) appends --disable-features=DnsOverHttps
+extra_args = []             # extra Chromium flags, e.g. ["--lang=ja-JP"]
 
 [security]
 domain_whitelist = []
@@ -95,6 +98,9 @@ All environment variables use the `AGENTCLOAK_` prefix.
 | `AGENTCLOAK_SCREENSHOT_QUALITY` | `browser.screenshot_quality` | `80` | Default JPEG quality for CLI screenshots (0-100) |
 | `AGENTCLOAK_MCP_SCREENSHOT_QUALITY` | `browser.mcp_screenshot_quality` | `50` | Default JPEG quality for MCP screenshots (lower than CLI to save tokens) |
 | `AGENTCLOAK_SNAPSHOT_MAX_NODES` | `browser.snapshot_max_nodes` | `80` | Default compact-mode snapshot node cap when caller didn't pass `--limit` / `max_nodes`. Pass `--limit 0` (CLI) or `max_nodes=0` (MCP) to opt back into the full tree. Only applied in compact mode. |
+| `AGENTCLOAK_PROXY` | `browser.proxy` | `""` | Upstream proxy for the browser (e.g. `socks5://user:pass@host:1080`, `http://corp-proxy:3128`). Empty = direct. Restart the daemon for changes to take effect. |
+| `AGENTCLOAK_DNS_OVER_HTTPS` | `browser.dns_over_https` | `false` | When `false` (default) agentcloak launches Chromium with `--disable-features=DnsOverHttps` so DNS goes through the system resolver — compatible with transparent / split-horizon proxies. Set to `true` to let Chromium use its bundled DoH resolvers. |
+| `AGENTCLOAK_EXTRA_ARGS` | `browser.extra_args` | `[]` | Comma-separated extra Chromium command-line flags appended to every browser launch (e.g. `--lang=ja-JP,--disable-blink-features=AutomationControlled`). User-controlled escape hatch; agentcloak does not validate the contents. |
 
 ### Security settings
 
@@ -190,3 +196,50 @@ Or via environment:
 export AGENTCLOAK_HOST=0.0.0.0
 export AGENTCLOAK_PORT=19000
 ```
+
+### Browser network (proxy, DoH, extra flags)
+
+```toml
+[browser]
+# Route every browser request through a residential SOCKS5 proxy
+proxy = "socks5://user:pass@residential.example:1080"
+
+# Keep system DNS (default). Set true to let Chromium use bundled DoH.
+dns_over_https = false
+
+# Extra Chromium flags. Useful for locale spoofing, feature flags, etc.
+extra_args = ["--lang=ja-JP", "--disable-blink-features=AutomationControlled"]
+```
+
+Or via environment (restart the daemon afterwards):
+
+```bash
+export AGENTCLOAK_PROXY="socks5://host:1080"
+export AGENTCLOAK_DNS_OVER_HTTPS=false
+export AGENTCLOAK_EXTRA_ARGS="--lang=ja-JP,--disable-blink-features=AutomationControlled"
+```
+
+> [!NOTE]
+> `proxy` only affects the browser. `cloak fetch` continues to use the
+> built-in httpcloak local TLS proxy so its TLS fingerprint matches
+> CloakBrowser — the two paths are intentionally independent.
+
+## Configuring keys from the CLI
+
+`cloak config` exposes git-style verbs for editing `~/.agentcloak/config.toml`:
+
+```bash
+cloak config                                  # list everything (with sources)
+cloak config list                             # same as above
+cloak config get browser.proxy                # print one value
+cloak config set browser.proxy "socks5://host:1080"
+cloak config set browser.headless false browser.humanize true   # batch set
+cloak config add browser.extra_args "--lang=ja-JP"              # append to list
+cloak config remove browser.extra_args "--lang=ja-JP"           # remove one entry
+cloak config unset browser.proxy                                # restore default
+cloak config keys                                               # list valid keys
+```
+
+Writes never touch env vars or defaults — only `~/.agentcloak/config.toml`.
+Setting a key under `[daemon]` or `[browser]` requires a daemon restart;
+the command prints `(restart daemon to apply)` when applicable.

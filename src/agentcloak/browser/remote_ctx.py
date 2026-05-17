@@ -20,7 +20,12 @@ from typing import Any, Protocol, cast
 import structlog
 
 from agentcloak.browser._snapshot_builder import FrameData
-from agentcloak.browser.base import BrowserContextBase
+from agentcloak.browser.base import (
+    BrowserContextBase,
+    classify_url_pattern,
+    match_url_glob,
+    match_url_substring,
+)
 from agentcloak.browser.state import (
     FrameInfo,
     PageSnapshot,
@@ -661,16 +666,23 @@ class RemoteBridgeContext(BrowserContextBase):
             await self._poll_js(js_expr, deadline, condition, timeout)
 
         elif condition == "url":
+            kind, processed = classify_url_pattern(value)
+
+            def _matches(current_url: str) -> bool:
+                if kind == "glob":
+                    return match_url_glob(processed, current_url)
+                return processed in current_url
+
             while True:
+                url, _ = await self._get_page_info()
+                if _matches(url):
+                    break
                 if time.monotonic() >= deadline:
                     raise BrowserTimeoutError(
                         error="wait_timeout",
                         hint=f"Wait condition 'url' timed out after {timeout}ms",
                         action="increase timeout or check the URL pattern",
                     )
-                url, _ = await self._get_page_info()
-                if value in url:
-                    break
                 await asyncio.sleep(0.25)
 
         elif condition == "load":
@@ -989,8 +1001,14 @@ class RemoteBridgeContext(BrowserContextBase):
         frame = frame_tree.get("frame", {})
         if name and frame.get("name") == name:
             return frame
-        if url and url in frame.get("url", ""):
-            return frame
+        if url:
+            kind, processed = classify_url_pattern(url)
+            frame_url = frame.get("url", "")
+            if kind == "glob":
+                if match_url_glob(processed, frame_url):
+                    return frame
+            elif match_url_substring(url, frame_url):
+                return frame
         for child in frame_tree.get("childFrames", []):
             found = self._find_frame(child, name=name, url=url)
             if found:

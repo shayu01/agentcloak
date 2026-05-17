@@ -39,6 +39,15 @@ cloak click 5            # clicks in the real browser
 cloak navigate "https://example.com"
 ```
 
+### Privacy Note
+
+In RemoteBridge mode `cloak tab list` returns **every open tab** in the
+user's browser, not just the ones the agent claimed — personal mail,
+banking, work tools, all of it. Those URLs and titles enter the agent's
+context window as soon as they're read. Prefer `cloak bridge claim
+--url-pattern ...` to scope what enters context, and avoid `tab list`
+when the user hasn't already shown you what's open.
+
 ### Tab Claiming
 
 Take over a tab the user already has open:

@@ -324,11 +324,17 @@ cloak bridge token --reset                # rotate the token
 ## Cookie management
 
 ```bash
-cloak cookies export
+cloak cookies export                              # every cookie in the active browser
+cloak cookies export --url https://example.com    # only cookies that match the URL
 cloak cookies import -c '[{"name":"token","value":"abc","domain":".example.com","path":"/"}]'
 ```
 
-`cookies export` prints `name=value` lines (one cookie per line). `cookies import` accepts the structured JSON form so httpOnly cookies survive.
+`cookies export` prints `domain | name=value` lines (one cookie per line) so an
+agent grepping the output can tell which site each cookie came from. Pass
+`--url` to scope the export to a single site — recommended whenever the agent
+only needs credentials for one domain, since the unfiltered output includes
+sessions for every site loaded in the active browser. `cookies import` accepts
+the structured JSON form so httpOnly cookies survive.
 
 ## Daemon management
 

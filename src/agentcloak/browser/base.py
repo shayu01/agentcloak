@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import re
 import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
@@ -45,7 +46,12 @@ from agentcloak.core.seq import RingBuffer, SeqCounter, SeqEvent
 if TYPE_CHECKING:
     from agentcloak.core.types import StealthTier
 
-__all__ = ["BrowserContextBase"]
+__all__ = [
+    "BrowserContextBase",
+    "classify_url_pattern",
+    "match_url_glob",
+    "match_url_substring",
+]
 
 logger = structlog.get_logger()
 
@@ -84,6 +90,79 @@ def _looks_like_browser_closed(exc: BaseException) -> bool:
     """Return True if the exception message smells like a closed browser/page."""
     msg = str(exc).lower()
     return any(hint in msg for hint in _BROWSER_CLOSED_HINTS)
+
+
+def classify_url_pattern(pattern: str) -> tuple[str, str]:
+    """Classify a user-supplied URL pattern.
+
+    Used by ``wait --url`` and ``frame focus --url`` so both surfaces agree
+    on what ``"*"`` and ``"glob:"`` mean. The native Playwright glob does
+    not let ``*`` cross ``/``, which surprised users who wrote
+    ``--url "*example*"`` expecting "contains".
+
+    Returns ``("glob", processed_pattern)`` when the caller should pass the
+    pattern to Playwright's glob engine, or ``("substring", processed_pattern)``
+    when the caller should fall back to ``processed_pattern in url``.
+
+    Rules:
+
+    * ``"glob:<pat>"`` strips the prefix and routes to native glob (escape
+      hatch for users who want exact glob semantics).
+    * ``*`` strictly inside the pattern (i.e. surviving ``strip("*")``)
+      signals real glob intent → native glob.
+    * Pure text, ``"*xxx"``, ``"xxx*"``, or ``"*xxx*"`` → substring match
+      on the ``*``-stripped value. This covers the common
+      ``--url "callback?code="`` and ``--url "*dashboard*"`` cases.
+    * ``?`` is always treated as a literal — it normally appears in URL
+      query strings, not as a glob single-character wildcard.
+    """
+    if pattern.startswith("glob:"):
+        return ("glob", pattern[len("glob:"):])
+    stripped = pattern.strip("*")
+    if "*" in stripped:
+        return ("glob", pattern)
+    return ("substring", stripped)
+
+
+def match_url_substring(pattern: str, url: str) -> bool:
+    """Substring URL match honouring leading/trailing ``*`` as plain text.
+
+    Companion to :func:`classify_url_pattern` for the ``substring`` branch.
+    Polling loops in subclasses call this once per iteration so the
+    behaviour stays identical across backends.
+    """
+    return pattern.strip("*") in url
+
+
+def match_url_glob(pattern: str, url: str) -> bool:
+    """Playwright-compatible glob match.
+
+    Used by backends that don't have Playwright's glob matcher in-process
+    (RemoteBridge). Mirrors the rules ``classify_url_pattern`` assumes:
+
+    * ``*`` matches any character except ``/``
+    * ``**`` matches any character including ``/``
+    * ``?`` is **literal** (URL query strings, not single-char wildcard)
+    * Everything else is regex-escaped
+    * Implicit ``^...$`` anchoring so ``"example.com"`` doesn't match
+      ``"https://example.com.evil/"``
+    """
+    out: list[str] = []
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "*":
+            if i + 1 < n and pattern[i + 1] == "*":
+                out.append(".*")
+                i += 2
+            else:
+                out.append("[^/]*")
+                i += 1
+        else:
+            out.append(re.escape(ch))
+            i += 1
+    return re.fullmatch("".join(out), url) is not None
 
 
 class BrowserContextBase(ABC):

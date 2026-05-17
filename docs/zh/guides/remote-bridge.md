@@ -59,6 +59,21 @@ cloak click 5                                    # 在真实 Chrome 里点击
 export AGENTCLOAK_DEFAULT_TIER=remote_bridge
 ```
 
+## 隐私提示
+
+RemoteBridge 让 agent 看到的浏览器视图和你本人完全一致。`cloak tab list`
+返回**所有打开的标签页**——包括个人邮箱、网银、办公工具——而不只是
+agent 显式接管的那些。URL 和标题一旦被读取就进入 agent 的上下文窗口，
+等于把标题栏里的所有内容都共享给驱动这次会话的模型。
+
+实际可用的护栏：
+
+- 连接前关闭（或移到独立 Chrome profile）不希望 agent 看到的标签。
+- 优先用 `cloak bridge claim --url-pattern ...` 把单个 tab 显式纳入控制，
+  而不是让 agent 扫整张标签表。
+- 留意蓝色 "agentcloak" tab group——分组之外的内容仍然可读，但分组本身
+  是一种视觉提醒，告诉你 agent 的标称作用域是哪些。
+
 ## 标签页接管
 
 bridge 启动时没有被托管的标签页。两种方式把 tab 纳入 agent 控制：
