@@ -23,6 +23,7 @@ Agent 原生隐身浏览器 -- 看见、交互、自动化。
 - **CLI + Skill 按需加载** -- agent 通过 Bash 调用 `cloak` 命令，Skill 按需加载仅占 ~300 tokens（MCP 工具定义常驻 ~6,000 tokens）
 - **CloakBrowser 内置隐身** -- 基于 57 个 C++ 补丁的 Chromium，对抗常见指纹检测和 JS 挑战
 - **登录态复用** -- 保存/恢复登录 profile，通过 RemoteBridge 操控真实 Chrome 浏览器
+- **网络配置** -- 代理（SOCKS5/HTTP）、DNS-over-HTTPS 控制、自定义 Chromium 参数，通过 `cloak config set` 管理
 - **Daemon 架构** -- 首次命令自动启动，管理浏览器生命周期，单调递增的 seq 计数器追踪状态
 - **Spell + API 流量捕获** -- 常见站点操作封装为一行命令；捕获流量，分析模式，自动生成 spell
 - **MCP server 23 个工具** -- 完整兼容 MCP 原生客户端（Claude Code、Codex、Cursor 等）
@@ -207,6 +208,28 @@ claude mcp add agentcloak -- agentcloak-mcp
 | **RemoteBridge** | 真实浏览器指纹 | 操控另一台机器上的 Chrome |
 
 详情参见[后端指南](docs/zh/guides/backends.md)。
+
+## 配置
+
+```bash
+cloak config list                                       # 全部配置及来源
+cloak config set browser.proxy "socks5://host:1080"     # 设置值
+cloak config get browser.proxy                          # 读取值
+cloak config add browser.extra_args "--lang=ja-JP"      # 追加到列表
+cloak config unset browser.proxy                        # 恢复默认
+```
+
+常用网络配置：
+
+```toml
+# ~/.agentcloak/config.toml
+[browser]
+proxy = "socks5://user:pass@host:1080"   # 上游代理（SOCKS5/HTTP）
+dns_over_https = false                    # 默认禁用，尊重系统 DNS
+extra_args = ["--disable-background-networking"]
+```
+
+所有配置项支持环境变量（`AGENTCLOAK_PROXY`、`AGENTCLOAK_DNS_OVER_HTTPS`、`AGENTCLOAK_EXTRA_ARGS`）。完整列表参见[配置参考](docs/zh/reference/config.md)。
 
 ## 架构
 
