@@ -9,7 +9,7 @@ Agent 原生隐身浏览器 -- 看见、交互、自动化。
 [![PyPI](https://img.shields.io/pypi/v/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![Python](https://img.shields.io/pypi/pyversions/agentcloak?style=flat)](https://pypi.org/project/agentcloak/)
 [![License](https://img.shields.io/github/license/shayuc137/agentcloak?style=flat)](https://github.com/shayuc137/agentcloak/blob/main/LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/shayuc137/agentcloak/ci.yml?style=flat&label=CI)](https://github.com/shayuc137/agentcloak/actions)
+[![Last commit](https://img.shields.io/github/last-commit/shayuc137/agentcloak?style=flat)](https://github.com/shayuc137/agentcloak/commits/main)
 
 <!-- README-I18N:START -->
 [English](./README.md) | **中文**
@@ -44,6 +44,8 @@ Agent 原生隐身浏览器 -- 看见、交互、自动化。
 
 ```bash
 pip install agentcloak
+cloak skill install        # 将 Skill 安装包安装到你的 agent 平台
+cloak doctor --fix         # 验证环境 + 下载 CloakBrowser
 ```
 
 一条命令安装全部组件：CLI（`agentcloak` 和简写 `cloak`）、MCP server（`agentcloak-mcp`）、CloakBrowser 隐身后端、httpcloak TLS 指纹代理。补丁版 Chromium 二进制文件（约 200 MB）在首次使用时自动下载到 `~/.cloakbrowser/`。
@@ -66,29 +68,42 @@ daemon 在首次命令时自动启动。
 
 ```bash
 # 导航并一次性获取页面 snapshot
-cloak navigate "https://example.com" --snapshot
-
-# 输出包含带 [N] 元素引用的无障碍树：
-#   [1] link "About" href="https://example.com/about"
-#   [2] button "Settings"
-#   [3] combobox "Search" value="" focused
-
-# 通过 [N] 引用进行交互 -- 加 --include-snapshot 可附带返回新 snapshot
-cloak fill --target 3 --text "search query" --include-snapshot
-cloak press --key Enter --target 3
-
-# 截图
-cloak screenshot --output page.png
+cloak navigate "https://example.com" --snap
 ```
 
-每个命令在 stdout 输出一个 JSON 对象。错误包含恢复建议：
+stdout 本身就是答案——文本优先，无需解析 JSON：
 
-```json
-{"ok": true, "seq": 3, "data": {"url": "https://example.com", "title": "Example"}}
-{"ok": false, "error": "element_not_found", "hint": "No element at index 99", "action": "re-snapshot to get fresh [N] refs"}
+```text
+https://example.com/ | Example Domain
+
+# Example Domain | https://example.com/ | 8 nodes (1 interactive) | seq=1
+  heading "Example Domain" level=1
+  [1] link "More information..." href="https://www.iana.org/domains/example"
 ```
 
-`navigate` 和 action 命令的 `--snapshot` 参数让观察-操作循环更紧凑 -- 无需在每步之间单独调用 snapshot。
+```bash
+# 通过 [N] 引用交互（位置参数或 --index N）-- --snap 附带返回新 snapshot
+cloak fill 3 "search query" --snap
+cloak press Enter
+
+# 截图（stdout = 文件路径）
+cloak screenshot
+```
+
+错误输出到 stderr，附带恢复建议和非零 exit code：
+
+```text
+Error: Element [99] not in selector_map (1 entries)
+  -> run 'snapshot' to refresh the selector_map, or re-snapshot if the page changed
+```
+
+需要旧的 JSON envelope 供脚本使用？传 `--json`（或设 `AGENTCLOAK_OUTPUT=json`）：
+
+```bash
+cloak --json snapshot | jq -r '.data.tree_text'
+```
+
+`navigate` 和 action 命令的 `--snap` 参数让观察-操作循环更紧凑——无需在每步之间单独调用 snapshot。
 
 完整教程参见[快速开始指南](docs/zh/getting-started/quickstart.md)，涵盖登录持久化、profile 管理和 API 捕获。
 
@@ -100,13 +115,39 @@ cloak screenshot --output page.png
 | **上下文开销** | ~300 tokens（按需加载） | ~6,000 tokens（常驻） |
 | **适用场景** | Claude Code 及任何支持 Bash 的 agent | 没有 Bash 能力的纯 MCP 客户端 |
 
-**Skill + CLI** -- 将 Skill 安装到你的项目：
+**Skill + CLI** -- 三条命令。`cloak skill install` 从 wheel 中提取 Skill 安装包，并将检测到的 agent 平台软链接到 `~/.agentcloak/skills/agentcloak/` 下的统一源：
 
 ```bash
-mkdir -p .claude/skills/agentcloak
-curl -o .claude/skills/agentcloak/SKILL.md \
-  https://raw.githubusercontent.com/shayuc137/agentcloak/main/.claude/skills/agentcloak/SKILL.md
+# 1. 安装 agentcloak（CLI + daemon + 隐身浏览器）
+pip install agentcloak
+
+# 2. 验证环境（首次运行时下载 CloakBrowser 二进制）
+cloak doctor --fix
+
+# 3. 安装 Skill 安装包（交互式菜单选择 agent 平台）
+cloak skill install
 ```
+
+非交互式安装（适用于脚本）：
+
+```bash
+cloak skill install --platform claude         # ~/.claude/skills/
+cloak skill install --platform codex          # ~/.codex/skills/
+cloak skill install --platform all            # 全部检测到的平台
+cloak skill install --path /custom/skills/dir # 任意位置
+```
+
+| Agent 平台 | Skill 位置 |
+|---|---|
+| Claude Code | `~/.claude/skills/agentcloak/` |
+| Codex | `~/.codex/skills/agentcloak/` |
+| Cursor | `.cursor/skills/agentcloak/` |
+| OpenCode | `.opencode/skills/agentcloak/` |
+| 其他 | 用 `--path` 指向你的 agent skills 目录 |
+
+升级 agentcloak 后运行 `cloak skill update` 刷新安装包（软链接安装自动生效，复制安装需要重新执行）。`cloak skill uninstall` 移除安装器创建的所有链接。
+
+详见 [Skill 安装指南](docs/zh/getting-started/installation.md#安装-skill-安装包)，包含离线 curl+tar 方式和 Windows 说明。
 
 **MCP Server** -- Claude Code 一行配置：
 

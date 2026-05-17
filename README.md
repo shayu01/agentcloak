@@ -133,8 +133,7 @@ cloak skill install
 Non-interactive variants for scripted setup:
 
 ```bash
-cloak skill install --platform claude         # project-scoped Claude Code
-cloak skill install --platform claude-global  # ~/.claude/skills/
+cloak skill install --platform claude         # ~/.claude/skills/
 cloak skill install --platform codex          # ~/.codex/skills/
 cloak skill install --platform all            # every detected platform
 cloak skill install --path /custom/skills/dir # arbitrary location
@@ -142,7 +141,7 @@ cloak skill install --path /custom/skills/dir # arbitrary location
 
 | Agent platform | Skill location |
 |---|---|
-| Claude Code (project / global) | `.claude/skills/agentcloak/` or `~/.claude/skills/agentcloak/` |
+| Claude Code | `~/.claude/skills/agentcloak/` |
 | Codex | `~/.codex/skills/agentcloak/` |
 | Cursor | `.cursor/skills/agentcloak/` |
 | OpenCode | `.opencode/skills/agentcloak/` |
