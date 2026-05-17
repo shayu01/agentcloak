@@ -44,7 +44,7 @@ graph TD
 
 The surface layer is how agents and users interact with agentcloak. Both surfaces talk to the daemon over HTTP and produce identical results.
 
-**CLI** (`src/agentcloak/cli/`): Built with [typer](https://github.com/fastapi/typer). Every command sends an HTTP request to the daemon (via the shared `httpx`-based `DaemonClient`) and prints one JSON object to stdout. The CLI never touches browser internals.
+**CLI** (`src/agentcloak/cli/`): Built with [typer](https://github.com/fastapi/typer). Every command sends an HTTP request to the daemon (via the shared `httpx`-based `DaemonClient`) and prints a text-first answer to stdout (JSON envelope available via `--json`). The CLI never touches browser internals.
 
 **MCP Server** (`src/agentcloak/mcp/`): Built with [FastMCP](https://github.com/modelcontextprotocol/python-sdk). Runs as a stdio MCP server, exposing 23 tools that map to daemon HTTP endpoints. The MCP server auto-starts the daemon on the first request, sharing the same `DaemonClient` (async mode) as the CLI uses in sync mode.
 
@@ -159,7 +159,7 @@ PlaywrightAdapter / CloakAdapter / RemoteBridgeAdapter
 Chromium / Chrome
   |
   v
-Response flows back: Browser -> Daemon -> CLI -> stdout JSON
+Response flows back: Browser -> Daemon -> CLI -> stdout (text-first, --json for envelope)
 ```
 
 The MCP flow is identical except the entry point is an MCP tool call instead of a CLI command.

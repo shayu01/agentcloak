@@ -32,7 +32,7 @@ main "Content"
 | `content` | 纯可见文本，无 role 无引用 | 文章抽取、内容摘要 |
 | `dom` | 原始 outer HTML | ARIA 隐藏了需要的信息时（罕见） |
 
-`compact` 是 v0.3.0 以后的默认——agent 几乎总是只需要交互元素和结构 landmark（`navigation`、`main`、`form`、`dialog`），不需要匿名 `<div>` 包装层。只在默认输出缺了上下文时才退到 `accessible`。
+`compact` 是 v0.2.0 以后的默认——agent 几乎总是只需要交互元素和结构 landmark（`navigation`、`main`、`form`、`dialog`），不需要匿名 `<div>` 包装层。只在默认输出缺了上下文时才退到 `accessible`。
 
 ## ARIA 状态提取
 

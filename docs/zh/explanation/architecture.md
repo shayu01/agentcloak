@@ -44,7 +44,7 @@ graph TD
 
 表面层是 agent 和用户与 agentcloak 交互的接口。两种表面都通过 HTTP 与 daemon 通信，产生相同的结果。
 
-**CLI**（`src/agentcloak/cli/`）：基于 [typer](https://github.com/fastapi/typer) 构建。每个命令通过共享的 `httpx` 客户端 `DaemonClient` 向 daemon 发送 HTTP 请求，并在 stdout 输出一个 JSON 对象。CLI 不接触 browser 内部实现。
+**CLI**（`src/agentcloak/cli/`）：基于 [typer](https://github.com/fastapi/typer) 构建。每个命令通过共享的 `httpx` 客户端 `DaemonClient` 向 daemon 发送 HTTP 请求，以文本优先的方式输出到 stdout（`--json` 可切回 JSON envelope）。CLI 不接触 browser 内部实现。
 
 **MCP Server**（`src/agentcloak/mcp/`）：基于 [FastMCP](https://github.com/modelcontextprotocol/python-sdk) 构建。作为 stdio MCP server 运行，暴露 23 个映射到 daemon HTTP 端点的工具。MCP server 在首次请求时自动启动 daemon，复用同一个 `DaemonClient`（异步模式，CLI 是同步模式）。
 
@@ -159,7 +159,7 @@ PlaywrightAdapter / CloakAdapter / RemoteBridgeAdapter
 Chromium / Chrome
   |
   v
-Response flows back: Browser -> Daemon -> CLI -> stdout JSON
+Response flows back: Browser -> Daemon -> CLI -> stdout（文本优先，--json 切换 envelope）
 ```
 
 MCP 的流程完全相同，只是入口点从 CLI 命令变为 MCP 工具调用。

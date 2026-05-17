@@ -42,7 +42,7 @@ default_tier = "cloak"       # 或 "playwright"、"remote_bridge"
 
 ## CloakBrowser 修了什么
 
-CloakBrowser 提供的补丁版 Chromium 二进制包含约 49 个 C++ 补丁加驱动层修复。覆盖：
+CloakBrowser 提供的补丁版 Chromium 二进制包含 57 个 C++ 补丁加驱动层修复。覆盖：
 
 - **`navigator.webdriver`** 在 C++ 层移除（不是 JS 可删的——在 `WebViewImpl` 里打了补丁）
 - **自动化 flag** 剥离（`--enable-automation` / `--enable-blink-features=AutomationControlled` 从不设置）

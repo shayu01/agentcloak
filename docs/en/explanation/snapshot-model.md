@@ -32,7 +32,7 @@ The shared builder lives in `src/agentcloak/browser/_snapshot_builder.py` — bo
 | `content` | Pure visible text, no roles or refs | Article extraction, summarization |
 | `dom` | Raw outer HTML | When ARIA hides what you need (rare) |
 
-`compact` is the default since v0.3.0 — agents almost always want interactive elements + structural landmarks (`navigation`, `main`, `form`, `dialog`...) without the anonymous wrapper `<div>`s. Reach for `accessible` only when the default omitted context you need.
+`compact` is the default since v0.2.0 — agents almost always want interactive elements + structural landmarks (`navigation`, `main`, `form`, `dialog`...) without the anonymous wrapper `<div>`s. Reach for `accessible` only when the default omitted context you need.
 
 ## ARIA state extraction
 

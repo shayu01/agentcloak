@@ -4,7 +4,7 @@ agentcloak provides two equivalent CLI entry points: `agentcloak` and `cloak` (s
 
 ## Output convention
 
-Since v0.3.0 the CLI is **text-first**. stdout is the answer itself; stderr carries hints and errors; exit code is `0` on success, `1` on business failure, `2` on bad usage.
+Since v0.2.0 the CLI is **text-first**. stdout is the answer itself; stderr carries hints and errors; exit code is `0` on success, `1` on business failure, `2` on bad usage.
 
 Examples:
 

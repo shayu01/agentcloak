@@ -1,6 +1,6 @@
 # MCP tools reference
 
-agentcloak's MCP server exposes 23 tools via stdio transport. Install with `pip install agentcloak[mcp]` and run with `agentcloak-mcp`.
+agentcloak's MCP server exposes 23 tools via stdio transport. It is included in the base install (`pip install agentcloak`) and run with `agentcloak-mcp`.
 
 For setup instructions, see the [MCP setup guide](../guides/mcp-setup.md).
 

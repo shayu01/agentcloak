@@ -35,11 +35,7 @@ After this, Claude Code automatically picks up the Skill when a task involves we
 
 ## MCP server setup
 
-Install the MCP extra first:
-
-```bash
-pip install agentcloak[mcp]
-```
+The MCP server is included in the base install (`pip install agentcloak`).
 
 The MCP server command is `agentcloak-mcp`. It uses stdio transport and auto-starts the daemon on the first request.
 

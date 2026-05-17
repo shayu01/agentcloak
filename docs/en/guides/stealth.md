@@ -42,7 +42,7 @@ Or env var: `AGENTCLOAK_DEFAULT_TIER=cloak`.
 
 ## CloakBrowser: what's patched
 
-CloakBrowser ships a patched Chromium binary with ~49 C++ patches plus driver-level fixes. Coverage:
+CloakBrowser ships a patched Chromium binary with 57 C++ patches plus driver-level fixes. Coverage:
 
 - **`navigator.webdriver`** removed at the C++ level (not deletable from JS — patched in `WebViewImpl`)
 - **Automation flags** stripped (`--enable-automation` / `--enable-blink-features=AutomationControlled` never set)

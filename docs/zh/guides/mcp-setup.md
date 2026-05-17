@@ -35,11 +35,7 @@ curl -L https://github.com/shayuc137/agentcloak/archive/refs/heads/main.tar.gz \
 
 ## MCP server 配置
 
-首先安装 MCP 扩展：
-
-```bash
-pip install agentcloak[mcp]
-```
+MCP server 已包含在基础安装中（`pip install agentcloak`）。
 
 MCP server 命令为 `agentcloak-mcp`，使用 stdio 传输，在首次请求时自动启动 daemon。
 

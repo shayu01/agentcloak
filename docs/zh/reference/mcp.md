@@ -1,6 +1,6 @@
 # MCP 工具参考
 
-agentcloak 的 MCP server 通过 stdio 传输暴露 23 个工具。安装方式：`pip install agentcloak[mcp]`，运行命令：`agentcloak-mcp`。
+agentcloak 的 MCP server 通过 stdio 传输暴露 23 个工具。已包含在基础安装中（`pip install agentcloak`），运行命令：`agentcloak-mcp`。
 
 配置说明参见 [MCP 配置指南](../guides/mcp-setup.md)。
 
