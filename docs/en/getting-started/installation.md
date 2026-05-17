@@ -202,7 +202,7 @@ A healthy install prints `"healthy": true`. If something's missing, `agentcloak 
 
 ### Linux server (no display)
 
-The default headless flag in v0.2.0 is `true`, so headless mode "just works" with no system dependencies. If you opt into headed mode (better stealth on some sites) on a server without a display, agentcloak auto-starts Xvfb and the doctor will tell you to install it:
+The default headless flag is `true`, so headless mode "just works" with no system dependencies. If you opt into headed mode (better stealth on some sites) on a server without a display, agentcloak auto-starts Xvfb and the doctor will tell you to install it:
 
 | Distro                                     | Install                                    |
 | ------------------------------------------ | ------------------------------------------ |

@@ -1,7 +1,7 @@
 [project]
 name = "agentcloak"
-version = "0.2.0"
-description = "Browser automation toolkit for AI agents — CLI + MCP dual interface, multi-backend stealth, remote bridge"
+version = "0.2.1"
+description = "Stealth browser toolkit for AI agents — anti-bot bypass out of the box, CLI and MCP interface"
 requires-python = ">=3.12"
 license = "MIT"
 readme = "README.md"
