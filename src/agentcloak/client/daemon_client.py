@@ -179,8 +179,7 @@ class DaemonClient:
                     "timed out before a TCP handshake completed."
                 ),
                 action=(
-                    "check daemon status with 'agentcloak daemon status' "
-                    "or restart it"
+                    "check daemon status with 'agentcloak daemon status' or restart it"
                 ),
             ) from exc
         except httpx.TimeoutException as exc:
@@ -228,8 +227,7 @@ class DaemonClient:
                     "timed out before a TCP handshake completed."
                 ),
                 action=(
-                    "check daemon status with 'agentcloak daemon status' "
-                    "or restart it"
+                    "check daemon status with 'agentcloak daemon status' or restart it"
                 ),
             ) from exc
         except httpx.TimeoutException as exc:
@@ -338,8 +336,7 @@ class DaemonClient:
                     "timed out before a TCP handshake completed."
                 ),
                 action=(
-                    "check daemon status with 'agentcloak daemon status' "
-                    "or restart it"
+                    "check daemon status with 'agentcloak daemon status' or restart it"
                 ),
             ) from exc
         except httpx.TimeoutException as exc:

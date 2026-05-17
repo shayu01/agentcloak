@@ -306,15 +306,11 @@ def load_config(*, root: Path | None = None) -> tuple[Paths, AgentcloakConfig]:
     if doh_env is not None:
         cfg.dns_over_https = doh_env.lower() in ("true", "1", "yes")
     else:
-        cfg.dns_over_https = bool(
-            browser.get("dns_over_https", cfg.dns_over_https)
-        )
+        cfg.dns_over_https = bool(browser.get("dns_over_https", cfg.dns_over_https))
 
     extra_args_env = _env("EXTRA_ARGS")
     if extra_args_env is not None:
-        cfg.extra_args = [
-            a.strip() for a in extra_args_env.split(",") if a.strip()
-        ]
+        cfg.extra_args = [a.strip() for a in extra_args_env.split(",") if a.strip()]
     else:
         cfg.extra_args = browser.get("extra_args", cfg.extra_args)
 

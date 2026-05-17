@@ -353,9 +353,7 @@ class PlaywrightContext(BrowserContextBase):
         try:
             cdp = await self._page.context.new_cdp_session(frame)
             try:
-                tree = await cdp.send(
-                    "Accessibility.getFullAXTree", {"pierce": True}
-                )
+                tree = await cdp.send("Accessibility.getFullAXTree", {"pierce": True})
             finally:
                 await cdp.detach()
             return tree.get("nodes", [])
@@ -374,9 +372,7 @@ class PlaywrightContext(BrowserContextBase):
         return tree.get("nodes", [])
 
     @staticmethod
-    async def _resolve_cdp_frame_id(
-        cdp: Any, frame: Any
-    ) -> str | None:
+    async def _resolve_cdp_frame_id(cdp: Any, frame: Any) -> str | None:
         """Get the CDP frameId for a Playwright Frame via Page.getFrameTree."""
         try:
             result = await cdp.send("Page.getFrameTree", {})

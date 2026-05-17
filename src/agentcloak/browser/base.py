@@ -117,7 +117,7 @@ def classify_url_pattern(pattern: str) -> tuple[str, str]:
       query strings, not as a glob single-character wildcard.
     """
     if pattern.startswith("glob:"):
-        return ("glob", pattern[len("glob:"):])
+        return ("glob", pattern[len("glob:") :])
     stripped = pattern.strip("*")
     if "*" in stripped:
         return ("glob", pattern)

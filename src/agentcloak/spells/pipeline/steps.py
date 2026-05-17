@@ -124,9 +124,7 @@ async def _step_fetch(params: Any, data: Any, ctx: StepContext) -> Any:
     req_headers.setdefault("User-Agent", _fallback_chrome_user_agent())
 
     async with httpx.AsyncClient(timeout=_timeout) as client:
-        resp = await client.request(
-            method, url, headers=req_headers, content=body
-        )
+        resp = await client.request(method, url, headers=req_headers, content=body)
         resp.raise_for_status()
         return resp.json()
 

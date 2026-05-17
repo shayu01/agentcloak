@@ -304,8 +304,7 @@ def do_batch(
                 )
             else:
                 actions = [
-                    cast("dict[str, Any]", item)
-                    for item in cast("list[Any]", parsed)
+                    cast("dict[str, Any]", item) for item in cast("list[Any]", parsed)
                 ]
         else:
             # JSONL form — one JSON object per non-blank line.

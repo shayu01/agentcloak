@@ -145,9 +145,7 @@ def config_get_cmd(
     except ConfigError as exc:
         raise _bail(str(exc)) from exc
     if is_json_mode():
-        emit_envelope(
-            {"ok": True, "seq": 0, "data": {"key": key, "value": result}}
-        )
+        emit_envelope({"ok": True, "seq": 0, "data": {"key": key, "value": result}})
         return
     value(result)
 
@@ -246,9 +244,7 @@ def config_remove_cmd(
     if not args:
         raise _bail(f"config remove {key} requires a value to remove")
     if len(args) > 1:
-        raise _bail(
-            f"config remove {key} takes one value at a time (got {len(args)})"
-        )
+        raise _bail(f"config remove {key} takes one value at a time (got {len(args)})")
     val = args[0]
     paths, _ = load_config()
     try:

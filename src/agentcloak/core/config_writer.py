@@ -58,9 +58,7 @@ def _resolve_key(key: str) -> tuple[str, str, type]:
         suggestions = [k for k in FIELD_SCHEMA if k.endswith("." + key.split(".")[-1])]
         if not suggestions:
             suggestions = [k for k in FIELD_SCHEMA if k.startswith(key)]
-        hint = (
-            f"; did you mean: {', '.join(suggestions[:5])}?" if suggestions else ""
-        )
+        hint = f"; did you mean: {', '.join(suggestions[:5])}?" if suggestions else ""
         raise ConfigError(
             f"Unknown config key: {key!r}. "
             f"Use 'cloak config list' to see all keys{hint}"
@@ -76,9 +74,7 @@ def _parse_scalar(value: str, field_type: type) -> Any:
             return True
         if low in ("false", "0", "no", "off"):
             return False
-        raise ConfigError(
-            f"Expected a bool (true/false), got {value!r}"
-        )
+        raise ConfigError(f"Expected a bool (true/false), got {value!r}")
     if field_type is int:
         try:
             return int(value)
@@ -93,9 +89,7 @@ def _parse_scalar(value: str, field_type: type) -> Any:
     return value
 
 
-def _safe_write_and_validate(
-    paths: Paths, sections: dict[str, dict[str, Any]]
-) -> None:
+def _safe_write_and_validate(paths: Paths, sections: dict[str, dict[str, Any]]) -> None:
     """Write ``sections`` to ``config.toml`` with a roll-back on validation failure.
 
     ``AgentcloakConfig._validate`` runs at the tail of ``load_config``. We
@@ -237,9 +231,7 @@ def parse_batch_args(args: list[str]) -> list[tuple[str, list[str]]]:
                 values.append(args[i])
                 i += 1
             if not values:
-                raise ConfigError(
-                    f"{key} is a list — provide at least one value"
-                )
+                raise ConfigError(f"{key} is a list — provide at least one value")
         else:
             if i >= n:
                 raise ConfigError(f"{key} requires a value")
