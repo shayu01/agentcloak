@@ -335,17 +335,67 @@ class PlaywrightContext(BrowserContextBase):
         }
 
     async def _get_ax_tree(self, *, frames: bool = False) -> list[dict[str, Any]]:
-        # When the user has run `frame focus`, snapshots should reflect that
-        # subframe — not the main page. Routing the CDP session to the active
-        # frame keeps `frame focus` symmetric with click/fill/etc., which
-        # already use `_target_frame`. See `frame focus` docs and bug B2.
-        target = self._active_frame if self._active_frame is not None else self._page
-        cdp = await self._page.context.new_cdp_session(target)
+        if (
+            self._active_frame is not None
+            and self._active_frame != self._page.main_frame
+        ):
+            return await self._get_frame_ax_tree(self._active_frame)
+        cdp = await self._page.context.new_cdp_session(self._page)
         try:
             tree = await cdp.send("Accessibility.getFullAXTree", {"pierce": True})
         finally:
             await cdp.detach()
         return tree.get("nodes", [])
+
+    async def _get_frame_ax_tree(self, frame: Any) -> list[dict[str, Any]]:
+        """Get AX tree for a focused frame (cross-origin or same-origin)."""
+        # Cross-origin iframes have their own CDP session
+        try:
+            cdp = await self._page.context.new_cdp_session(frame)
+            try:
+                tree = await cdp.send(
+                    "Accessibility.getFullAXTree", {"pierce": True}
+                )
+            finally:
+                await cdp.detach()
+            return tree.get("nodes", [])
+        except Exception:
+            pass
+        # Same-origin iframe: use main page session + frameId scope
+        cdp = await self._page.context.new_cdp_session(self._page)
+        try:
+            fid = await self._resolve_cdp_frame_id(cdp, frame)
+            params: dict[str, Any] = {"pierce": True}
+            if fid:
+                params["frameId"] = fid
+            tree = await cdp.send("Accessibility.getFullAXTree", params)
+        finally:
+            await cdp.detach()
+        return tree.get("nodes", [])
+
+    @staticmethod
+    async def _resolve_cdp_frame_id(
+        cdp: Any, frame: Any
+    ) -> str | None:
+        """Get the CDP frameId for a Playwright Frame via Page.getFrameTree."""
+        try:
+            result = await cdp.send("Page.getFrameTree", {})
+        except Exception:
+            return None
+
+        def _find(node: dict[str, Any]) -> str | None:
+            f = node.get("frame", {})
+            if (frame.name and f.get("name") == frame.name) or (
+                frame.url and f.get("url") == frame.url
+            ):
+                return f.get("id")
+            for child in node.get("childFrames", []):
+                found = _find(child)
+                if found:
+                    return found
+            return None
+
+        return _find(result.get("frameTree", {}))
 
     async def _get_child_frame_trees(self) -> list[FrameData]:
         child_frames: list[FrameData] = []
