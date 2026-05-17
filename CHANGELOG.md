@@ -22,7 +22,9 @@ Major architecture upgrade: RemoteBridge production-ready, CLI output redesign, 
 - `cloak bridge token [--reset]` — view or rotate persistent bridge auth token
 - 20 CLI command groups, 41 daemon routes
 
-### RemoteBridge (Chrome Extension)
+### RemoteBridge (Chrome Extension) — experimental
+
+> Remote Bridge is experimental. Core functionality works but has limited real-world testing. Report issues on GitHub.
 
 - evaluate rewritten with CDP `Runtime.evaluate` (async support, no CSP issues)
 - `activeTabId` state — navigate creates new tab instead of hijacking user's active tab

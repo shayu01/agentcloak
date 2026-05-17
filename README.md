@@ -198,7 +198,7 @@ See the full [MCP setup guide](docs/en/guides/mcp-setup.md) for details.
 |---------|---------|----------|
 | **CloakBrowser** (default) | 57 C++ patches + Cloudflare bypass | Most sites, anti-bot protected pages |
 | **Playwright** | Standard Chromium | Development, testing, no stealth needed |
-| **RemoteBridge** | Real browser fingerprint | Operate your own Chrome on another machine |
+| **RemoteBridge** (experimental) | Real browser fingerprint | Operate your own Chrome on another machine |
 
 See the [backends guide](docs/en/guides/backends.md) for configuration details and trade-offs.
 
