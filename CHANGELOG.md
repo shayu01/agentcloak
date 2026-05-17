@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.2.3 (unreleased)
+
+Seed-user review round 2: bug fixes, security, snapshot optimization, network config.
+
+### Bug Fixes
+
+- **`wait --url` / `frame focus --url`** — three-way URL matching: substring (default), glob (when `*` in middle), explicit `glob:` prefix. `?` treated as literal (URL query param), not glob wildcard.
+- **`frame focus` snapshot** — snapshot now correctly switches to the focused iframe's content (was always returning main page due to CDP session targeting bug).
+- **`batch` JSON array** — accepts both JSONL and JSON array format; gives friendly error on parse failure instead of raw traceback.
+
+### Security & DX
+
+- **`cookies export`** — output now includes domain column (`domain | name=value`); `--url` filter exposed in CLI.
+- **RemoteBridge privacy** — docs now warn that `tab list` exposes all browser tabs in agent context.
+- **humanize/fill behavior** — documented that `fill` under `humanize=true` is ~33x slower (CloakBrowser intercepts); guidance to use `type` for anti-detection, `fill` for speed.
+
+### Snapshot Optimization
+
+- **Indent compression** — tree indent step reduced from 2 to 1 space (~50% indent token savings on deep pages).
+- **Token estimate** — snapshot header now includes `~NK tok` estimate (chars/4, no tokenizer dependency).
+- **Content dedup** — content mode deduplicates adjacent identical lines (fixes Wikipedia/HN repetition from parent-child a11y node overlap).
+
+### Network Config (from Phase 7c roadmap)
+
+- **`browser.proxy`** — SOCKS5/HTTP upstream proxy for the browser (`AGENTCLOAK_PROXY` env var).
+- **`browser.dns_over_https`** — defaults to `false`, disabling Chrome's built-in DoH to respect system DNS / split-horizon proxies.
+- **`browser.extra_args`** — arbitrary Chromium launch args passthrough (`AGENTCLOAK_EXTRA_ARGS` env var, comma-separated).
+
+### Config CLI Upgrade
+
+Five-verb declarative config management:
+
+```bash
+cloak config set <key> <value...>    # set scalar or replace list
+cloak config get <key>               # read value
+cloak config unset <key>             # reset to default
+cloak config add <key> <value...>    # append to list
+cloak config remove <key> <value>    # remove from list
+cloak config keys                    # list all settable keys
+```
+
+Batch set, type-aware schema, write-after-validate with rollback, restart hints for browser/daemon keys.
+
+---
+
+## 0.2.2 (2026-05-17)
+
+Rapid fix for 24 issues from seed-user review (16/17 fixed, 94% rate).
+
+### Fixed
+
+- `click --snap` snapshot loss in headless mode (navigation timing race)
+- `resume` tab count incorrect (only reported first tab)
+- `doctor` daemon check changed from `[fail]` to `[info]`
+- daemon auto-start log level downgraded from warning to silent
+- `daemon status` command added (was `health`)
+- `config` command now shows full merged config with sources
+- content mode text concatenation (Chromium a11y tree limitation, documented)
+- spell User-Agent unified to Chrome UA
+- default snapshot limit set to 80 nodes
+- `navigate --snap` includes header separator line
+- `cloak version` subcommand added
+- recipes.md `--target` parameter fixed to positional syntax
+- SKILL.md `--target` reference corrected
+- `--snap` / `--include-snapshot` naming unified
+- SKILL.md headless/headed configuration documented
+- troubleshooting.md rewritten from text-first perspective
+- getting-started.md installation updated to uv/pipx first
+
+---
+
+## 0.2.1 (2026-05-16)
+
+- Updated project description and metadata
+- CI: PyPI trusted publisher workflow
+- CI: added Python 3.14 to test matrix
+- CI: migrated to uv for consistent dependency resolution
+- Simplified skill install (removed claude-global alias)
+
+---
+
 ## 0.2.0 (2026-05-16)
 
 Major architecture upgrade: RemoteBridge production-ready, CLI output redesign, dynamic tier switching.
