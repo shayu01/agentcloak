@@ -12,13 +12,15 @@ The defaults already use the strongest local stealth tier:
 cloak navigate "https://example.com"     # CloakBrowser, headless by default in v0.2.0
 ```
 
-For maximum stealth on tough targets, switch off headless mode and turn humanise on:
+For maximum stealth on tough targets, switch off headless mode, turn humanise on, and route through a residential proxy:
 
 ```toml
 # ~/.agentcloak/config.toml
 [browser]
 headless = false   # headed mode survives more bot checks than headless
 humanize = true    # human-like mouse curves and typing cadence
+proxy = "socks5://user:pass@residential.example:1080"   # residential IP defeats IP reputation checks
+dns_over_https = false   # default; respects your system DNS / split-horizon proxy
 ```
 
 Then verify against bot detection benchmarks (see [Verification](#verification) below).
@@ -131,8 +133,41 @@ Some categories of detection require the real-Chrome route via RemoteBridge:
 
 For those, switch the daemon's tier to `remote_bridge` and drive your actual desktop Chrome. See the [Remote Bridge guide](./remote-bridge.md).
 
+## Proxy and network config
+
+Browser fingerprint stealth is necessary but not sufficient — if the request originates from a data-center IP, services like Cloudflare and Google will flag you on **IP reputation** alone. A residential proxy bridges that gap.
+
+```bash
+cloak config set browser.proxy "socks5://user:pass@residential.example:1080"
+```
+
+CloakBrowser supports SOCKS5 (with credentials), HTTP, and HTTPS proxy schemes. The `proxy` setting only affects the browser; `cloak fetch` still goes through httpcloak's local TLS proxy.
+
+### DNS-over-HTTPS (DoH)
+
+Chromium enables secure DNS (DoH) by default, which sends DNS queries directly to Google's DoH resolver — bypassing your system DNS, transparent proxies, and split-horizon setups. agentcloak **disables DoH by default** (`dns_over_https = false`) so the browser respects your system resolver.
+
+If you explicitly need DoH (e.g., in a network without DNS):
+
+```bash
+cloak config set browser.dns_over_https true
+```
+
+### Extra Chromium arguments
+
+For edge cases not covered by named config keys:
+
+```bash
+cloak config add browser.extra_args "--disable-background-networking"
+cloak config add browser.extra_args "--lang=ja-JP"
+```
+
+All three settings require a daemon restart to take effect.
+
 ## Common pitfalls
 
+- **Data-center IP** — the #1 reason for blocks after fingerprint checks pass. Use `browser.proxy` with a residential proxy
+- **DNS bypassed by DoH** — if your network uses DNS-based routing (split-horizon, transparent proxy), make sure `dns_over_https = false` (the default)
 - **Headless on a tough site** — try `headless = false` first; you'll see more "this won't load" sites clear immediately
 - **No Xvfb on a headless server** — CloakBrowser auto-starts Xvfb but it must be installed (`sudo apt-get install xvfb` etc., see `cloak doctor`)
 - **Mismatched httpcloak preset** — if you pinned `cloakbrowser` to a major version the proxy doesn't have, you get `chrome-latest` fallback; usually fine but verify with `tls.peet.ws`

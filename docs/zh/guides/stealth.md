@@ -12,13 +12,15 @@ agentcloak 是为主动检测和阻止自动化的站点而设计的。默认后
 cloak navigate "https://example.com"     # CloakBrowser，v0.2.0 默认 headless
 ```
 
-最强反检测的目标站点上，关掉 headless 并打开 humanize：
+最强反检测的目标站点上，关掉 headless、打开 humanize，并走住宅代理：
 
 ```toml
 # ~/.agentcloak/config.toml
 [browser]
 headless = false   # 带头模式比 headless 更能通过 bot 检测
 humanize = true    # 拟人化鼠标曲线与打字节奏
+proxy = "socks5://user:pass@residential.example:1080"   # 住宅 IP 绕过 IP 信誉检测
+dns_over_https = false   # 默认值；尊重系统 DNS / split-horizon 代理
 ```
 
 然后用 bot 检测基准站点验证（见下方 [验证](#验证)）。
@@ -131,8 +133,41 @@ cloak navigate "https://tls.peet.ws/api/all" --snapshot   # 给 httpcloak / fetc
 
 这些场景下把 daemon 切到 `remote_bridge` 层，驱动你实际桌面的 Chrome。详见 [Remote Bridge 指南](./remote-bridge.md)。
 
+## 代理与网络配置
+
+浏览器指纹伪装是必要的，但不充分——如果请求来源是数据中心 IP，Cloudflare 和 Google 等服务仅凭 **IP 信誉**就会拦截。住宅代理补上这块短板。
+
+```bash
+cloak config set browser.proxy "socks5://user:pass@residential.example:1080"
+```
+
+CloakBrowser 支持 SOCKS5（含凭证）、HTTP 和 HTTPS 代理。`proxy` 设置只影响浏览器；`cloak fetch` 仍走 httpcloak 的本地 TLS 代理。
+
+### DNS-over-HTTPS (DoH)
+
+Chromium 默认启用安全 DNS（DoH），直接向 Google 的 DoH 解析器发送 DNS 查询——绕过你的系统 DNS、透明代理和 split-horizon 配置。agentcloak **默认禁用 DoH**（`dns_over_https = false`），让浏览器尊重系统 resolver。
+
+如果你明确需要 DoH（比如网络中没有 DNS）：
+
+```bash
+cloak config set browser.dns_over_https true
+```
+
+### 额外 Chromium 参数
+
+覆盖命名配置项之外的边缘需求：
+
+```bash
+cloak config add browser.extra_args "--disable-background-networking"
+cloak config add browser.extra_args "--lang=ja-JP"
+```
+
+以上三项设置修改后都需要重启 daemon 才能生效。
+
 ## 常见陷阱
 
+- **数据中心 IP**——指纹检查过了还被拦截的首要原因。用 `browser.proxy` 配住宅代理
+- **DoH 绕过 DNS**——如果你的网络用 DNS 分流（split-horizon、透明代理），确保 `dns_over_https = false`（默认值）
 - **难站点上跑 headless**——先试 `headless = false`；许多"加载不动"的站点会立刻通过
 - **headless 服务器没装 Xvfb**——CloakBrowser 会自动启动 Xvfb 但必须先安装（`sudo apt-get install xvfb` 等，见 `cloak doctor`）
 - **httpcloak preset 不匹配**——如果你把 `cloakbrowser` 钉到代理没有的 major 版本，会拿到 `chrome-latest` 回退；通常没事，但用 `tls.peet.ws` 验证一下
